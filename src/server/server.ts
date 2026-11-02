@@ -1,8 +1,11 @@
 import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
+import fs from 'fs';
 import { createServer } from 'http';
+import path from 'path';
 import { Server } from 'socket.io';
+import { fileURLToPath } from 'url';
 import {
   applyAction,
   calculateFinalScores,
@@ -17,22 +20,23 @@ import {
 } from '../network/socketTypes.js';
 import { RoomManager } from './rooms.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
-// Set allowed frontend origins (local dev + Render/Vercel production URL)
+// Set allowed frontend origins (same-origin + local dev + optional external CLIENT_URL)
 const allowedOrigins = [
   'http://localhost:5173',
+  'http://localhost:3001',
   process.env['CLIENT_URL'],
   process.env['CORS_ORIGIN'],
-]
-  .filter((origin): origin is string => Boolean(origin && origin !== '*'));
+].filter((origin): origin is string => Boolean(origin && origin !== '*'));
 
 const corsOriginConfig: boolean | string | string[] =
-  process.env['CORS_ORIGIN'] === '*'
+  process.env['CORS_ORIGIN'] === '*' || !process.env['CLIENT_URL']
     ? true
-    : allowedOrigins.length > 0
-    ? allowedOrigins
-    : ['http://localhost:5173'];
+    : allowedOrigins;
 
 app.use(
   cors({
@@ -53,6 +57,23 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Serve the compiled Vite React frontend (`dist/client`) when present
+const clientDistPath = path.resolve(__dirname, '../../dist/client');
+const clientIndexHtml = path.join(clientDistPath, 'index.html');
+
+if (fs.existsSync(clientIndexHtml)) {
+  app.use(express.static(clientDistPath));
+
+  // SPA fallback for `/`, `/join/:code`, and `/room/:code`
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/socket.io')) {
+      next();
+      return;
+    }
+    res.sendFile(clientIndexHtml);
+  });
+}
 
 const httpServer = createServer(app);
 

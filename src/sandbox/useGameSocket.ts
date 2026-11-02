@@ -9,10 +9,24 @@ import {
   ServerToClientEvents,
 } from '../network/socketTypes.js';
 
-const DEFAULT_SERVER_URL =
-  (import.meta as unknown as { env?: Record<string, string> }).env?.[
-    'VITE_SERVER_URL'
-  ] ?? 'http://localhost:3001';
+function resolveDefaultServerUrl(): string {
+  const envUrl = (import.meta as unknown as { env?: Record<string, string> })
+    .env?.['VITE_SERVER_URL'];
+  if (envUrl) {
+    return envUrl;
+  }
+  if (typeof window !== 'undefined') {
+    // When running Vite dev server on :5173, connect to local backend on :3001;
+    // When deployed on Render (same origin), connect directly to window.location.origin!
+    if (window.location.port === '5173') {
+      return 'http://localhost:3001';
+    }
+    return window.location.origin;
+  }
+  return 'http://localhost:3001';
+}
+
+const DEFAULT_SERVER_URL = resolveDefaultServerUrl();
 
 export interface ToastMessage {
   readonly id: number;

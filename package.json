@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "tsx watch src/server/server.ts",
-    "build": "tsc -p tsconfig.server.json",
-    "build:client": "tsc --noEmit && vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "vite build",
+    "build": "npm run build:server && npm run build:client",
     "start": "node dist/server/server.js",
     "preview": "vite preview",
     "test": "vitest run",
