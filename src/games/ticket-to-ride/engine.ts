@@ -212,6 +212,7 @@ export function initGame(
       minTicketsToKeep: skipInitialSelection ? 0 : INITIAL_MIN_TICKETS_TO_KEEP,
       trainsRemaining: INITIAL_TRAINS_PER_PLAYER,
       claimedRoutePoints: 0,
+      recentDrawnCards: {},
     };
   }
 
@@ -243,6 +244,9 @@ export function initGame(
     finalRoundTriggeredBy: null,
     turnsRemainingInFinalRound: 0,
     turnNumber: 1,
+    lastActionSummary: skipInitialSelection
+      ? 'Game started! Waiting for first player action.'
+      : 'Game started! Each player is choosing their initial Destination Tickets.',
   };
 }
 
@@ -574,10 +578,28 @@ export function applyAction(
         nextFaceUp = replenishFaceUpCards(nextFaceUp, trainDeck);
       }
 
+      // If starting a fresh turn ('AWAITING_ACTION'), reset recentDrawnCards;
+      // if drawing the 2nd card ('DREW_ONE_CARD'), accumulate onto the 1st card drawn this turn.
+      const baseRecent =
+        state.turnStep === 'DREW_ONE_CARD' ? { ...player.recentDrawnCards } : {};
+      baseRecent[drawnCard] = (baseRecent[drawnCard] ?? 0) + 1;
+
       const updatedPlayer: PlayerState = {
         ...player,
         hand: addCardsToHand(player.hand, [drawnCard]),
+        recentDrawnCards: baseRecent,
       };
+
+      const actionDescription =
+        action.source === 'DECK'
+          ? state.turnStep === 'DREW_ONE_CARD'
+            ? `${playerId} drew a 2nd blind Train Card from the deck (finished drawing 2 cards).`
+            : `${playerId} drew 1 blind Train Card from the deck (1 of 2).`
+          : tookFaceUpLocomotive
+          ? `${playerId} took a face-up LOCOMOTIVE (Wild) card from slot #${action.slotIndex}.`
+          : state.turnStep === 'DREW_ONE_CARD'
+          ? `${playerId} took a face-up ${drawnCard} card from slot #${action.slotIndex} (2 of 2).`
+          : `${playerId} took a face-up ${drawnCard} card from slot #${action.slotIndex} (1 of 2).`;
 
       const intermediateState: GameState = {
         ...state,
@@ -587,6 +609,7 @@ export function applyAction(
         },
         faceUpCards: nextFaceUp,
         trainDeck: trainDeck.toState(),
+        lastActionSummary: actionDescription,
       };
 
       // A face-up Locomotive costs both card draws; or if this was already the 2nd draw, end turn.
@@ -631,6 +654,7 @@ export function applyAction(
         hand: nextHand,
         trainsRemaining: player.trainsRemaining - route.length,
         claimedRoutePoints: player.claimedRoutePoints + routePoints,
+        recentDrawnCards: {},
       };
 
       const updatedRoutes = state.routes.map((r) =>
@@ -646,6 +670,7 @@ export function applyAction(
         routes: updatedRoutes,
         faceUpCards: nextFaceUp,
         trainDeck: trainDeck.toState(),
+        lastActionSummary: `${playerId} claimed route ${route.from} ↔ ${route.to} (${route.length} cars, +${routePoints} pts).`,
       };
 
       return advanceTurn(nextState);
@@ -662,6 +687,7 @@ export function applyAction(
           TURN_MIN_TICKETS_TO_KEEP,
           drawnTickets.length
         ),
+        recentDrawnCards: {},
       };
 
       return {
@@ -672,6 +698,7 @@ export function applyAction(
           [playerId]: updatedPlayer,
         },
         ticketDeck: ticketDeck.toState(),
+        lastActionSummary: `${playerId} drew ${drawnTickets.length} Destination Tickets and is choosing which to keep.`,
       };
     }
 
@@ -694,6 +721,7 @@ export function applyAction(
         tickets: [...player.tickets, ...keptTickets],
         pendingTickets: [],
         minTicketsToKeep: 0,
+        recentDrawnCards: {},
       };
 
       const nextPlayers = {
@@ -713,6 +741,9 @@ export function applyAction(
           turnStep: allReady ? 'AWAITING_ACTION' : 'CHOOSING_TICKETS',
           players: nextPlayers,
           ticketDeck: ticketDeck.toState(),
+          lastActionSummary: allReady
+            ? `${playerId} kept ${keptTickets.length} initial Destination Ticket(s). All players ready — Game on!`
+            : `${playerId} kept ${keptTickets.length} initial Destination Ticket(s).`,
         };
       }
 
@@ -720,6 +751,11 @@ export function applyAction(
         ...state,
         players: nextPlayers,
         ticketDeck: ticketDeck.toState(),
+        lastActionSummary: `${playerId} kept ${keptTickets.length} Destination Ticket(s)${
+          returnedTickets.length > 0
+            ? ` and discarded ${returnedTickets.length}`
+            : ''
+        }.`,
       };
 
       return advanceTurn(nextState);
@@ -766,6 +802,7 @@ export function getPlayerPerspective(
       hand: { ...self.hand },
       tickets: [...self.tickets],
       pendingTickets: [...self.pendingTickets],
+      recentDrawnCards: { ...self.recentDrawnCards },
     },
     opponents,
     routes: state.routes.map((r) => ({ ...r })),
@@ -776,6 +813,7 @@ export function getPlayerPerspective(
     finalRoundTriggeredBy: state.finalRoundTriggeredBy,
     turnsRemainingInFinalRound: state.turnsRemainingInFinalRound,
     turnNumber: state.turnNumber,
+    lastActionSummary: state.lastActionSummary,
   };
 }
 

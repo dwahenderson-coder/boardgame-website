@@ -40,6 +40,7 @@ export interface PlayerState {
   readonly minTicketsToKeep: number;
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
+  readonly recentDrawnCards: Partial<Record<TrainCardColor, number>>;
 }
 
 export type GamePhase =
@@ -66,6 +67,7 @@ export interface GameState {
   readonly finalRoundTriggeredBy: string | null;
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
+  readonly lastActionSummary: string | null;
 }
 
 export interface SanitizedOpponentState {
@@ -92,6 +94,7 @@ export interface SanitizedGameState {
   readonly finalRoundTriggeredBy: string | null;
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
+  readonly lastActionSummary: string | null;
 }
 
 // --- Turn Actions ---

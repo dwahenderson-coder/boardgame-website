@@ -283,6 +283,13 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       });
       expect(state.turnStep).toBe('AWAITING_ACTION');
       expect(state.playerOrder[state.activePlayerIndex]).toBe('alice');
+      expect(state.lastActionSummary).toContain('bob drew a 2nd blind Train Card');
+
+      // Verify Bob's recentDrawnCards tracks the 2 cards drawn on his turn
+      const bobRecentTotal = Object.values(
+        state.players['bob']!.recentDrawnCards
+      ).reduce((sum, n) => sum + (n ?? 0), 0);
+      expect(bobRecentTotal).toBe(2);
 
       // 5. Valid Turn 3 (Alice): Claim Seattle -> Helena (length 6 YELLOW) using 5 YELLOW + 1 LOCOMOTIVE
       state = applyAction(state, 'alice', {

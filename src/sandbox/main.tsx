@@ -305,6 +305,24 @@ export const SandboxApp: React.FC = () => {
     return pid;
   };
 
+  const formattedLastAction = useMemo(() => {
+    const raw = activeSanitized.lastActionSummary;
+    if (!raw) {
+      return 'Waiting for the first move...';
+    }
+    if (runnerMode !== 'MULTIPLAYER') {
+      return raw;
+    }
+    let formatted = raw;
+    for (const [pid, name] of Object.entries(mp.playerNames)) {
+      formatted = formatted.replace(
+        new RegExp(`\\b${pid}\\b`, 'g'),
+        `${name} (${pid})`
+      );
+    }
+    return formatted;
+  }, [activeSanitized.lastActionSummary, runnerMode, mp.playerNames]);
+
   // --- Handlers ---
 
   const handleCopyInviteLink = () => {
@@ -757,6 +775,21 @@ export const SandboxApp: React.FC = () => {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* LEFT + CENTER COLUMN */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* ACTION FEED TEXT BOX — Displays what action the player has taken */}
+          <div className="shrink-0 bg-slate-900/95 border-b border-slate-800 px-4 py-2 flex items-center justify-between gap-4 z-10">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px] uppercase tracking-wider shrink-0">
+                Latest Action
+              </span>
+              <div className="text-xs font-medium text-slate-100 truncate">
+                {formattedLastAction}
+              </div>
+            </div>
+            <div className="text-[11px] font-mono text-slate-400 shrink-0">
+              Turn #{activeSanitized.turnNumber}
+            </div>
+          </div>
+
           {/* 2. CENTER PANEL — INTERACTIVE SVG MAP + OVERLAYS */}
           <div className="flex-1 relative min-h-0">
             <InteractiveMap
@@ -1385,19 +1418,30 @@ export const SandboxApp: React.FC = () => {
               </div>
 
               {/* 9 Card Color Stacks */}
-              <div className="grid grid-cols-9 gap-1.5 my-auto pt-1">
+              <div className="grid grid-cols-9 gap-1.5 my-auto pt-3">
                 {ALL_TRAIN_CARD_COLORS.map((color) => {
                   const count = selfPlayer.hand[color];
+                  const drawnCount = selfPlayer.recentDrawnCards?.[color] ?? 0;
                   const theme = ROUTE_COLOR_THEMES[color];
                   return (
                     <div
                       key={color}
-                      className={`flex flex-col items-center justify-between rounded-lg p-1.5 border transition ${
-                        count > 0
+                      className={`relative flex flex-col items-center justify-between rounded-lg p-1.5 border transition ${
+                        drawnCount > 0
+                          ? 'bg-slate-900 border-amber-400 ring-1 ring-amber-400/50 shadow-md'
+                          : count > 0
                           ? 'bg-slate-900 border-slate-700 shadow-sm'
                           : 'bg-slate-950/40 border-slate-800/60 opacity-45'
                       }`}
                     >
+                      {drawnCount > 0 && (
+                        <span
+                          className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono text-[10px] font-black shadow-md border border-amber-200 animate-bounce"
+                          title={`Drew ${drawnCount}x ${color} on last action`}
+                        >
+                          {drawnCount}x
+                        </span>
+                      )}
                       <div
                         className={`w-full h-9 rounded border flex items-center justify-center font-mono text-sm font-black shadow-inner ${theme.badgeBg} ${theme.badgeBorder}`}
                       >
