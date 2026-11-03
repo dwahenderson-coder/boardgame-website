@@ -97,12 +97,22 @@ export const STANDARD_DESTINATION_TICKETS: readonly DestinationTicket[] = [
   { id: 'TKT_DEN_ELP', from: 'Denver', to: 'El Paso', points: 4 },
   { id: 'TKT_KC_HOU', from: 'Kansas City', to: 'Houston', points: 5 },
   { id: 'TKT_NY_ATL', from: 'New York', to: 'Atlanta', points: 6 },
-  { id: 'TKT_CHI_NY', from: 'Chicago', to: 'New York', points: 5 },
   { id: 'TKT_BOS_MIA', from: 'Boston', to: 'Miami', points: 12 },
   { id: 'TKT_MTL_NO', from: 'Montreal', to: 'New Orleans', points: 13 },
   { id: 'TKT_SEA_LA', from: 'Seattle', to: 'Los Angeles', points: 9 },
   { id: 'TKT_HEL_LA', from: 'Helena', to: 'Los Angeles', points: 8 },
   { id: 'TKT_DUL_HOU', from: 'Duluth', to: 'Houston', points: 8 },
+  { id: 'TKT_WIN_HOU', from: 'Winnipeg', to: 'Houston', points: 12 },
+  { id: 'TKT_SSM_NSH', from: 'Sault St Marie', to: 'Nashville', points: 8 },
+  { id: 'TKT_SSM_OKC', from: 'Sault St Marie', to: 'Oklahoma City', points: 9 },
+  { id: 'TKT_TOR_MIA', from: 'Toronto', to: 'Miami', points: 10 },
+  { id: 'TKT_WIN_LR', from: 'Winnipeg', to: 'Little Rock', points: 11 },
+  { id: 'TKT_MTL_ATL', from: 'Montreal', to: 'Atlanta', points: 9 },
+  { id: 'TKT_CAL_SLC', from: 'Calgary', to: 'Salt Lake City', points: 7 },
+  { id: 'TKT_PDX_PHX', from: 'Portland', to: 'Phoenix', points: 11 },
+  { id: 'TKT_DUL_ELP', from: 'Duluth', to: 'El Paso', points: 10 },
+  { id: 'TKT_CHI_SFE', from: 'Chicago', to: 'Santa Fe', points: 9 },
+  { id: 'TKT_DAL_NY', from: 'Dallas', to: 'New York', points: 11 },
 ];
 
 /**
@@ -168,6 +178,47 @@ export const STANDARD_BOARD_ROUTES: readonly RouteEdge[] = [
   { id: 'R_ATL_MIA', from: 'Atlanta', to: 'Miami', length: 5, color: 'BLUE', ownerId: null, routeIndex: 0 },
   { id: 'R_NY_WDC_1', from: 'New York', to: 'Washington', length: 2, color: 'ORANGE', ownerId: null, routeIndex: 0 },
   { id: 'R_NY_WDC_2', from: 'New York', to: 'Washington', length: 2, color: 'BLACK', ownerId: null, routeIndex: 1 },
-  { id: 'R_WDC_ATL', from: 'Washington', to: 'Atlanta', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  // Winnipeg connections
+  { id: 'R_WIN_CAL', from: 'Winnipeg', to: 'Calgary', length: 6, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'R_WIN_DUL', from: 'Winnipeg', to: 'Duluth', length: 4, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'R_WIN_HEL', from: 'Winnipeg', to: 'Helena', length: 4, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'R_WIN_SSM', from: 'Winnipeg', to: 'Sault St Marie', length: 6, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  // Sault St Marie connections
+  { id: 'R_SSM_TOR', from: 'Sault St Marie', to: 'Toronto', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_SSM_DUL', from: 'Sault St Marie', to: 'Duluth', length: 3, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_SSM_MTL', from: 'Sault St Marie', to: 'Montreal', length: 5, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  // Las Vegas connections
+  { id: 'R_LV_LA', from: 'Las Vegas', to: 'Los Angeles', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_LV_SLC', from: 'Las Vegas', to: 'Salt Lake City', length: 3, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  // Omaha connections
+  { id: 'R_OMA_DUL_1', from: 'Omaha', to: 'Duluth', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_OMA_DUL_2', from: 'Omaha', to: 'Duluth', length: 2, color: 'GRAY', ownerId: null, routeIndex: 1 },
+  { id: 'R_OMA_HEL', from: 'Omaha', to: 'Helena', length: 4, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'R_OMA_DEN', from: 'Omaha', to: 'Denver', length: 4, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'R_OMA_KC_1', from: 'Omaha', to: 'Kansas City', length: 1, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_OMA_KC_2', from: 'Omaha', to: 'Kansas City', length: 1, color: 'GRAY', ownerId: null, routeIndex: 1 },
+  { id: 'R_OMA_CHI', from: 'Omaha', to: 'Chicago', length: 4, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  // Little Rock connections
+  { id: 'R_LR_STL', from: 'Little Rock', to: 'Saint Louis', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_LR_OKC', from: 'Little Rock', to: 'Oklahoma City', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_LR_DAL', from: 'Little Rock', to: 'Dallas', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_LR_NO', from: 'Little Rock', to: 'New Orleans', length: 3, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'R_LR_NSH', from: 'Little Rock', to: 'Nashville', length: 3, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  // Toronto connections
+  { id: 'R_TOR_MTL', from: 'Toronto', to: 'Montreal', length: 3, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_TOR_DUL', from: 'Toronto', to: 'Duluth', length: 6, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'R_TOR_CHI', from: 'Toronto', to: 'Chicago', length: 4, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'R_TOR_PIT', from: 'Toronto', to: 'Pittsburgh', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  // Charleston connections
+  { id: 'R_CHA_ATL', from: 'Charleston', to: 'Atlanta', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_CHA_RAL', from: 'Charleston', to: 'Raleigh', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_CHA_MIA', from: 'Charleston', to: 'Miami', length: 4, color: 'PINK', ownerId: null, routeIndex: 0 },
+  // Raleigh connections
+  { id: 'R_RAL_ATL_1', from: 'Raleigh', to: 'Atlanta', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_RAL_ATL_2', from: 'Raleigh', to: 'Atlanta', length: 2, color: 'GRAY', ownerId: null, routeIndex: 1 },
+  { id: 'R_RAL_WDC_1', from: 'Raleigh', to: 'Washington', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_RAL_WDC_2', from: 'Raleigh', to: 'Washington', length: 2, color: 'GRAY', ownerId: null, routeIndex: 1 },
+  { id: 'R_RAL_PIT', from: 'Raleigh', to: 'Pittsburgh', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'R_RAL_NSH', from: 'Raleigh', to: 'Nashville', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
 ];
 

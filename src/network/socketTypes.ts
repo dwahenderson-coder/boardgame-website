@@ -1,9 +1,10 @@
 import {
-  Action,
-  DestinationTicket,
-  GameState,
-  SanitizedGameState,
-} from '../games/ticket-to-ride/types.js';
+  AnyGameAction,
+  AnyGameState,
+  AnySanitizedGameState,
+  GameId,
+} from '../games/registry.js';
+import { DestinationTicket } from '../games/ticket-to-ride/types.js';
 
 export type RoomStatus = 'LOBBY' | 'PLAYING' | 'FINISHED';
 
@@ -19,9 +20,10 @@ export interface PlayerSession {
 export interface GameRoom {
   roomId: string;
   hostPlayerId: string;
+  selectedGameId: GameId;
   status: RoomStatus;
   players: Map<string, PlayerSession>; // Keyed by sessionToken
-  gameState: GameState | null;
+  gameState: AnyGameState | null;
 }
 
 export interface RoomPlayerSummary {
@@ -37,6 +39,7 @@ export interface RoomResponse {
   roomId?: string;
   playerId?: string;
   sessionToken?: string;
+  selectedGameId?: GameId;
   error?: string;
 }
 
@@ -62,8 +65,9 @@ export interface PlayerFinalStanding {
 
 export interface StateSyncPayload {
   roomId: string;
+  selectedGameId: GameId;
   status: RoomStatus;
-  view: SanitizedGameState | null;
+  view: AnySanitizedGameState | null;
   playerNames: Readonly<Record<string, string>>;
   finalScores?: Readonly<Record<string, number>>;
   finalStandings?: readonly PlayerFinalStanding[];
@@ -71,6 +75,7 @@ export interface StateSyncPayload {
 
 export interface RoomUpdatedPayload {
   roomId: string;
+  selectedGameId: GameId;
   status: RoomStatus;
   hostPlayerId: string;
   players: readonly RoomPlayerSummary[];
@@ -79,16 +84,17 @@ export interface RoomUpdatedPayload {
 // Client -> Server events
 export interface ClientToServerEvents {
   create_room: (
-    data: { playerName: string },
+    data: { playerName: string; selectedGameId?: GameId },
     cb: (res: RoomResponse) => void
   ) => void;
   join_room: (
     data: { roomId: string; playerName: string; sessionToken?: string },
     cb: (res: RoomResponse) => void
   ) => void;
+  select_game: (data: { roomId: string; gameId: GameId }) => void;
   start_game: (data: { roomId: string; seed?: number }) => void;
   dispatch_action: (
-    data: { roomId: string; action: Action },
+    data: { roomId: string; action: AnyGameAction },
     cb?: (res: DispatchActionResponse) => void
   ) => void;
   reset_to_lobby: (data: { roomId: string }) => void;

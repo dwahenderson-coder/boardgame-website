@@ -2,19 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { Graph } from '../src/common/graph.js';
 import { Deck } from '../src/mechanics/deck.js';
 import { RoomManager } from '../src/server/rooms.js';
+import { GameRegistry } from '../src/games/registry.js';
 import {
   applyAction,
   calculateFinalScores,
   createEmptyHand,
   getPlayerPerspective,
   initGame,
+  STANDARD_BOARD_ROUTES,
+  STANDARD_DESTINATION_TICKETS,
   validateAction,
 } from '../src/games/ticket-to-ride/index.js';
+import { CITY_COORDINATES } from '../src/sandbox/mapData.js';
 import type {
   DestinationTicket,
   GameState,
   RouteEdge,
 } from '../src/games/ticket-to-ride/types.js';
+import type { CatanGameState } from '../src/games/catan/index.js';
 
 describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // ---------------------------------------------------------------------------
@@ -449,5 +454,148 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(standings[0]!.tickets.length).toBeGreaterThan(0);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 5. Multi-Game Registry & Catan Engine Integration
+  // ---------------------------------------------------------------------------
+  describe('GameRegistry - Multi-Game Dispatch (Ticket to Ride & Catan)', () => {
+    it('registers ttr (2-5 players) and catan (3-4 players) with unified engine interfaces', () => {
+      expect(GameRegistry.ttr.minPlayers).toBe(2);
+      expect(GameRegistry.ttr.maxPlayers).toBe(5);
+      expect(GameRegistry.catan.minPlayers).toBe(3);
+      expect(GameRegistry.catan.maxPlayers).toBe(4);
+
+      const manager = new RoomManager();
+      const created = manager.createRoom('Alice', 'sock_1');
+      expect(created.room.selectedGameId).toBe('ttr');
+
+      // Switch room to Catan in lobby
+      created.room.selectedGameId = 'catan';
+      expect(created.room.selectedGameId).toBe('catan');
+    });
+
+    it('initializes Catan for 3-4 players, validates dice rolls, produces resources, and builds roads/settlements', () => {
+      const catanEngine = GameRegistry.catan;
+
+      // Reject 2-player Catan initialization
+      expect(() => catanEngine.initGame(['p1', 'p2'], 101)).toThrow(/3 and 4 players/);
+
+      // Initialize 3-player Catan match
+      let state = catanEngine.initGame(['p1', 'p2', 'p3'], 101) as CatanGameState;
+      expect(state.gameId).toBe('catan');
+      expect(state.hexes).toHaveLength(19);
+      expect(state.turnStep).toBe('ROLL_DICE');
+
+      // Cannot build before rolling dice
+      expect(
+        catanEngine.validateAction(state, 'p1', { type: 'CATAN_BUILD_ROAD' }).valid
+      ).toBe(false);
+
+      // Roll dice on p1's turn
+      expect(
+        catanEngine.validateAction(state, 'p1', { type: 'CATAN_ROLL_DICE' }).valid
+      ).toBe(true);
+      state = catanEngine.applyAction(state, 'p1', {
+        type: 'CATAN_ROLL_DICE',
+      }) as CatanGameState;
+      expect(state.turnStep).toBe('MAIN_PHASE');
+      expect(state.lastDiceRoll).not.toBeNull();
+
+      // Build a road using starting resources (1 BRICK + 1 LUMBER)
+      expect(
+        catanEngine.validateAction(state, 'p1', { type: 'CATAN_BUILD_ROAD' }).valid
+      ).toBe(true);
+      state = catanEngine.applyAction(state, 'p1', {
+        type: 'CATAN_BUILD_ROAD',
+      }) as CatanGameState;
+      expect(state.players['p1']!.roadsBuilt).toBe(3);
+
+      // End p1's turn -> advances to p2 in ROLL_DICE step
+      state = catanEngine.applyAction(state, 'p1', {
+        type: 'CATAN_END_TURN',
+      }) as CatanGameState;
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+      expect(state.turnStep).toBe('ROLL_DICE');
+
+      // Sanitized player perspective strips opponent resource hand breakdown
+      const p1View = catanEngine.getPlayerPerspective(state, 'p1');
+      expect(p1View.gameId).toBe('catan');
+      if (p1View.gameId === 'catan') {
+        expect(p1View.self.id).toBe('p1');
+        expect(p1View.opponents['p2']).toBeDefined();
+        expect('resources' in p1View.opponents['p2']!).toBe(false);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 6. Full North America Board Cities, Routes & Destination Tickets Integrity
+  // ---------------------------------------------------------------------------
+  describe('Ticket to Ride Full Board Data Integrity', () => {
+    it('includes all 8 added cities, removes Washington-Atlanta & NY-Chicago ticket, adds 11 new tickets, and maps every city to SVG coordinates', () => {
+      const addedCities = [
+        'Winnipeg',
+        'Sault St Marie',
+        'Las Vegas',
+        'Omaha',
+        'Little Rock',
+        'Toronto',
+        'Charleston',
+        'Raleigh',
+      ];
+      for (const city of addedCities) {
+        expect(CITY_COORDINATES[city]).toBeDefined();
+      }
+
+      // Every city in routes and tickets must exist in CITY_COORDINATES
+      for (const r of STANDARD_BOARD_ROUTES) {
+        expect(CITY_COORDINATES[r.from]).toBeDefined();
+        expect(CITY_COORDINATES[r.to]).toBeDefined();
+      }
+      for (const t of STANDARD_DESTINATION_TICKETS) {
+        expect(CITY_COORDINATES[t.from]).toBeDefined();
+        expect(CITY_COORDINATES[t.to]).toBeDefined();
+      }
+
+      // Direct Washington <-> Atlanta route is removed
+      const wdcAtl = STANDARD_BOARD_ROUTES.find(
+        (r) =>
+          (r.from === 'Washington' && r.to === 'Atlanta') ||
+          (r.from === 'Atlanta' && r.to === 'Washington')
+      );
+      expect(wdcAtl).toBeUndefined();
+
+      // New York <-> Chicago destination ticket is removed
+      const nyChiTicket = STANDARD_DESTINATION_TICKETS.find(
+        (t) =>
+          (t.from === 'Chicago' && t.to === 'New York') ||
+          (t.from === 'New York' && t.to === 'Chicago')
+      );
+      expect(nyChiTicket).toBeUndefined();
+
+      // Verify all 11 newly added Destination Tickets
+      const expectedTickets: Array<[string, string, number]> = [
+        ['Winnipeg', 'Houston', 12],
+        ['Sault St Marie', 'Nashville', 8],
+        ['Sault St Marie', 'Oklahoma City', 9],
+        ['Toronto', 'Miami', 10],
+        ['Winnipeg', 'Little Rock', 11],
+        ['Montreal', 'Atlanta', 9],
+        ['Calgary', 'Salt Lake City', 7],
+        ['Portland', 'Phoenix', 11],
+        ['Duluth', 'El Paso', 10],
+        ['Chicago', 'Santa Fe', 9],
+        ['Dallas', 'New York', 11],
+      ];
+
+      for (const [from, to, points] of expectedTickets) {
+        const match = STANDARD_DESTINATION_TICKETS.find(
+          (t) => t.from === from && t.to === to && t.points === points
+        );
+        expect(match).toBeDefined();
+      }
+    });
+  });
 });
+
 

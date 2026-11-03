@@ -1,6 +1,11 @@
 import { customAlphabet } from 'nanoid';
 import { Graph } from '../common/graph.js';
-import { RouteEdge } from '../games/ticket-to-ride/types.js';
+import { CatanGameState } from '../games/catan/index.js';
+import { GameId } from '../games/registry.js';
+import {
+  GameState as TTRGameState,
+  RouteEdge,
+} from '../games/ticket-to-ride/types.js';
 import {
   GameRoom,
   PlayerFinalStanding,
@@ -31,7 +36,11 @@ export class RoomManager {
   private readonly rooms = new Map<string, GameRoom>();
   private readonly socketToToken = new Map<string, string>(); // socket.id -> sessionToken
 
-  public createRoom(hostName: string, socketId: string): {
+  public createRoom(
+    hostName: string,
+    socketId: string,
+    initialGameId: GameId = 'ttr'
+  ): {
     roomId: string;
     playerId: string;
     sessionToken: string;
@@ -58,6 +67,7 @@ export class RoomManager {
     const room: GameRoom = {
       roomId,
       hostPlayerId,
+      selectedGameId: initialGameId,
       status: 'LOBBY',
       players: new Map([[sessionToken, hostSession]]),
       gameState: null,
@@ -218,7 +228,7 @@ export class RoomManager {
   }
 
   /**
-   * Builds the full end-of-game leaderboard with revealed Destination Tickets and Graph completion status.
+   * Builds the full end-of-game leaderboard for either Ticket to Ride or Catan.
    */
   public static buildFinalStandings(
     room: GameRoom
@@ -226,8 +236,27 @@ export class RoomManager {
     if (!room.gameState) {
       return [];
     }
-    const state = room.gameState;
     const nameMap = RoomManager.getPlayerNameMap(room);
+
+    if (room.selectedGameId === 'catan' || 'gameId' in room.gameState) {
+      const catanState = room.gameState as CatanGameState;
+      return catanState.playerOrder
+        .map((playerId) => {
+          const p = catanState.players[playerId]!;
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.victoryPoints,
+            ticketPoints: 0,
+            totalScore: p.victoryPoints,
+            trainsRemaining: p.settlementsRemaining,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    const state = room.gameState as TTRGameState;
 
     const standings: PlayerFinalStanding[] = state.playerOrder.map(
       (playerId) => {

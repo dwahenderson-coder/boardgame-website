@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Action, SanitizedGameState } from '../games/ticket-to-ride/types.js';
+import {
+  AnyGameAction,
+  AnySanitizedGameState,
+  GameId,
+} from '../games/registry.js';
 import {
   ClientToServerEvents,
   PlayerFinalStanding,
@@ -39,23 +43,25 @@ export interface UseGameSocketResult {
   readonly reconnecting: boolean;
   readonly pendingAction: boolean;
   readonly roomId: string | null;
+  readonly selectedGameId: GameId;
   readonly playerId: string | null;
   readonly roomStatus: RoomStatus | null;
   readonly hostPlayerId: string | null;
   readonly lobbyPlayers: readonly RoomPlayerSummary[];
   readonly playerNames: Readonly<Record<string, string>>;
-  readonly sanitizedView: SanitizedGameState | null;
+  readonly sanitizedView: AnySanitizedGameState | null;
   readonly finalScores: Readonly<Record<string, number>> | null;
   readonly finalStandings: readonly PlayerFinalStanding[] | null;
   readonly errorBanner: string | null;
   readonly toasts: readonly ToastMessage[];
   readonly dismissToast: (id: number) => void;
   readonly clearError: () => void;
-  readonly createRoom: (playerName: string) => void;
+  readonly createRoom: (playerName: string, initialGameId?: GameId) => void;
   readonly joinRoom: (roomId: string, playerName: string) => void;
+  readonly selectGame: (gameId: GameId) => void;
   readonly startGame: (seed?: number) => void;
   readonly resetToLobby: () => void;
-  readonly sendAction: (action: Action) => void;
+  readonly sendAction: (action: AnyGameAction) => void;
   readonly leaveRoom: () => void;
 }
 
@@ -68,8 +74,6 @@ export function useGameSocket(
     ClientToServerEvents
   > | null>(null);
 
-  // Keep a ref of the active room + player name so socket reconnects (Network drop / F5)
-  // automatically re-emit join_room with the stored sessionToken!
   const activeSessionRef = useRef<{
     roomId: string | null;
     playerName: string;
@@ -82,6 +86,7 @@ export function useGameSocket(
   const [reconnecting, setReconnecting] = useState(false);
   const [pendingAction, setPendingAction] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [selectedGameId, setSelectedGameId] = useState<GameId>('ttr');
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [roomStatus, setRoomStatus] = useState<RoomStatus | null>(null);
   const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
@@ -92,7 +97,7 @@ export function useGameSocket(
     Readonly<Record<string, string>>
   >({});
   const [sanitizedView, setSanitizedView] =
-    useState<SanitizedGameState | null>(null);
+    useState<AnySanitizedGameState | null>(null);
   const [finalScores, setFinalScores] = useState<Readonly<
     Record<string, number>
   > | null>(null);
@@ -170,6 +175,9 @@ export function useGameSocket(
                 if (res.playerId) {
                   setPlayerId(res.playerId);
                 }
+                if (res.selectedGameId) {
+                  setSelectedGameId(res.selectedGameId);
+                }
               }
             }
           );
@@ -188,6 +196,7 @@ export function useGameSocket(
     socket.on('room_updated', (payload) => {
       setRoomId(payload.roomId);
       activeSessionRef.current.roomId = payload.roomId;
+      setSelectedGameId(payload.selectedGameId);
       setRoomStatus(payload.status);
       setHostPlayerId(payload.hostPlayerId);
       setLobbyPlayers(payload.players);
@@ -207,6 +216,7 @@ export function useGameSocket(
       setPendingAction(false);
       setRoomId(payload.roomId);
       activeSessionRef.current.roomId = payload.roomId;
+      setSelectedGameId(payload.selectedGameId);
       setRoomStatus(payload.status);
       setSanitizedView(payload.view);
       setPlayerNames(payload.playerNames);
@@ -227,7 +237,7 @@ export function useGameSocket(
   }, [enabled, serverUrl, pushToast]);
 
   const createRoom = useCallback(
-    (playerName: string) => {
+    (playerName: string, initialGameId: GameId = 'ttr') => {
       const socket = socketRef.current;
       if (!socket) {
         const msg = 'Socket is not connected to multiplayer server.';
@@ -240,24 +250,31 @@ export function useGameSocket(
       activeSessionRef.current.playerName = cleanName;
       setErrorBanner(null);
 
-      socket.emit('create_room', { playerName: cleanName }, (res) => {
-        if (res.ok && res.roomId && res.sessionToken) {
-          localStorage.setItem(`ttr_session_${res.roomId}`, res.sessionToken);
-          activeSessionRef.current.roomId = res.roomId;
-          setRoomId(res.roomId);
-          setPlayerId(res.playerId ?? 'p1');
-          window.history.replaceState(
-            {},
-            '',
-            `/room/${encodeURIComponent(res.roomId)}`
-          );
-          pushToast(`Room ${res.roomId} created!`, 'success');
-        } else {
-          const msg = res.error ?? 'Failed to create room.';
-          setErrorBanner(msg);
-          pushToast(msg, 'error');
+      socket.emit(
+        'create_room',
+        { playerName: cleanName, selectedGameId: initialGameId },
+        (res) => {
+          if (res.ok && res.roomId && res.sessionToken) {
+            localStorage.setItem(`ttr_session_${res.roomId}`, res.sessionToken);
+            activeSessionRef.current.roomId = res.roomId;
+            setRoomId(res.roomId);
+            setPlayerId(res.playerId ?? 'p1');
+            if (res.selectedGameId) {
+              setSelectedGameId(res.selectedGameId);
+            }
+            window.history.replaceState(
+              {},
+              '',
+              `/room/${encodeURIComponent(res.roomId)}`
+            );
+            pushToast(`Room ${res.roomId} created!`, 'success');
+          } else {
+            const msg = res.error ?? 'Failed to create room.';
+            setErrorBanner(msg);
+            pushToast(msg, 'error');
+          }
         }
-      });
+      );
     },
     [pushToast]
   );
@@ -278,8 +295,6 @@ export function useGameSocket(
       activeSessionRef.current.roomId = normalizedCode;
 
       if (!socket || !socket.connected) {
-        // When socket finishes connecting, the 'connect' handler will auto-join if a token exists,
-        // or we queue the join once connected:
         socket?.once('connect', () => {
           joinRoom(normalizedCode, cleanName);
         });
@@ -309,6 +324,9 @@ export function useGameSocket(
             if (res.playerId) {
               setPlayerId(res.playerId);
             }
+            if (res.selectedGameId) {
+              setSelectedGameId(res.selectedGameId);
+            }
             window.history.replaceState(
               {},
               '',
@@ -323,6 +341,18 @@ export function useGameSocket(
       );
     },
     [pushToast]
+  );
+
+  const selectGame = useCallback(
+    (gameId: GameId) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) {
+        return;
+      }
+      setErrorBanner(null);
+      socket.emit('select_game', { roomId, gameId });
+    },
+    [roomId]
   );
 
   const startGame = useCallback(
@@ -350,7 +380,7 @@ export function useGameSocket(
   }, [roomId]);
 
   const sendAction = useCallback(
-    (action: Action) => {
+    (action: AnyGameAction) => {
       const socket = socketRef.current;
       if (!socket || !roomId) {
         return;
@@ -389,6 +419,7 @@ export function useGameSocket(
     reconnecting,
     pendingAction,
     roomId,
+    selectedGameId,
     playerId,
     roomStatus,
     hostPlayerId,
@@ -403,6 +434,7 @@ export function useGameSocket(
     clearError,
     createRoom,
     joinRoom,
+    selectGame,
     startGame,
     resetToLobby,
     sendAction,

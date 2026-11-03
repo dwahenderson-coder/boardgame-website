@@ -6,13 +6,7 @@ import { createServer } from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
-import {
-  applyAction,
-  calculateFinalScores,
-  getPlayerPerspective,
-  initGame,
-  validateAction,
-} from '../games/ticket-to-ride/index.js';
+import { GameId, GameRegistry } from '../games/registry.js';
 import {
   ClientToServerEvents,
   GameRoom,
@@ -53,7 +47,7 @@ app.get('/healthz', (_req, res) => {
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
-    service: 'ttr-multiplayer-server',
+    service: 'boardgames-multiplayer-server',
     timestamp: new Date().toISOString(),
   });
 });
@@ -93,6 +87,7 @@ const roomManager = new RoomManager();
 function broadcastRoomLobby(room: GameRoom): void {
   io.to(room.roomId).emit('room_updated', {
     roomId: room.roomId,
+    selectedGameId: room.selectedGameId,
     status: room.status,
     hostPlayerId: room.hostPlayerId,
     players: RoomManager.getPlayerSummaries(room),
@@ -100,12 +95,13 @@ function broadcastRoomLobby(room: GameRoom): void {
 }
 
 function broadcastSanitizedViews(room: GameRoom): void {
+  const engine = GameRegistry[room.selectedGameId];
   const playerNames = RoomManager.getPlayerNameMap(room);
   const isGameOver =
     room.gameState !== null && room.gameState.phase === 'GAME_OVER';
   const finalScores =
     isGameOver && room.gameState
-      ? calculateFinalScores(room.gameState)
+      ? engine.calculateFinalScores(room.gameState)
       : undefined;
   const finalStandings = isGameOver
     ? RoomManager.buildFinalStandings(room)
@@ -114,11 +110,12 @@ function broadcastSanitizedViews(room: GameRoom): void {
   for (const session of room.players.values()) {
     if (session.connected) {
       const sanitizedView = room.gameState
-        ? getPlayerPerspective(room.gameState, session.playerId)
+        ? engine.getPlayerPerspective(room.gameState, session.playerId)
         : null;
 
       io.to(session.socketId).emit('state_sync', {
         roomId: room.roomId,
+        selectedGameId: room.selectedGameId,
         status: room.status,
         view: sanitizedView,
         playerNames,
@@ -131,13 +128,22 @@ function broadcastSanitizedViews(room: GameRoom): void {
 
 io.on('connection', (socket) => {
   // 1. Create Room
-  socket.on('create_room', ({ playerName }, callback) => {
+  socket.on('create_room', ({ playerName, selectedGameId }, callback) => {
+    const validGameId: GameId =
+      selectedGameId && selectedGameId in GameRegistry ? selectedGameId : 'ttr';
     const { roomId, playerId, sessionToken, room } = roomManager.createRoom(
       playerName,
-      socket.id
+      socket.id,
+      validGameId
     );
     socket.join(roomId);
-    callback({ ok: true, roomId, playerId, sessionToken });
+    callback({
+      ok: true,
+      roomId,
+      playerId,
+      sessionToken,
+      selectedGameId: room.selectedGameId,
+    });
     broadcastRoomLobby(room);
   });
 
@@ -161,6 +167,7 @@ io.on('connection', (socket) => {
       roomId: room.roomId,
       playerId: player.playerId,
       sessionToken: result.sessionToken,
+      selectedGameId: room.selectedGameId,
     });
 
     broadcastRoomLobby(room);
@@ -169,10 +176,11 @@ io.on('connection', (socket) => {
       (room.status === 'PLAYING' || room.status === 'FINISHED') &&
       room.gameState
     ) {
-      const view = getPlayerPerspective(room.gameState, player.playerId);
+      const engine = GameRegistry[room.selectedGameId];
+      const view = engine.getPlayerPerspective(room.gameState, player.playerId);
       const isGameOver = room.gameState.phase === 'GAME_OVER';
       const finalScores = isGameOver
-        ? calculateFinalScores(room.gameState)
+        ? engine.calculateFinalScores(room.gameState)
         : undefined;
       const finalStandings = isGameOver
         ? RoomManager.buildFinalStandings(room)
@@ -180,6 +188,7 @@ io.on('connection', (socket) => {
 
       socket.emit('state_sync', {
         roomId: room.roomId,
+        selectedGameId: room.selectedGameId,
         status: room.status,
         view,
         playerNames: RoomManager.getPlayerNameMap(room),
@@ -189,7 +198,36 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Start Game (or Play Again rematch)
+  // 3. Select Game (Host only during LOBBY phase)
+  socket.on('select_game', ({ roomId, gameId }) => {
+    const ctx = roomManager.getSessionBySocket(socket.id);
+    if (!ctx || ctx.room.roomId !== roomId.trim().toUpperCase()) {
+      return;
+    }
+    if (ctx.session.playerId !== ctx.room.hostPlayerId) {
+      socket.emit('action_error', {
+        message: 'Only the room host can change the selected game.',
+      });
+      return;
+    }
+    if (ctx.room.status !== 'LOBBY') {
+      socket.emit('action_error', {
+        message: 'Cannot switch games while a match is already in progress.',
+      });
+      return;
+    }
+    if (!(gameId in GameRegistry)) {
+      socket.emit('action_error', {
+        message: `Unknown game ID: ${gameId}`,
+      });
+      return;
+    }
+
+    ctx.room.selectedGameId = gameId;
+    broadcastRoomLobby(ctx.room);
+  });
+
+  // 4. Start Game (or Play Again rematch) — Looks up engine from GameRegistry
   socket.on('start_game', ({ roomId, seed }) => {
     const ctx = roomManager.getSessionBySocket(socket.id);
     if (!ctx || ctx.room.roomId !== roomId.trim().toUpperCase()) {
@@ -201,9 +239,21 @@ io.on('connection', (socket) => {
       });
       return;
     }
-    if (ctx.room.players.size < 2) {
+
+    const engine = GameRegistry[ctx.room.selectedGameId];
+    const currentCount = ctx.room.players.size;
+
+    if (currentCount < engine.minPlayers) {
+      const needed = engine.minPlayers - currentCount;
       socket.emit('action_error', {
-        message: 'At least 2 players are required to start Ticket to Ride.',
+        message: `${engine.title} requires at least ${engine.minPlayers} players (need ${needed} more player${needed === 1 ? '' : 's'}).`,
+      });
+      return;
+    }
+
+    if (currentCount > engine.maxPlayers) {
+      socket.emit('action_error', {
+        message: `${engine.title} supports at most ${engine.maxPlayers} players (currently ${currentCount} in lobby).`,
       });
       return;
     }
@@ -213,14 +263,14 @@ io.on('connection', (socket) => {
       .map((p) => p.playerId);
 
     const effectiveSeed = seed ?? Date.now();
-    ctx.room.gameState = initGame(playerIds, effectiveSeed);
+    ctx.room.gameState = engine.initGame(playerIds, effectiveSeed);
     ctx.room.status = 'PLAYING';
 
     broadcastRoomLobby(ctx.room);
     broadcastSanitizedViews(ctx.room);
   });
 
-  // 4. Reset to Waiting Room Lobby (Host only)
+  // 5. Reset to Waiting Room Lobby (Host only)
   socket.on('reset_to_lobby', ({ roomId }) => {
     const ctx = roomManager.getSessionBySocket(socket.id);
     if (!ctx || ctx.room.roomId !== roomId.trim().toUpperCase()) {
@@ -239,7 +289,7 @@ io.on('connection', (socket) => {
     broadcastSanitizedViews(ctx.room);
   });
 
-  // 5. Dispatch Engine Action (with acknowledgement callback for Pending UI)
+  // 6. Dispatch Engine Action — Routed through GameRegistry[room.selectedGameId]
   socket.on('dispatch_action', ({ roomId, action }, callback) => {
     const ctx = roomManager.getSessionBySocket(socket.id);
     if (!ctx || ctx.room.roomId !== roomId.trim().toUpperCase()) {
@@ -255,7 +305,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const check = validateAction(
+    const engine = GameRegistry[ctx.room.selectedGameId];
+    const check = engine.validateAction(
       ctx.room.gameState,
       ctx.session.playerId,
       action
@@ -267,13 +318,14 @@ io.on('connection', (socket) => {
       return;
     }
 
-    ctx.room.gameState = applyAction(
+    const nextState = engine.applyAction(
       ctx.room.gameState,
       ctx.session.playerId,
       action
     );
+    ctx.room.gameState = nextState;
 
-    if (ctx.room.gameState.phase === 'GAME_OVER') {
+    if (nextState.phase === 'GAME_OVER') {
       ctx.room.status = 'FINISHED';
       broadcastRoomLobby(ctx.room);
     }
@@ -282,7 +334,7 @@ io.on('connection', (socket) => {
     broadcastSanitizedViews(ctx.room);
   });
 
-  // 6. Handle Disconnect & Automatic Host Migration
+  // 7. Handle Disconnect & Automatic Host Migration
   socket.on('disconnect', () => {
     const res = roomManager.handleDisconnect(socket.id);
     if (res) {
