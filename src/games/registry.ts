@@ -9,6 +9,16 @@ import {
   validateCatanAction,
 } from './catan/index.js';
 import {
+  applyHoldemAction,
+  calculateHoldemFinalScores,
+  getHoldemPlayerPerspective,
+  HoldemAction,
+  HoldemGameState,
+  HoldemSanitizedGameState,
+  initHoldemGame,
+  validateHoldemAction,
+} from './texas-holdem/index.js';
+import {
   Action as TTRAction,
   applyAction as applyTTRAction,
   calculateFinalScores as calculateTTRFinalScores,
@@ -20,13 +30,14 @@ import {
   ValidationResult,
 } from './ticket-to-ride/index.js';
 
-export type GameId = 'ttr' | 'catan';
+export type GameId = 'ttr' | 'catan' | 'holdem';
 
-export type AnyGameState = TTRGameState | CatanGameState;
+export type AnyGameState = TTRGameState | CatanGameState | HoldemGameState;
 export type AnySanitizedGameState =
   | TTRSanitizedGameState
-  | CatanSanitizedGameState;
-export type AnyGameAction = TTRAction | CatanAction;
+  | CatanSanitizedGameState
+  | HoldemSanitizedGameState;
+export type AnyGameAction = TTRAction | CatanAction | HoldemAction;
 
 export interface GameMetadata {
   readonly id: GameId;
@@ -83,6 +94,16 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = [
     mechanicsLabel: 'Trading, Building & Dice Production',
     badgeColor: 'emerald',
   },
+  {
+    id: 'holdem',
+    title: "Texas Hold'em",
+    subtitle: 'No-Limit Casino Poker',
+    minPlayers: 2,
+    maxPlayers: 6,
+    durationLabel: '~30 min',
+    mechanicsLabel: 'No-Limit Betting & Hand Evaluation',
+    badgeColor: 'rose',
+  },
 ] as const;
 
 export const GameRegistry: Readonly<
@@ -104,6 +125,14 @@ export const GameRegistry: Readonly<
     applyAction: applyCatanAction,
     getPlayerPerspective: getCatanPlayerPerspective,
     calculateFinalScores: calculateCatanFinalScores,
+  },
+  holdem: {
+    ...GAME_METADATA_LIST[2]!,
+    initGame: initHoldemGame,
+    validateAction: validateHoldemAction,
+    applyAction: applyHoldemAction,
+    getPlayerPerspective: getHoldemPlayerPerspective,
+    calculateFinalScores: calculateHoldemFinalScores,
   },
 };
 

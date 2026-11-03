@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { Graph } from '../src/common/graph.js';
+import {
+  CardZone,
+  createStandardDeck,
+  evaluateBestPokerHand,
+  evaluateTrickWinner,
+  isLegalTrickPlay,
+  StandardCard,
+} from '../src/common/cards/index.js';
+import { createPRNG } from '../src/common/prng.js';
 import { Deck } from '../src/mechanics/deck.js';
 import { RoomManager } from '../src/server/rooms.js';
 import { GameRegistry } from '../src/games/registry.js';
+import { HoldemGameState } from '../src/games/texas-holdem/index.js';
 import {
   applyAction,
   calculateFinalScores,
@@ -594,6 +604,226 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         );
         expect(match).toBeDefined();
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. Reusable Card Engine Toolkit (`common/cards`) & Texas Hold'em Engine
+  // ---------------------------------------------------------------------------
+  describe('Card Engine Toolkit (CardZone, Poker & Trick Evaluators) & Texas Hold’em', () => {
+    it('supports StandardCard 52-card decks, CardZone transfers/sanitization, and Trick-Taking evaluation', () => {
+      const deck52 = createStandardDeck();
+      expect(deck52).toHaveLength(52);
+      const deck54 = createStandardDeck({ includeJokers: true });
+      expect(deck54).toHaveLength(54);
+
+      const deckZone = new CardZone<StandardCard>({
+        id: 'draw_pile',
+        visibility: 'hidden',
+        initialCards: deck52,
+      });
+      deckZone.shuffle(createPRNG(42));
+
+      const p1Hand = new CardZone<StandardCard>({
+        id: 'hand_p1',
+        visibility: 'private',
+        ownerId: 'p1',
+      });
+      const p2Hand = new CardZone<StandardCard>({
+        id: 'hand_p2',
+        visibility: 'private',
+        ownerId: 'p2',
+      });
+
+      deckZone.dealRoundRobin([p1Hand, p2Hand], 2);
+      expect(p1Hand.count).toBe(2);
+      expect(p2Hand.count).toBe(2);
+      expect(deckZone.count).toBe(48);
+
+      // Perspective sanitization hides p2's private hand from p1 while revealing cardCount
+      const p2SanitizedForP1 = p2Hand.toSanitized('p1');
+      expect(p2SanitizedForP1.cardCount).toBe(2);
+      expect(p2SanitizedForP1.cards).toBeNull();
+
+      const p1SanitizedForP1 = p1Hand.toSanitized('p1');
+      expect(p1SanitizedForP1.cards).toHaveLength(2);
+
+      // Transfer a specific card from p1Hand to a public table zone
+      const tableZone = new CardZone<StandardCard>({
+        id: 'table',
+        visibility: 'public',
+      });
+      const firstCardId = p1Hand.getCards()[0]!.id;
+      expect(p1Hand.transferTo(tableZone, firstCardId)).toBe(true);
+      expect(p1Hand.count).toBe(1);
+      expect(tableZone.count).toBe(1);
+
+      // Trick-taking evaluator test (lead suit vs trump suit)
+      const cardById = (id: string) => deck52.find((c) => c.id === id)!;
+      const trickWinnerNoTrump = evaluateTrickWinner(
+        [
+          { playerId: 'p1', card: cardById('10H') },
+          { playerId: 'p2', card: cardById('AS') }, // off-suit Ace
+          { playerId: 'p3', card: cardById('KH') }, // highest Heart
+        ],
+        null
+      );
+      expect(trickWinnerNoTrump.playerId).toBe('p3');
+
+      const trickWinnerWithSpadeTrump = evaluateTrickWinner(
+        [
+          { playerId: 'p1', card: cardById('AH') },
+          { playerId: 'p2', card: cardById('2S') }, // low trump beats off-suit Ace
+          { playerId: 'p3', card: cardById('KH') },
+        ],
+        'S'
+      );
+      expect(trickWinnerWithSpadeTrump.playerId).toBe('p2');
+
+      expect(
+        isLegalTrickPlay(
+          [cardById('10H'), cardById('2C')],
+          cardById('2C'),
+          'H',
+          true
+        )
+      ).toBe(false);
+    });
+
+    it('accurately ranks 5-to-7 card Poker hands including Wheel Straights, Full Houses, and Royal Flushes', () => {
+      const deck = createStandardDeck();
+      const c = (id: string) => deck.find((card) => card.id === id)!;
+
+      const royalFlush = evaluateBestPokerHand([
+        c('AS'),
+        c('KS'),
+        c('QS'),
+        c('JS'),
+        c('10S'),
+        c('2D'),
+        c('3C'),
+      ]);
+      expect(royalFlush.category).toBe('ROYAL_FLUSH');
+
+      const fullHouse = evaluateBestPokerHand([
+        c('AH'),
+        c('AD'),
+        c('AC'),
+        c('KH'),
+        c('KD'),
+        c('2C'),
+        c('7S'),
+      ]);
+      expect(fullHouse.category).toBe('FULL_HOUSE');
+
+      const wheelStraight = evaluateBestPokerHand([
+        c('AS'),
+        c('2D'),
+        c('3C'),
+        c('4H'),
+        c('5S'),
+        c('9D'),
+        c('KC'),
+      ]);
+      expect(wheelStraight.category).toBe('STRAIGHT');
+      expect(wheelStraight.tiebreakers[0]).toBe(5);
+
+      expect(royalFlush.score).toBeGreaterThan(fullHouse.score);
+      expect(fullHouse.score).toBeGreaterThan(wheelStraight.score);
+    });
+
+    it('runs a full Texas Hold’em hand through GameRegistry.holdem from Pre-Flop to Showdown and Next Hand', () => {
+      const holdemEngine = GameRegistry.holdem;
+      expect(holdemEngine.minPlayers).toBe(2);
+      expect(holdemEngine.maxPlayers).toBe(6);
+
+      let state = holdemEngine.initGame(['p1', 'p2', 'p3'], 777) as HoldemGameState;
+      expect(state.gameId).toBe('holdem');
+      expect(state.street).toBe('PREFLOP');
+      expect(state.pot).toBe(30); // SB $10 (p2) + BB $20 (p3)
+
+      // p1 is UTG in a 3-player game (dealer=p1(0), SB=p2(1), BB=p3(2), active=p1(0))
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+
+      // Sanitized perspective for p1 reveals p1's 2 hole cards and conceals p2/p3's hole cards
+      const p1Perspective = holdemEngine.getPlayerPerspective(state, 'p1');
+      if (p1Perspective.gameId === 'holdem') {
+        expect(p1Perspective.self.holeZone.cards).toHaveLength(2);
+        expect(p1Perspective.opponents['p2']!.holeZone.cards).toBeNull();
+        expect(p1Perspective.opponents['p2']!.holeZone.cardCount).toBe(2);
+      }
+
+      // Pre-flop: p1 calls $20, p2 completes SB ($10 more), p3 checks BB -> advances to FLOP
+      state = holdemEngine.applyAction(state, 'p1', {
+        type: 'HOLDEM_CALL',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p2', {
+        type: 'HOLDEM_CALL',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p3', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+
+      expect(state.street).toBe('FLOP');
+      expect(state.communityZone.cards).toHaveLength(3);
+      expect(state.pot).toBe(60);
+
+      // Flop: p2 checks, p3 bets $40, p1 folds, p2 calls $40 -> advances to TURN
+      state = holdemEngine.applyAction(state, 'p2', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p3', {
+        type: 'HOLDEM_BET_RAISE',
+        targetBet: 40,
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p1', {
+        type: 'HOLDEM_FOLD',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p2', {
+        type: 'HOLDEM_CALL',
+      }) as HoldemGameState;
+
+      expect(state.street).toBe('TURN');
+      expect(state.communityZone.cards).toHaveLength(4);
+      expect(state.pot).toBe(140);
+
+      // Turn: p2 checks, p3 checks -> advances to RIVER
+      state = holdemEngine.applyAction(state, 'p2', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p3', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+
+      expect(state.street).toBe('RIVER');
+      expect(state.communityZone.cards).toHaveLength(5);
+
+      // River: p2 checks, p3 checks -> resolves SHOWDOWN & awards pot
+      state = holdemEngine.applyAction(state, 'p2', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+      state = holdemEngine.applyAction(state, 'p3', {
+        type: 'HOLDEM_CHECK',
+      }) as HoldemGameState;
+
+      expect(state.street).toBe('SHOWDOWN');
+      expect(state.turnStep).toBe('HAND_OVER');
+      expect(state.lastHandWinners.length).toBeGreaterThan(0);
+
+      // Total chips in play remain conserved at 3000
+      const totalChips = Object.values(state.players).reduce(
+        (sum, p) => sum + p.chips,
+        0
+      );
+      expect(totalChips).toBe(3000);
+
+      // Deal Next Hand rotates the dealer button and starts Hand #2
+      state = holdemEngine.applyAction(state, 'p1', {
+        type: 'HOLDEM_NEXT_HAND',
+      }) as HoldemGameState;
+      expect(state.handNumber).toBe(2);
+      expect(state.street).toBe('PREFLOP');
+      expect(state.dealerIndex).toBe(1);
     });
   });
 });

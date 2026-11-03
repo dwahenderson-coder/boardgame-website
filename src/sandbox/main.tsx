@@ -7,6 +7,10 @@ import {
   CatanSanitizedGameState,
 } from '../games/catan/index.js';
 import {
+  HoldemGameState,
+  HoldemSanitizedGameState,
+} from '../games/texas-holdem/index.js';
+import {
   AnyGameAction,
   AnyGameState,
   GAME_METADATA_LIST,
@@ -23,6 +27,7 @@ import {
 import { PlayerFinalStanding } from '../network/socketTypes.js';
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
+import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
@@ -176,12 +181,19 @@ export const SandboxApp: React.FC = () => {
     ? activeSanitized.self.id
     : localViewedPlayerId;
 
-  const isCatanActive = 'gameId' in activeSanitized;
-  const ttrSanitized = !isCatanActive
-    ? (activeSanitized as TTRSanitizedGameState)
-    : null;
+  const isCatanActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'catan';
+  const isHoldemActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'holdem';
+  const ttrSanitized =
+    !isCatanActive && !isHoldemActive
+      ? (activeSanitized as TTRSanitizedGameState)
+      : null;
   const catanSanitized = isCatanActive
     ? (activeSanitized as CatanSanitizedGameState)
+    : null;
+  const holdemSanitized = isHoldemActive
+    ? (activeSanitized as HoldemSanitizedGameState)
     : null;
 
   // Determine whether the local user is allowed to act right now
@@ -252,7 +264,24 @@ export const SandboxApp: React.FC = () => {
     if (localGameState.phase !== 'GAME_OVER') {
       return [];
     }
-    if ('gameId' in localGameState) {
+    if ('gameId' in localGameState && localGameState.gameId === 'holdem') {
+      const hs = localGameState as HoldemGameState;
+      return hs.playerOrder
+        .map((pid) => {
+          const p = hs.players[pid]!;
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: p.chips,
+            ticketPoints: 0,
+            totalScore: p.chips,
+            trainsRemaining: p.handsWon,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'catan') {
       const cs = localGameState as CatanGameState;
       return cs.playerOrder
         .map((pid) => {
@@ -304,6 +333,9 @@ export const SandboxApp: React.FC = () => {
     : localFinalStandings;
 
   const selfProjectedScore = useMemo(() => {
+    if (holdemSanitized) {
+      return holdemSanitized.self.chips;
+    }
     if (catanSanitized) {
       return catanSanitized.self.victoryPoints;
     }
@@ -461,7 +493,23 @@ export const SandboxApp: React.FC = () => {
   // --- Sandbox Cheat / Debug Helper (Local God Mode Only) ---
   const handleGodModeGrantCards = () => {
     if (runnerMode !== 'LOCAL') return;
-    if ('gameId' in localGameState) {
+    if ('gameId' in localGameState && localGameState.gameId === 'holdem') {
+      const hs = localGameState as HoldemGameState;
+      const p = hs.players[localActivePlayerId]!;
+      setLocalGameState({
+        ...hs,
+        players: {
+          ...hs.players,
+          [localActivePlayerId]: {
+            ...p,
+            chips: p.chips + 500,
+          },
+        },
+      });
+      setLocalErrorBanner(null);
+      return;
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'catan') {
       const cs = localGameState as CatanGameState;
       const p = cs.players[localActivePlayerId]!;
       const updatedRes = { ...p.resources };
@@ -641,7 +689,7 @@ export const SandboxApp: React.FC = () => {
                   }}
                   className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 font-semibold focus:outline-none focus:border-amber-400"
                 >
-                  {[2, 3, 4, 5]
+                  {[2, 3, 4, 5, 6]
                     .filter(
                       (n) =>
                         n >= GameRegistry[localSelectedGameId].minPlayers &&
@@ -863,7 +911,17 @@ export const SandboxApp: React.FC = () => {
           {/* =================================================================
               DYNAMIC BOARD COMPONENT LOADER (`GameContainer`)
              ================================================================= */}
-          {catanSanitized ? (
+          {holdemSanitized ? (
+            /* Mount <HoldemBoard /> when `selectedGameId === 'holdem'` */
+            <HoldemBoard
+              gameState={holdemSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              sendAction={(action) =>
+                dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : catanSanitized ? (
             /* Mount <CatanBoard /> when `selectedGameId === 'catan'` */
             <CatanBoard
               view={catanSanitized}
@@ -1418,7 +1476,7 @@ export const SandboxApp: React.FC = () => {
                       <label className="block text-slate-300 font-semibold mb-1.5">
                         Select Game to Host (can also be switched in Lobby)
                       </label>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {GAME_METADATA_LIST.map((game) => {
                           const isSelected = entrySelectedGameId === game.id;
                           return (
@@ -1435,7 +1493,11 @@ export const SandboxApp: React.FC = () => {
                               <div>
                                 <div className="flex items-center justify-between">
                                   <span className="font-black text-sm text-slate-100">
-                                    {game.id === 'ttr' ? '🚂 ' : '🏝️ '}
+                                    {game.id === 'ttr'
+                                      ? '🚂 '
+                                      : game.id === 'catan'
+                                      ? '🏝️ '
+                                      : '🃏 '}
                                     {game.title}
                                   </span>
                                   {isSelected && (
@@ -1558,7 +1620,7 @@ export const SandboxApp: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {GAME_METADATA_LIST.map((game) => {
                         const isSelected = mp.selectedGameId === game.id;
                         const isHost = mp.playerId === mp.hostPlayerId;
@@ -1592,7 +1654,11 @@ export const SandboxApp: React.FC = () => {
                             <div>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-base font-black text-slate-100">
-                                  {game.id === 'ttr' ? '🚂 ' : '🏝️ '}
+                                  {game.id === 'ttr'
+                                    ? '🚂 '
+                                    : game.id === 'catan'
+                                    ? '🏝️ '
+                                    : '🃏 '}
                                   {game.title}
                                 </span>
                                 {isSelected ? (

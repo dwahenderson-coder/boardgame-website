@@ -1,6 +1,7 @@
 import { customAlphabet } from 'nanoid';
 import { Graph } from '../common/graph.js';
 import { CatanGameState } from '../games/catan/index.js';
+import { HoldemGameState } from '../games/texas-holdem/index.js';
 import { GameId } from '../games/registry.js';
 import {
   GameState as TTRGameState,
@@ -123,8 +124,8 @@ export class RoomManager {
     if (room.status !== 'LOBBY') {
       return { ok: false, error: 'Game is already in progress.' };
     }
-    if (room.players.size >= 5) {
-      return { ok: false, error: 'Room is full (maximum 5 players).' };
+    if (room.players.size >= 6) {
+      return { ok: false, error: 'Room is full (maximum 6 players).' };
     }
 
     const seatIndex = room.players.size;
@@ -238,7 +239,31 @@ export class RoomManager {
     }
     const nameMap = RoomManager.getPlayerNameMap(room);
 
-    if (room.selectedGameId === 'catan' || 'gameId' in room.gameState) {
+    if (
+      room.selectedGameId === 'holdem' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'holdem')
+    ) {
+      const holdemState = room.gameState as HoldemGameState;
+      return holdemState.playerOrder
+        .map((playerId) => {
+          const p = holdemState.players[playerId]!;
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.chips,
+            ticketPoints: 0,
+            totalScore: p.chips,
+            trainsRemaining: p.handsWon,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'catan' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'catan')
+    ) {
       const catanState = room.gameState as CatanGameState;
       return catanState.playerOrder
         .map((playerId) => {
