@@ -11,8 +11,25 @@ import {
 import { createPRNG } from '../src/common/prng.js';
 import { Deck } from '../src/mechanics/deck.js';
 import { RoomManager } from '../src/server/rooms.js';
-import { GameRegistry } from '../src/games/registry.js';
+import {
+  BOARD_GAME_METADATA_LIST,
+  CARD_GAME_METADATA_LIST,
+  GameRegistry,
+} from '../src/games/registry.js';
 import { HoldemGameState } from '../src/games/texas-holdem/index.js';
+import {
+  EuchreGameState,
+  evaluateEuchreTrickWinner,
+  getEuchreEffectiveSuit,
+} from '../src/games/euchre/index.js';
+import {
+  CribbageGameState,
+  evaluateCribbageHand,
+} from '../src/games/cribbage/index.js';
+import {
+  getKingsCornersCardPoints,
+  KingsCornersGameState,
+} from '../src/games/kings-corners/index.js';
 import {
   applyAction,
   calculateFinalScores,
@@ -824,6 +841,222 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(state.handNumber).toBe(2);
       expect(state.street).toBe('PREFLOP');
       expect(state.dealerIndex).toBe(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
+  // ---------------------------------------------------------------------------
+  describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
+    it('splits GameRegistry into Board Games (ttr, catan) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+      expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual(['ttr', 'catan']);
+      expect(CARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
+        'holdem',
+        'euchre',
+        'cribbage',
+        'kings_corners',
+      ]);
+    });
+
+    it('enforces Kings Corners rules: 2-card initial peek, hidden cards during play, knock circle-back, K=0 scoring, and last-quarter tie push rule', () => {
+      const deck = createStandardDeck();
+      const cardById = (id: string) => deck.find((c) => c.id === id)!;
+
+      // Verify exact card point values: A=1, 2..9=face, 10/J/Q=10, K=0
+      expect(getKingsCornersCardPoints(cardById('AS'))).toBe(1);
+      expect(getKingsCornersCardPoints(cardById('7H'))).toBe(7);
+      expect(getKingsCornersCardPoints(cardById('10D'))).toBe(10);
+      expect(getKingsCornersCardPoints(cardById('JC'))).toBe(10);
+      expect(getKingsCornersCardPoints(cardById('QH'))).toBe(10);
+      expect(getKingsCornersCardPoints(cardById('KS'))).toBe(0);
+
+      const kcEngine = GameRegistry.kings_corners;
+      let state = kcEngine.initGame(['p1', 'p2'], 555) as KingsCornersGameState;
+      expect(state.turnStep).toBe('INITIAL_PEEK');
+      expect(state.players['p1']!.quarters).toBe(4);
+      expect(state.players['p2']!.quarters).toBe(4);
+
+      // Before peeking, all 4 slots are hidden (null)
+      let p1View = kcEngine.getPlayerPerspective(state, 'p1');
+      if (p1View.gameId === 'kings_corners') {
+        expect(p1View.self.visibleSlots).toEqual([null, null, null, null]);
+      }
+
+      // p1 peeks at TOP 2 cards (slots 0 & 1 visible; slots 2 & 3 null)
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_PEEK_CARDS',
+        row: 'TOP',
+      }) as KingsCornersGameState;
+      p1View = kcEngine.getPlayerPerspective(state, 'p1');
+      if (p1View.gameId === 'kings_corners') {
+        expect(p1View.self.visibleSlots[0]).not.toBeNull();
+        expect(p1View.self.visibleSlots[1]).not.toBeNull();
+        expect(p1View.self.visibleSlots[2]).toBeNull();
+        expect(p1View.self.visibleSlots[3]).toBeNull();
+      }
+
+      // p2 peeks at BOTTOM 2 cards
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_PEEK_CARDS',
+        row: 'BOTTOM',
+      }) as KingsCornersGameState;
+
+      // Both players finish peeking -> hand begins and ALL 4 cards are hidden again!
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_FINISH_PEEK',
+      }) as KingsCornersGameState;
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_FINISH_PEEK',
+      }) as KingsCornersGameState;
+
+      expect(state.turnStep).toBe('AWAITING_TURN_ACTION');
+      p1View = kcEngine.getPlayerPerspective(state, 'p1');
+      if (p1View.gameId === 'kings_corners') {
+        expect(p1View.self.visibleSlots).toEqual([null, null, null, null]);
+      }
+
+      // Dealer is p1 (index 0), so p2 (index 1) acts first clockwise from dealer
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+
+      // Set known cards so p2 has low score (4 Kings = 0 pts) and p1 has high score (35 pts)
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            cards: [
+              cardById('10S'),
+              cardById('JH'),
+              cardById('QD'),
+              cardById('5C'),
+            ], // 35 pts
+          },
+          p2: {
+            ...state.players['p2']!,
+            cards: [
+              cardById('KS'),
+              cardById('KH'),
+              cardById('KD'),
+              cardById('KC'),
+            ], // 0 pts
+          },
+        },
+      };
+
+      // p2 Knocks! Turn passes to p1 for their final turn
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_KNOCK',
+      }) as KingsCornersGameState;
+      expect(state.knockerId).toBe('p2');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+
+      // p1 draws from deck and discards the drawn card -> circles back to p2 (knocker) and ends the hand!
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_DRAW_DECK',
+      }) as KingsCornersGameState;
+      expect(state.turnStep).toBe('DECIDING_DRAWN_CARD');
+
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_DISCARD_DRAWN',
+      }) as KingsCornersGameState;
+
+      expect(state.turnStep).toBe('HAND_OVER');
+      expect(state.players['p1']!.quarters).toBe(3); // p1 lost 1 quarter
+      expect(state.players['p2']!.quarters).toBe(4);
+      expect(state.potQuarters).toBe(1);
+
+      // Test the Last-Quarter Tie Push Rule:
+      // If both players are on their last quarter (1 quarter each) and tie for highest score, neither loses a quarter!
+      let tieState = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_NEXT_HAND',
+      }) as KingsCornersGameState;
+      tieState = {
+        ...tieState,
+        turnStep: 'AWAITING_TURN_ACTION',
+        activePlayerIndex: 0,
+        players: {
+          p1: {
+            ...tieState.players['p1']!,
+            quarters: 1,
+            readyAfterPeek: true,
+            cards: [
+              cardById('10S'),
+              cardById('10H'),
+              cardById('5D'),
+              cardById('5C'),
+            ], // 30 pts
+          },
+          p2: {
+            ...tieState.players['p2']!,
+            quarters: 1,
+            readyAfterPeek: true,
+            cards: [
+              cardById('JS'),
+              cardById('QH'),
+              cardById('6D'),
+              cardById('4C'),
+            ], // 30 pts
+          },
+        },
+      };
+
+      tieState = kcEngine.applyAction(tieState, 'p1', {
+        type: 'KC_KNOCK',
+      }) as KingsCornersGameState;
+      tieState = kcEngine.applyAction(tieState, 'p2', {
+        type: 'KC_DRAW_DECK',
+      }) as KingsCornersGameState;
+      tieState = kcEngine.applyAction(tieState, 'p2', {
+        type: 'KC_DISCARD_DRAWN',
+      }) as KingsCornersGameState;
+
+      expect(tieState.turnStep).toBe('HAND_OVER');
+      expect(tieState.lastHandSummary!.isPush).toBe(true);
+      expect(tieState.players['p1']!.quarters).toBe(1);
+      expect(tieState.players['p2']!.quarters).toBe(1);
+    });
+
+    it('evaluates Euchre Right/Left Bowers and Cribbage 15s/Pairs/Runs/Nobs accurately', () => {
+      const deck = createStandardDeck();
+      const c = (id: string) => deck.find((card) => card.id === id)!;
+
+      // In Euchre with Spades ('S') as Trump, Jack of Clubs ('JC') is the Left Bower and counts as a Spade!
+      expect(getEuchreEffectiveSuit(c('JC'), 'S')).toBe('S');
+      const winner = evaluateEuchreTrickWinner(
+        [
+          { playerId: 'p1', card: c('AS') }, // Ace of Trump
+          { playerId: 'p2', card: c('JC') }, // Left Bower beats Ace of Trump!
+        ],
+        'S'
+      );
+      expect(winner.playerId).toBe('p2');
+
+      const euchreState = GameRegistry.euchre.initGame(
+        ['p1', 'p2', 'p3', 'p4'],
+        101
+      ) as EuchreGameState;
+      expect(euchreState.gameId).toBe('euchre');
+      expect(euchreState.players['p1']!.handZone.cards).toHaveLength(5);
+
+      // Cribbage Perfect 29-point hand test: 5H, 5C, 5D, JS with starter 5S!
+      // 15s = 8 combos (16 pts) + Four of a kind 5s (6 pairs = 12 pts) + His Nobs JS matching 5S (1 pt) = 29 pts!
+      const perfect29 = evaluateCribbageHand(
+        [c('5H'), c('5C'), c('5D'), c('JS')],
+        c('5S'),
+        false
+      );
+      expect(perfect29.fifteens).toBe(16);
+      expect(perfect29.pairs).toBe(12);
+      expect(perfect29.nobs).toBe(1);
+      expect(perfect29.total).toBe(29);
+
+      const cribState = GameRegistry.cribbage.initGame(
+        ['p1', 'p2'],
+        202
+      ) as CribbageGameState;
+      expect(cribState.gameId).toBe('cribbage');
+      expect(cribState.players['p1']!.handZone.cards).toHaveLength(6);
     });
   });
 });

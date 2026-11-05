@@ -1,6 +1,9 @@
 import { customAlphabet } from 'nanoid';
 import { Graph } from '../common/graph.js';
 import { CatanGameState } from '../games/catan/index.js';
+import { CribbageGameState } from '../games/cribbage/index.js';
+import { EuchreGameState } from '../games/euchre/index.js';
+import { KingsCornersGameState } from '../games/kings-corners/index.js';
 import { HoldemGameState } from '../games/texas-holdem/index.js';
 import { GameId } from '../games/registry.js';
 import {
@@ -238,6 +241,69 @@ export class RoomManager {
       return [];
     }
     const nameMap = RoomManager.getPlayerNameMap(room);
+
+    if (
+      room.selectedGameId === 'euchre' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'euchre')
+    ) {
+      const euchreState = room.gameState as EuchreGameState;
+      return euchreState.playerOrder
+        .map((playerId) => {
+          const p = euchreState.players[playerId]!;
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.score,
+            ticketPoints: 0,
+            totalScore: p.score,
+            trainsRemaining: p.tricksWonThisHand,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'cribbage' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'cribbage')
+    ) {
+      const cribState = room.gameState as CribbageGameState;
+      return cribState.playerOrder
+        .map((playerId) => {
+          const p = cribState.players[playerId]!;
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.score,
+            ticketPoints: 0,
+            totalScore: p.score,
+            trainsRemaining: 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'kings_corners' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'kings_corners')
+    ) {
+      const kcState = room.gameState as KingsCornersGameState;
+      return kcState.playerOrder
+        .map((playerId) => {
+          const p = kcState.players[playerId]!;
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.quarters,
+            ticketPoints: 0,
+            totalScore: p.quarters,
+            trainsRemaining: p.lastHandScore ?? 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
 
     if (
       room.selectedGameId === 'holdem' ||

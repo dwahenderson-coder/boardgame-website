@@ -7,12 +7,26 @@ import {
   CatanSanitizedGameState,
 } from '../games/catan/index.js';
 import {
+  CribbageGameState,
+  CribbageSanitizedGameState,
+} from '../games/cribbage/index.js';
+import {
+  EuchreGameState,
+  EuchreSanitizedGameState,
+} from '../games/euchre/index.js';
+import {
+  KingsCornersGameState,
+  KingsCornersSanitizedGameState,
+} from '../games/kings-corners/index.js';
+import {
   HoldemGameState,
   HoldemSanitizedGameState,
 } from '../games/texas-holdem/index.js';
 import {
   AnyGameAction,
   AnyGameState,
+  BOARD_GAME_METADATA_LIST,
+  CARD_GAME_METADATA_LIST,
   GAME_METADATA_LIST,
   GameId,
   GameRegistry,
@@ -27,8 +41,11 @@ import {
 import { PlayerFinalStanding } from '../network/socketTypes.js';
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
+import { CribbageBoard } from './CribbageBoard.js';
+import { EuchreBoard } from './EuchreBoard.js';
 import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
+import { KingsCornersBoard } from './KingsCornersBoard.js';
 import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
 import { useGameSocket } from './useGameSocket.js';
@@ -185,8 +202,14 @@ export const SandboxApp: React.FC = () => {
     'gameId' in activeSanitized && activeSanitized.gameId === 'catan';
   const isHoldemActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'holdem';
+  const isEuchreActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'euchre';
+  const isCribbageActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'cribbage';
+  const isKingsCornersActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'kings_corners';
   const ttrSanitized =
-    !isCatanActive && !isHoldemActive
+    !('gameId' in activeSanitized)
       ? (activeSanitized as TTRSanitizedGameState)
       : null;
   const catanSanitized = isCatanActive
@@ -194,6 +217,15 @@ export const SandboxApp: React.FC = () => {
     : null;
   const holdemSanitized = isHoldemActive
     ? (activeSanitized as HoldemSanitizedGameState)
+    : null;
+  const euchreSanitized = isEuchreActive
+    ? (activeSanitized as EuchreSanitizedGameState)
+    : null;
+  const cribbageSanitized = isCribbageActive
+    ? (activeSanitized as CribbageSanitizedGameState)
+    : null;
+  const kingsCornersSanitized = isKingsCornersActive
+    ? (activeSanitized as KingsCornersSanitizedGameState)
     : null;
 
   // Determine whether the local user is allowed to act right now
@@ -263,6 +295,60 @@ export const SandboxApp: React.FC = () => {
   const localFinalStandings = useMemo<readonly PlayerFinalStanding[]>(() => {
     if (localGameState.phase !== 'GAME_OVER') {
       return [];
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'euchre') {
+      const es = localGameState as EuchreGameState;
+      return es.playerOrder
+        .map((pid) => {
+          const p = es.players[pid]!;
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: p.score,
+            ticketPoints: 0,
+            totalScore: p.score,
+            trainsRemaining: p.tricksWonThisHand,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'cribbage') {
+      const crs = localGameState as CribbageGameState;
+      return crs.playerOrder
+        .map((pid) => {
+          const p = crs.players[pid]!;
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: p.score,
+            ticketPoints: 0,
+            totalScore: p.score,
+            trainsRemaining: 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if (
+      'gameId' in localGameState &&
+      localGameState.gameId === 'kings_corners'
+    ) {
+      const kcs = localGameState as KingsCornersGameState;
+      return kcs.playerOrder
+        .map((pid) => {
+          const p = kcs.players[pid]!;
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: p.quarters,
+            ticketPoints: 0,
+            totalScore: p.quarters,
+            trainsRemaining: p.lastHandScore ?? 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
     }
     if ('gameId' in localGameState && localGameState.gameId === 'holdem') {
       const hs = localGameState as HoldemGameState;
@@ -670,11 +756,20 @@ export const SandboxApp: React.FC = () => {
                   }
                   className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-amber-300 font-bold focus:outline-none focus:border-amber-400"
                 >
-                  {GAME_METADATA_LIST.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.title} ({g.minPlayers}–{g.maxPlayers}P)
-                    </option>
-                  ))}
+                  <optgroup label="🎲 Board Games">
+                    {BOARD_GAME_METADATA_LIST.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.icon} {g.title} ({g.minPlayers}–{g.maxPlayers}P)
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🃏 Card Games">
+                    {CARD_GAME_METADATA_LIST.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.icon} {g.title} ({g.minPlayers}–{g.maxPlayers}P)
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
 
@@ -911,7 +1006,37 @@ export const SandboxApp: React.FC = () => {
           {/* =================================================================
               DYNAMIC BOARD COMPONENT LOADER (`GameContainer`)
              ================================================================= */}
-          {holdemSanitized ? (
+          {kingsCornersSanitized ? (
+            /* Mount <KingsCornersBoard /> when `selectedGameId === 'kings_corners'` */
+            <KingsCornersBoard
+              gameState={kingsCornersSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              sendAction={(action) =>
+                dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : euchreSanitized ? (
+            /* Mount <EuchreBoard /> when `selectedGameId === 'euchre'` */
+            <EuchreBoard
+              gameState={euchreSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              sendAction={(action) =>
+                dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : cribbageSanitized ? (
+            /* Mount <CribbageBoard /> when `selectedGameId === 'cribbage'` */
+            <CribbageBoard
+              gameState={cribbageSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              sendAction={(action) =>
+                dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : holdemSanitized ? (
             /* Mount <HoldemBoard /> when `selectedGameId === 'holdem'` */
             <HoldemBoard
               gameState={holdemSanitized}
@@ -1471,52 +1596,92 @@ export const SandboxApp: React.FC = () => {
                       />
                     </div>
 
-                    {/* Initial Game Selection on Entry View */}
-                    <div>
-                      <label className="block text-slate-300 font-semibold mb-1.5">
-                        Select Game to Host (can also be switched in Lobby)
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {GAME_METADATA_LIST.map((game) => {
-                          const isSelected = entrySelectedGameId === game.id;
-                          return (
-                            <button
-                              key={game.id}
-                              type="button"
-                              onClick={() => setEntrySelectedGameId(game.id)}
-                              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                                isSelected
-                                  ? 'bg-emerald-950/50 border-emerald-400 shadow-lg ring-1 ring-emerald-400/50'
-                                  : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
-                              }`}
-                            >
-                              <div>
-                                <div className="flex items-center justify-between">
-                                  <span className="font-black text-sm text-slate-100">
-                                    {game.id === 'ttr'
-                                      ? '🚂 '
-                                      : game.id === 'catan'
-                                      ? '🏝️ '
-                                      : '🃏 '}
-                                    {game.title}
-                                  </span>
-                                  {isSelected && (
-                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
-                                      Selected
+                    {/* Categorized Game Selection on Entry View (Board Games vs Card Games) */}
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-emerald-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
+                          🎲 Board Games
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {BOARD_GAME_METADATA_LIST.map((game) => {
+                            const isSelected = entrySelectedGameId === game.id;
+                            return (
+                              <button
+                                key={game.id}
+                                type="button"
+                                onClick={() => setEntrySelectedGameId(game.id)}
+                                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                                  isSelected
+                                    ? 'bg-emerald-950/50 border-emerald-400 shadow-lg ring-1 ring-emerald-400/50'
+                                    : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-black text-sm text-slate-100">
+                                      {game.icon} {game.title}
                                     </span>
-                                  )}
+                                    {isSelected && (
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                                        Selected
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-amber-300 font-semibold mt-1">
+                                    {game.minPlayers}–{game.maxPlayers} Players
+                                    | {game.durationLabel}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    {game.mechanicsLabel}
+                                  </div>
                                 </div>
-                                <div className="text-[11px] text-amber-300 font-semibold mt-1">
-                                  {game.minPlayers}–{game.maxPlayers} Players |{' '}
-                                  {game.durationLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-amber-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
+                          🃏 Card Games
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {CARD_GAME_METADATA_LIST.map((game) => {
+                            const isSelected = entrySelectedGameId === game.id;
+                            return (
+                              <button
+                                key={game.id}
+                                type="button"
+                                onClick={() => setEntrySelectedGameId(game.id)}
+                                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                                  isSelected
+                                    ? 'bg-emerald-950/50 border-emerald-400 shadow-lg ring-1 ring-emerald-400/50'
+                                    : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-black text-sm text-slate-100">
+                                      {game.icon} {game.title}
+                                    </span>
+                                    {isSelected && (
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                                        Selected
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-amber-300 font-semibold mt-1">
+                                    {game.minPlayers}–{game.maxPlayers} Players
+                                    | {game.durationLabel}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    {game.mechanicsLabel}
+                                  </div>
                                 </div>
-                                <div className="text-[11px] text-slate-400 mt-0.5">
-                                  {game.mechanicsLabel}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
@@ -1606,104 +1771,122 @@ export const SandboxApp: React.FC = () => {
                   </div>
 
                   {/* =========================================================
-                      GAME SELECTION MENU / CAROUSEL (Host Interactive / Guest Read-Only)
+                      CATEGORIZED GAME SELECTION MENU (Board Games & Card Games)
                      ========================================================= */}
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between">
                       <span className="font-bold uppercase tracking-wider text-slate-300 text-[11px]">
-                        Select Board Game
+                        Game Selection Menu
                       </span>
                       <span className="text-[11px] text-slate-400">
                         {mp.playerId === mp.hostPlayerId
-                          ? '👑 Host Controls: Click a game card to switch'
+                          ? '👑 Host Controls: Click any Board or Card game below to switch'
                           : `🔒 Guest View: Host (${formatPlayerLabel(mp.hostPlayerId ?? 'p1')}) selects the game`}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {GAME_METADATA_LIST.map((game) => {
-                        const isSelected = mp.selectedGameId === game.id;
-                        const isHost = mp.playerId === mp.hostPlayerId;
-                        const neededForThisGame = Math.max(
-                          0,
-                          game.minPlayers - currentLobbyCount
-                        );
-                        const tooManyForThisGame = Math.max(
-                          0,
-                          currentLobbyCount - game.maxPlayers
-                        );
+                    {(
+                      [
+                        {
+                          label: '🎲 Board Games',
+                          accent: 'text-emerald-300',
+                          items: BOARD_GAME_METADATA_LIST,
+                        },
+                        {
+                          label: '🃏 Card Games',
+                          accent: 'text-amber-300',
+                          items: CARD_GAME_METADATA_LIST,
+                        },
+                      ] as const
+                    ).map((section) => (
+                      <div key={section.label}>
+                        <div
+                          className={`text-[11px] font-black uppercase tracking-wider mb-1.5 ${section.accent}`}
+                        >
+                          {section.label}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {section.items.map((game) => {
+                            const isSelected = mp.selectedGameId === game.id;
+                            const isHost = mp.playerId === mp.hostPlayerId;
+                            const neededForThisGame = Math.max(
+                              0,
+                              game.minPlayers - currentLobbyCount
+                            );
+                            const tooManyForThisGame = Math.max(
+                              0,
+                              currentLobbyCount - game.maxPlayers
+                            );
 
-                        return (
-                          <div
-                            key={game.id}
-                            onClick={() => {
-                              if (isHost && !isSelected) {
-                                mp.selectGame(game.id);
-                              }
-                            }}
-                            className={`p-4 rounded-xl border-2 transition flex flex-col justify-between ${
-                              isSelected
-                                ? 'bg-emerald-950/45 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
-                                : 'bg-slate-950/70 border-slate-800 opacity-75'
-                            } ${
-                              isHost
-                                ? 'cursor-pointer hover:border-emerald-400/70 hover:opacity-100'
-                                : 'cursor-default'
-                            }`}
-                          >
-                            <div>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-base font-black text-slate-100">
-                                  {game.id === 'ttr'
-                                    ? '🚂 '
-                                    : game.id === 'catan'
-                                    ? '🏝️ '
-                                    : '🃏 '}
-                                  {game.title}
-                                </span>
-                                {isSelected ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] uppercase">
-                                    ✓ Active Game
-                                  </span>
-                                ) : (
-                                  isHost && (
-                                    <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-semibold">
-                                      Click to Select
+                            return (
+                              <div
+                                key={game.id}
+                                onClick={() => {
+                                  if (isHost && !isSelected) {
+                                    mp.selectGame(game.id);
+                                  }
+                                }}
+                                className={`p-3.5 rounded-xl border-2 transition flex flex-col justify-between ${
+                                  isSelected
+                                    ? 'bg-emerald-950/45 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                                    : 'bg-slate-950/70 border-slate-800 opacity-75'
+                                } ${
+                                  isHost
+                                    ? 'cursor-pointer hover:border-emerald-400/70 hover:opacity-100'
+                                    : 'cursor-default'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-black text-slate-100">
+                                      {game.icon} {game.title}
                                     </span>
-                                  )
-                                )}
-                              </div>
+                                    {isSelected ? (
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] uppercase">
+                                        ✓ Active Game
+                                      </span>
+                                    ) : (
+                                      isHost && (
+                                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-semibold">
+                                          Click to Select
+                                        </span>
+                                      )
+                                    )}
+                                  </div>
 
-                              <div className="mt-1.5 inline-block px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-semibold text-[11px]">
-                                {game.minPlayers}–{game.maxPlayers} Players |{' '}
-                                {game.durationLabel} | {game.mechanicsLabel}
-                              </div>
-                            </div>
+                                  <div className="mt-1.5 inline-block px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-semibold text-[10px]">
+                                    {game.minPlayers}–{game.maxPlayers} Players
+                                    | {game.durationLabel} |{' '}
+                                    {game.mechanicsLabel}
+                                  </div>
+                                </div>
 
-                            {/* Live Player Requirement Badge */}
-                            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between">
-                              {neededForThisGame > 0 ? (
-                                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-semibold text-[11px]">
-                                  ⏳ Need {neededForThisGame} more player
-                                  {neededForThisGame === 1 ? '' : 's'} for{' '}
-                                  {game.title}
-                                </span>
-                              ) : tooManyForThisGame > 0 ? (
-                                <span className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold text-[11px]">
-                                  ⚠️ Max {game.maxPlayers} players for{' '}
-                                  {game.title}
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold text-[11px]">
-                                  ✓ Player count ready ({currentLobbyCount}/
-                                  {game.maxPlayers})
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                                {/* Live Player Requirement Badge */}
+                                <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                                  {neededForThisGame > 0 ? (
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-semibold text-[10px]">
+                                      ⏳ Need {neededForThisGame} more player
+                                      {neededForThisGame === 1 ? '' : 's'} for{' '}
+                                      {game.title}
+                                    </span>
+                                  ) : tooManyForThisGame > 0 ? (
+                                    <span className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold text-[10px]">
+                                      ⚠️ Max {game.maxPlayers} players for{' '}
+                                      {game.title}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold text-[10px]">
+                                      ✓ Player count ready ({currentLobbyCount}/
+                                      {game.maxPlayers})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Direct Invite URL & Copy Button */}

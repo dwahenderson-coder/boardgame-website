@@ -9,6 +9,36 @@ import {
   validateCatanAction,
 } from './catan/index.js';
 import {
+  applyCribbageAction,
+  calculateCribbageFinalScores,
+  CribbageAction,
+  CribbageGameState,
+  CribbageSanitizedGameState,
+  getCribbagePlayerPerspective,
+  initCribbageGame,
+  validateCribbageAction,
+} from './cribbage/index.js';
+import {
+  applyEuchreAction,
+  calculateEuchreFinalScores,
+  EuchreAction,
+  EuchreGameState,
+  EuchreSanitizedGameState,
+  getEuchrePlayerPerspective,
+  initEuchreGame,
+  validateEuchreAction,
+} from './euchre/index.js';
+import {
+  applyKingsCornersAction,
+  calculateKingsCornersFinalScores,
+  getKingsCornersPlayerPerspective,
+  initKingsCornersGame,
+  KingsCornersAction,
+  KingsCornersGameState,
+  KingsCornersSanitizedGameState,
+  validateKingsCornersAction,
+} from './kings-corners/index.js';
+import {
   applyHoldemAction,
   calculateHoldemFinalScores,
   getHoldemPlayerPerspective,
@@ -30,17 +60,44 @@ import {
   ValidationResult,
 } from './ticket-to-ride/index.js';
 
-export type GameId = 'ttr' | 'catan' | 'holdem';
+export type GameCategory = 'BOARD' | 'CARD';
 
-export type AnyGameState = TTRGameState | CatanGameState | HoldemGameState;
+export type GameId =
+  | 'ttr'
+  | 'catan'
+  | 'holdem'
+  | 'euchre'
+  | 'cribbage'
+  | 'kings_corners';
+
+export type AnyGameState =
+  | TTRGameState
+  | CatanGameState
+  | HoldemGameState
+  | EuchreGameState
+  | CribbageGameState
+  | KingsCornersGameState;
+
 export type AnySanitizedGameState =
   | TTRSanitizedGameState
   | CatanSanitizedGameState
-  | HoldemSanitizedGameState;
-export type AnyGameAction = TTRAction | CatanAction | HoldemAction;
+  | HoldemSanitizedGameState
+  | EuchreSanitizedGameState
+  | CribbageSanitizedGameState
+  | KingsCornersSanitizedGameState;
+
+export type AnyGameAction =
+  | TTRAction
+  | CatanAction
+  | HoldemAction
+  | EuchreAction
+  | CribbageAction
+  | KingsCornersAction;
 
 export interface GameMetadata {
   readonly id: GameId;
+  readonly category: GameCategory;
+  readonly icon: string;
   readonly title: string;
   readonly subtitle: string;
   readonly minPlayers: number;
@@ -74,8 +131,11 @@ export interface GameEngineModule<
 }
 
 export const GAME_METADATA_LIST: readonly GameMetadata[] = [
+  // --- BOARD GAMES ---
   {
     id: 'ttr',
+    category: 'BOARD',
+    icon: '🚂',
     title: 'Ticket to Ride',
     subtitle: 'Cross-Country Rail Adventure',
     minPlayers: 2,
@@ -86,6 +146,8 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = [
   },
   {
     id: 'catan',
+    category: 'BOARD',
+    icon: '🏝️',
     title: 'Catan',
     subtitle: 'Settlers of the Hex Island',
     minPlayers: 3,
@@ -94,8 +156,11 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = [
     mechanicsLabel: 'Trading, Building & Dice Production',
     badgeColor: 'emerald',
   },
+  // --- CARD GAMES ---
   {
     id: 'holdem',
+    category: 'CARD',
+    icon: '🃏',
     title: "Texas Hold'em",
     subtitle: 'No-Limit Casino Poker',
     minPlayers: 2,
@@ -104,7 +169,49 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = [
     mechanicsLabel: 'No-Limit Betting & Hand Evaluation',
     badgeColor: 'rose',
   },
+  {
+    id: 'euchre',
+    category: 'CARD',
+    icon: '♠️',
+    title: 'Euchre',
+    subtitle: 'Classic 24-Card Bower Trick-Taking',
+    minPlayers: 2,
+    maxPlayers: 4,
+    durationLabel: '~25 min',
+    mechanicsLabel: 'Trump Calling, Right/Left Bowers & Tricks',
+    badgeColor: 'indigo',
+  },
+  {
+    id: 'cribbage',
+    category: 'CARD',
+    icon: '🪵',
+    title: 'Cribbage',
+    subtitle: '121-Point Pegging & Hand Counting',
+    minPlayers: 2,
+    maxPlayers: 4,
+    durationLabel: '~30 min',
+    mechanicsLabel: 'Crib Discards, 31 Pegging & 15s/Runs',
+    badgeColor: 'cyan',
+  },
+  {
+    id: 'kings_corners',
+    category: 'CARD',
+    icon: '👑',
+    title: 'Kings Corners',
+    subtitle: '4-Card Memory, Knocking & Quarters Pot',
+    minPlayers: 2,
+    maxPlayers: 6,
+    durationLabel: '~20 min',
+    mechanicsLabel: '2-Card Peek, Hidden Swaps & Low Score Knock',
+    badgeColor: 'amber',
+  },
 ] as const;
+
+export const BOARD_GAME_METADATA_LIST: readonly GameMetadata[] =
+  GAME_METADATA_LIST.filter((g) => g.category === 'BOARD');
+
+export const CARD_GAME_METADATA_LIST: readonly GameMetadata[] =
+  GAME_METADATA_LIST.filter((g) => g.category === 'CARD');
 
 export const GameRegistry: Readonly<
   Record<GameId, GameEngineModule<any, any, any>>
@@ -134,5 +241,28 @@ export const GameRegistry: Readonly<
     getPlayerPerspective: getHoldemPlayerPerspective,
     calculateFinalScores: calculateHoldemFinalScores,
   },
+  euchre: {
+    ...GAME_METADATA_LIST[3]!,
+    initGame: initEuchreGame,
+    validateAction: validateEuchreAction,
+    applyAction: applyEuchreAction,
+    getPlayerPerspective: getEuchrePlayerPerspective,
+    calculateFinalScores: calculateEuchreFinalScores,
+  },
+  cribbage: {
+    ...GAME_METADATA_LIST[4]!,
+    initGame: initCribbageGame,
+    validateAction: validateCribbageAction,
+    applyAction: applyCribbageAction,
+    getPlayerPerspective: getCribbagePlayerPerspective,
+    calculateFinalScores: calculateCribbageFinalScores,
+  },
+  kings_corners: {
+    ...GAME_METADATA_LIST[5]!,
+    initGame: initKingsCornersGame,
+    validateAction: validateKingsCornersAction,
+    applyAction: applyKingsCornersAction,
+    getPlayerPerspective: getKingsCornersPlayerPerspective,
+    calculateFinalScores: calculateKingsCornersFinalScores,
+  },
 };
-
