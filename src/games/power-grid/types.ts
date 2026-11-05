@@ -244,4 +244,7 @@ export type PowerGridAction =
   | {
       readonly type: 'PG_POWER_CITIES';
       readonly allocations: readonly FuelBurnAllocation[];
+    }
+  | {
+      readonly type: 'PG_AI_TURN';
     };

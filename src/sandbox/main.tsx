@@ -19,6 +19,12 @@ import {
   KingsCornersSanitizedGameState,
 } from '../games/kings-corners/index.js';
 import {
+  calculateMaxPoweredCities,
+  getActivePlayerId as getPowerGridActivePlayerId,
+  PowerGridGameState,
+  SanitizedPowerGridState,
+} from '../games/power-grid/index.js';
+import {
   calculateStockpileNetWorth,
   StockpileGameState,
   StockpileSanitizedGameState,
@@ -51,6 +57,7 @@ import { EuchreBoard } from './EuchreBoard.js';
 import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
+import { PowerGridBoard } from './PowerGridBoard.js';
 import { StockpileBoard } from './StockpileBoard.js';
 import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
@@ -184,8 +191,10 @@ export const SandboxApp: React.FC = () => {
 
   // Active Perspective resolution (either Local Engine or Server State Sync)
   const localActivePlayerId =
-    localGameState.playerOrder[localGameState.activePlayerIndex] ??
-    localGameState.playerOrder[0]!;
+    'gameId' in localGameState && localGameState.gameId === 'power_grid'
+      ? getPowerGridActivePlayerId(localGameState as PowerGridGameState)
+      : localGameState.playerOrder[localGameState.activePlayerIndex] ??
+        localGameState.playerOrder[0]!;
 
   const localViewedPlayerId =
     viewport === 'GOD_MODE' ? localActivePlayerId : viewport;
@@ -216,6 +225,8 @@ export const SandboxApp: React.FC = () => {
     'gameId' in activeSanitized && activeSanitized.gameId === 'kings_corners';
   const isStockpileActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'stockpile';
+  const isPowerGridActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'power_grid';
   const ttrSanitized =
     !('gameId' in activeSanitized)
       ? (activeSanitized as TTRSanitizedGameState)
@@ -237,6 +248,9 @@ export const SandboxApp: React.FC = () => {
     : null;
   const stockpileSanitized = isStockpileActive
     ? (activeSanitized as StockpileSanitizedGameState)
+    : null;
+  const powerGridSanitized = isPowerGridActive
+    ? (activeSanitized as SanitizedPowerGridState)
     : null;
 
   // Determine whether the local user is allowed to act right now
@@ -306,6 +320,28 @@ export const SandboxApp: React.FC = () => {
   const localFinalStandings = useMemo<readonly PlayerFinalStanding[]>(() => {
     if (localGameState.phase !== 'GAME_OVER') {
       return [];
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'power_grid') {
+      const pgs = localGameState as PowerGridGameState;
+      return pgs.turnOrder
+        .map((pid) => {
+          const p = pgs.players[pid]!;
+          const powered = calculateMaxPoweredCities(p);
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: powered,
+            ticketPoints: p.money,
+            totalScore: powered,
+            trainsRemaining: p.cities.length,
+            tickets: [],
+          };
+        })
+        .sort((a, b) =>
+          b.totalScore !== a.totalScore
+            ? b.totalScore - a.totalScore
+            : b.ticketPoints - a.ticketPoints
+        );
     }
     if ('gameId' in localGameState && localGameState.gameId === 'stockpile') {
       const sps = localGameState as StockpileGameState;
@@ -1094,6 +1130,18 @@ export const SandboxApp: React.FC = () => {
                 viewingPlayerId={viewedPlayerId}
                 playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
                 isSpectator={false}
+                onDispatchAction={(action) =>
+                  dispatchEngineAction(viewedPlayerId, action)
+                }
+              />
+            </div>
+          ) : powerGridSanitized ? (
+            /* Mount <PowerGridBoard /> when `selectedGameId === 'power_grid'` */
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-950">
+              <PowerGridBoard
+                state={powerGridSanitized}
+                viewingPlayerId={viewedPlayerId}
+                playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
                 onDispatchAction={(action) =>
                   dispatchEngineAction(viewedPlayerId, action)
                 }

@@ -5,6 +5,10 @@ import { CribbageGameState } from '../games/cribbage/index.js';
 import { EuchreGameState } from '../games/euchre/index.js';
 import { KingsCornersGameState } from '../games/kings-corners/index.js';
 import {
+  calculateMaxPoweredCities,
+  PowerGridGameState,
+} from '../games/power-grid/index.js';
+import {
   calculateStockpileNetWorth,
   StockpileGameState,
 } from '../games/stockpile/index.js';
@@ -245,6 +249,32 @@ export class RoomManager {
       return [];
     }
     const nameMap = RoomManager.getPlayerNameMap(room);
+
+    if (
+      room.selectedGameId === 'power_grid' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'power_grid')
+    ) {
+      const pgState = room.gameState as PowerGridGameState;
+      return pgState.turnOrder
+        .map((playerId) => {
+          const p = pgState.players[playerId]!;
+          const powered = calculateMaxPoweredCities(p);
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: powered,
+            ticketPoints: p.money,
+            totalScore: powered,
+            trainsRemaining: p.cities.length,
+            tickets: [],
+          };
+        })
+        .sort((a, b) =>
+          b.totalScore !== a.totalScore
+            ? b.totalScore - a.totalScore
+            : b.ticketPoints - a.ticketPoints
+        );
+    }
 
     if (
       room.selectedGameId === 'stockpile' ||

@@ -299,6 +299,10 @@ export function validatePowerGridAction(
     return { valid: false, reason: `Unknown player "${playerId}".` };
   }
 
+  if (action.type === 'PG_AI_TURN') {
+    return { valid: true };
+  }
+
   if (action.type === 'PG_DETERMINE_TURN_ORDER') {
     if (state.phase !== PowerGridPhase.PHASE_1_DETERMINE_TURN_ORDER) {
       return {
@@ -814,6 +818,167 @@ function advanceOrCompletePhase2Auction(
   };
 }
 
+function computePowerGridAiAction(
+  state: PowerGridGameState,
+  activePlayerId: string
+): PowerGridAction {
+  const player = state.players[activePlayerId]!;
+
+  if (state.phase === PowerGridPhase.PHASE_1_DETERMINE_TURN_ORDER) {
+    return { type: 'PG_DETERMINE_TURN_ORDER' };
+  }
+
+  if (state.phase === PowerGridPhase.PHASE_2_AUCTION_POWER_PLANTS && state.auction) {
+    if (state.auction.pendingPlantDiscard) {
+      // Discard lowest-numbered owned plant
+      const sorted = [...player.powerPlants].sort((a, b) => a.card.id - b.card.id);
+      return {
+        type: 'PG_DISCARD_PLANT',
+        discardPlantId: sorted[0]!.card.id,
+      };
+    }
+
+    if (state.auction.activePlant) {
+      const nextBid = state.auction.currentBid + 1;
+      const plantVal = state.auction.activePlant.id;
+      if (
+        nextBid <= player.money &&
+        nextBid <= plantVal + 2 &&
+        player.powerPlants.length === 0
+      ) {
+        return { type: 'PG_RAISE_BID', bid: nextBid };
+      }
+      return { type: 'PG_PASS_CURRENT_BID' };
+    }
+
+    // Deciding whether to open an auction or pass
+    const currentCapacity = player.powerPlants.reduce(
+      (sum, p) => sum + p.card.citiesPowered,
+      0
+    );
+    const highestOwned = getHighestPlantNumber(player);
+    const affordable = state.actualMarket.filter((c) => c.id <= player.money);
+
+    if (
+      state.roundNumber === 1 ||
+      (affordable.length > 0 &&
+        currentCapacity <= player.cities.length &&
+        affordable[affordable.length - 1]!.id > highestOwned)
+    ) {
+      const targetPlant = affordable[0];
+      if (targetPlant) {
+        return {
+          type: 'PG_OPEN_AUCTION',
+          plantId: targetPlant.id,
+          bid: targetPlant.id,
+        };
+      }
+    }
+
+    if (state.roundNumber > 1) {
+      return { type: 'PG_PASS_AUCTION_PHASE' };
+    }
+  }
+
+  if (state.phase === PowerGridPhase.PHASE_3_BUY_RESOURCES) {
+    for (const owned of player.powerPlants) {
+      if (owned.card.intakeCost === 0) continue;
+      const needed = Math.max(
+        0,
+        owned.card.intakeCost - getTotalStoredOnPlant(owned)
+      );
+      if (needed <= 0) continue;
+
+      for (const res of ALL_POWER_GRID_RESOURCES) {
+        if (!canPlantStoreResource(owned.card, res)) continue;
+        const avail = state.resourceMarket.inventory[res];
+        const qty = Math.min(needed, avail, getPlantRemainingCapacity(owned, res));
+        if (qty > 0) {
+          const cost = calculateResourcePurchaseCost(
+            state.resourceMarket,
+            res,
+            qty
+          );
+          if (cost !== null && cost <= player.money) {
+            return {
+              type: 'PG_BUY_RESOURCES',
+              purchases: [{ plantId: owned.card.id, resource: res, quantity: qty }],
+            };
+          }
+        }
+      }
+    }
+    return { type: 'PG_FINISH_BUYING_RESOURCES' };
+  }
+
+  if (state.phase === PowerGridPhase.PHASE_4_BUILD_CITIES) {
+    const plantCapacity = player.powerPlants.reduce(
+      (sum, p) => sum + p.card.citiesPowered,
+      0
+    );
+    if (player.cities.length < Math.max(1, plantCapacity)) {
+      let cheapestCityId: string | null = null;
+      let cheapestCost = Infinity;
+
+      for (const cid of Object.keys(state.cityBoard)) {
+        const check = calculateCityBuildCost(
+          state.mapId,
+          state.cityBoard,
+          state.step,
+          activePlayerId,
+          player.cities,
+          cid
+        );
+        if (
+          check.valid &&
+          check.totalCost <= player.money &&
+          check.totalCost < cheapestCost
+        ) {
+          cheapestCost = check.totalCost;
+          cheapestCityId = cid;
+        }
+      }
+
+      if (cheapestCityId) {
+        return { type: 'PG_BUILD_CITY', cityId: cheapestCityId };
+      }
+    }
+    return { type: 'PG_FINISH_BUILDING_CITIES' };
+  }
+
+  if (state.phase === PowerGridPhase.PHASE_5_BUREAUCRACY) {
+    const allocations: Array<{
+      plantId: number;
+      resourcesSpent: Partial<Record<PowerGridResource, number>>;
+    }> = [];
+
+    for (const owned of player.powerPlants) {
+      if (owned.card.intakeCost === 0) {
+        allocations.push({ plantId: owned.card.id, resourcesSpent: {} });
+        continue;
+      }
+      if (getTotalStoredOnPlant(owned) >= owned.card.intakeCost) {
+        let remainingToSpend = owned.card.intakeCost;
+        const spent: Partial<Record<PowerGridResource, number>> = {};
+        for (const res of ALL_POWER_GRID_RESOURCES) {
+          const take = Math.min(remainingToSpend, owned.storedResources[res]);
+          if (take > 0) {
+            spent[res] = take;
+            remainingToSpend -= take;
+          }
+        }
+        if (remainingToSpend === 0) {
+          allocations.push({ plantId: owned.card.id, resourcesSpent: spent });
+        }
+      }
+    }
+
+    return { type: 'PG_POWER_CITIES', allocations };
+  }
+
+  return { type: 'PG_FINISH_BUYING_RESOURCES' };
+}
+
 /**
  * Pure state reducer applying a validated `PowerGridAction`.
  */
@@ -822,14 +987,32 @@ export function applyPowerGridAction(
   playerId: string,
   action: PowerGridAction
 ): PowerGridGameState {
-  const validation = validatePowerGridAction(state, playerId, action);
+  const activeActor = getActivePlayerId(state);
+  const effectivePlayerId =
+    action.type === 'PG_AI_TURN' ? activeActor : playerId;
+  const effectiveAction =
+    action.type === 'PG_AI_TURN'
+      ? computePowerGridAiAction(state, activeActor)
+      : action;
+
+  const validation = validatePowerGridAction(
+    state,
+    effectivePlayerId,
+    effectiveAction
+  );
   if (!validation.valid) {
     throw new Error(validation.reason ?? 'Invalid Power Grid action.');
   }
 
   const cfg =
     PLAYER_COUNT_CONFIGS[state.turnOrder.length] ?? PLAYER_COUNT_CONFIGS[4]!;
-  const player = state.players[playerId]!;
+  const player = state.players[effectivePlayerId]!;
+  playerId = effectivePlayerId;
+  action = effectiveAction;
+  state = {
+    ...state,
+    turnNumber: state.turnNumber + 1,
+  };
 
   switch (action.type) {
     case 'PG_DETERMINE_TURN_ORDER': {
@@ -1494,6 +1677,9 @@ export function applyPowerGridAction(
         lastActionSummary: `${playerId} powered ${actualCitiesPowered} cities (+$${payout}). Bureaucracy complete — Round ${nextRound} started!`,
       };
     }
+
+    default:
+      return state;
   }
 }
 
