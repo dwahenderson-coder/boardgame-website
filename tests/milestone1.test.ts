@@ -31,6 +31,12 @@ import {
   KingsCornersGameState,
 } from '../src/games/kings-corners/index.js';
 import {
+  applyCompanyPriceShift,
+  createMarketDeck80,
+  STOCKPILE_COMPANY_IDS,
+  StockpileGameState,
+} from '../src/games/stockpile/index.js';
+import {
   applyAction,
   calculateFinalScores,
   createEmptyHand,
@@ -848,8 +854,13 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
   // ---------------------------------------------------------------------------
   describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
-    it('splits GameRegistry into Board Games (ttr, catan) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
-      expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual(['ttr', 'catan']);
+    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+      expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
+        'ttr',
+        'catan',
+        'stockpile',
+        'power_grid',
+      ]);
       expect(CARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'holdem',
         'euchre',
@@ -1057,6 +1068,178 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       ) as CribbageGameState;
       expect(cribState.gameId).toBe('cribbage');
       expect(cribState.players['p1']!.handZone.cards).toHaveLength(6);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 9. Stockpile Digital Board Game Engine (6 Rounds, 6 Phases, Splits & Bankruptcy)
+  // ---------------------------------------------------------------------------
+  describe('Stockpile Board Game Engine', () => {
+    it('initializes 80-card Market Deck, 6 companies at $5, $20,000 starting cash, and Phase 1/2 setup', () => {
+      const deck80 = createMarketDeck80();
+      expect(deck80).toHaveLength(80);
+      expect(deck80.filter((c) => c.kind === 'BOOM')).toHaveLength(4);
+      expect(deck80.filter((c) => c.kind === 'BUST')).toHaveLength(4);
+      expect(deck80.filter((c) => c.kind === 'TRADING_FEE')).toHaveLength(4);
+      for (const cid of STOCKPILE_COMPANY_IDS) {
+        const companyShares = deck80.filter(
+          (c) => c.kind === 'SHARE' && c.companyId === cid
+        );
+        expect(companyShares.length).toBeGreaterThanOrEqual(10);
+      }
+
+      const spEngine = GameRegistry.stockpile;
+      const state = spEngine.initGame(['p1', 'p2', 'p3'], 777) as StockpileGameState;
+      expect(state.gameId).toBe('stockpile');
+      expect(state.roundNumber).toBe(1);
+      expect(state.maxRounds).toBe(6);
+      expect(state.turnStep).toBe('PHASE_2_SUPPLY');
+      expect(state.stockpiles).toHaveLength(3);
+
+      for (const cid of STOCKPILE_COMPANY_IDS) {
+        expect(state.stockPrices[cid]).toBe(5);
+      }
+      for (const pid of ['p1', 'p2', 'p3']) {
+        expect(state.players[pid]!.cash).toBe(20000);
+        expect(state.players[pid]!.supplyHand).toHaveLength(2);
+        expect(state.players[pid]!.insiderPairing).not.toBeNull();
+      }
+
+      // Sanitized perspective hides face-down stockpile cards & other players' private insider pairings
+      const p1View = spEngine.getPlayerPerspective(state, 'p1');
+      if (p1View.gameId === 'stockpile') {
+        expect(p1View.publicPairing).toBeDefined();
+        expect(p1View.self.insiderPairing).not.toBeNull();
+        expect(p1View.opponents['p2']!.insiderPairing).toBeNull();
+        expect(p1View.revealedPairings).toBeNull();
+      }
+    });
+
+    it('enforces Stock Splits at $11 (doubles shares, resets to $6) and Bankruptcy at $0 (wipes shares, resets to $5)', () => {
+      const spEngine = GameRegistry.stockpile;
+      let state = spEngine.initGame(['p1', 'p2'], 888) as StockpileGameState;
+
+      // Give p1 3 shares of ENERGY and 4 shares of BIOTECH
+      state = {
+        ...state,
+        stockPrices: {
+          ...state.stockPrices,
+          ENERGY: 9,
+          BIOTECH: 2,
+        },
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            portfolio: {
+              ...state.players['p1']!.portfolio,
+              ENERGY: 3,
+              BIOTECH: 4,
+            },
+          },
+        },
+      };
+
+      // Shift ENERGY by +2 -> reaches $11 -> Stock Split! Shares double to 6 and price resets to $6!
+      const splitRes = applyCompanyPriceShift(
+        state.stockPrices,
+        state.players,
+        'ENERGY',
+        2,
+        false
+      );
+      expect(splitRes.movement.triggeredSplit).toBe(true);
+      expect(splitRes.nextPrices.ENERGY).toBe(6);
+      expect(splitRes.nextPlayers['p1']!.portfolio.ENERGY).toBe(6);
+
+      // Shift BIOTECH by -2 -> reaches $0 -> Bankruptcy! Shares wiped to 0 and price resets to $5!
+      const bankruptRes = applyCompanyPriceShift(
+        splitRes.nextPrices,
+        splitRes.nextPlayers,
+        'BIOTECH',
+        -2,
+        false
+      );
+      expect(bankruptRes.movement.triggeredBankruptcy).toBe(true);
+      expect(bankruptRes.nextPrices.BIOTECH).toBe(5);
+      expect(bankruptRes.nextPlayers['p1']!.portfolio.BIOTECH).toBe(0);
+    });
+
+    it('runs through all 6 phases and 6 rounds including outbid displacement, selling, and End-Game Majority Shareholder Bonuses', () => {
+      const spEngine = GameRegistry.stockpile;
+      let state = spEngine.initGame(['p1', 'p2'], 999) as StockpileGameState;
+
+      // Phase 2: p1 and p2 place 1 face-up and 1 face-down card
+      const p1Cards = state.players['p1']!.supplyHand;
+      state = spEngine.applyAction(state, 'p1', {
+        type: 'STOCKPILE_PLACE_SUPPLY',
+        faceUpCardId: p1Cards[0]!.id,
+        faceUpPileIndex: 0,
+        faceDownCardId: p1Cards[1]!.id,
+        faceDownPileIndex: 1,
+      }) as StockpileGameState;
+
+      const p2Cards = state.players['p2']!.supplyHand;
+      state = spEngine.applyAction(state, 'p2', {
+        type: 'STOCKPILE_PLACE_SUPPLY',
+        faceUpCardId: p2Cards[0]!.id,
+        faceUpPileIndex: 1,
+        faceDownCardId: p2Cards[1]!.id,
+        faceDownPileIndex: 0,
+      }) as StockpileGameState;
+
+      expect(state.turnStep).toBe('PHASE_3_DEMAND');
+
+      // Phase 3: p1 bids $0 on Pile 0
+      state = spEngine.applyAction(state, 'p1', {
+        type: 'STOCKPILE_BID',
+        pileIndex: 0,
+        bidAmount: 0,
+      }) as StockpileGameState;
+
+      // p2 outbids p1 on Pile 0 with $3K!
+      state = spEngine.applyAction(state, 'p2', {
+        type: 'STOCKPILE_BID',
+        pileIndex: 0,
+        bidAmount: 3,
+      }) as StockpileGameState;
+
+      // p1 was outbid on Pile 0, so p1 is immediately active and CANNOT re-bid on Pile 0 immediately!
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+      expect(state.players['p1']!.outbidFromPileIndex).toBe(0);
+      const invalidRebid = spEngine.validateAction(state, 'p1', {
+        type: 'STOCKPILE_BID',
+        pileIndex: 0,
+        bidAmount: 6,
+      });
+      expect(invalidRebid.valid).toBe(false);
+
+      // p1 moves their bidding token to Pile 1 at $0 -> every player now occupies a unique stockpile!
+      state = spEngine.applyAction(state, 'p1', {
+        type: 'STOCKPILE_BID',
+        pileIndex: 1,
+        bidAmount: 0,
+      }) as StockpileGameState;
+
+      // Fast-forward remaining rounds using AI turn action & round advancement until GAME_OVER
+      let safetyCounter = 0;
+      while (state.phase !== 'GAME_OVER' && safetyCounter < 200) {
+        safetyCounter++;
+        const activePid = state.playerOrder[state.activePlayerIndex]!;
+        if (state.turnStep === 'PHASE_6_MOVEMENT_SUMMARY') {
+          state = spEngine.applyAction(state, activePid, {
+            type: 'STOCKPILE_NEXT_ROUND',
+          }) as StockpileGameState;
+        } else {
+          state = spEngine.applyAction(state, activePid, {
+            type: 'STOCKPILE_AI_TURN',
+          }) as StockpileGameState;
+        }
+      }
+
+      expect(state.phase).toBe('GAME_OVER');
+      expect(state.roundNumber).toBe(6);
+      expect(state.winnerId).not.toBeNull();
     });
   });
 });

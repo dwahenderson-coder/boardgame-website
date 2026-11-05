@@ -10,6 +10,6 @@
     "skipLibCheck": true
   },
   "include": ["src/common/**/*", "src/mechanics/**/*", "src/games/**/*", "src/network/**/*", "src/server/**/*"],
-  "exclude": ["src/sandbox/**/*", "tests/**/*"]
+  "exclude": ["src/sandbox/**/*", "src/**/*.test.ts", "tests/**/*"]
 }
 

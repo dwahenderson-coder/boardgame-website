@@ -4,6 +4,10 @@ import { CatanGameState } from '../games/catan/index.js';
 import { CribbageGameState } from '../games/cribbage/index.js';
 import { EuchreGameState } from '../games/euchre/index.js';
 import { KingsCornersGameState } from '../games/kings-corners/index.js';
+import {
+  calculateStockpileNetWorth,
+  StockpileGameState,
+} from '../games/stockpile/index.js';
 import { HoldemGameState } from '../games/texas-holdem/index.js';
 import { GameId } from '../games/registry.js';
 import {
@@ -241,6 +245,28 @@ export class RoomManager {
       return [];
     }
     const nameMap = RoomManager.getPlayerNameMap(room);
+
+    if (
+      room.selectedGameId === 'stockpile' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'stockpile')
+    ) {
+      const spState = room.gameState as StockpileGameState;
+      return spState.playerOrder
+        .map((playerId) => {
+          const p = spState.players[playerId]!;
+          const netWorth = calculateStockpileNetWorth(spState, playerId);
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: p.cash - p.endGameMajorityBonus,
+            ticketPoints: p.endGameMajorityBonus,
+            totalScore: netWorth,
+            trainsRemaining: 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
 
     if (
       room.selectedGameId === 'euchre' ||

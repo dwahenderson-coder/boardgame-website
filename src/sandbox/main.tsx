@@ -19,6 +19,11 @@ import {
   KingsCornersSanitizedGameState,
 } from '../games/kings-corners/index.js';
 import {
+  calculateStockpileNetWorth,
+  StockpileGameState,
+  StockpileSanitizedGameState,
+} from '../games/stockpile/index.js';
+import {
   HoldemGameState,
   HoldemSanitizedGameState,
 } from '../games/texas-holdem/index.js';
@@ -46,6 +51,7 @@ import { EuchreBoard } from './EuchreBoard.js';
 import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
+import { StockpileBoard } from './StockpileBoard.js';
 import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
 import { useGameSocket } from './useGameSocket.js';
@@ -208,6 +214,8 @@ export const SandboxApp: React.FC = () => {
     'gameId' in activeSanitized && activeSanitized.gameId === 'cribbage';
   const isKingsCornersActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'kings_corners';
+  const isStockpileActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'stockpile';
   const ttrSanitized =
     !('gameId' in activeSanitized)
       ? (activeSanitized as TTRSanitizedGameState)
@@ -226,6 +234,9 @@ export const SandboxApp: React.FC = () => {
     : null;
   const kingsCornersSanitized = isKingsCornersActive
     ? (activeSanitized as KingsCornersSanitizedGameState)
+    : null;
+  const stockpileSanitized = isStockpileActive
+    ? (activeSanitized as StockpileSanitizedGameState)
     : null;
 
   // Determine whether the local user is allowed to act right now
@@ -295,6 +306,24 @@ export const SandboxApp: React.FC = () => {
   const localFinalStandings = useMemo<readonly PlayerFinalStanding[]>(() => {
     if (localGameState.phase !== 'GAME_OVER') {
       return [];
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'stockpile') {
+      const sps = localGameState as StockpileGameState;
+      return sps.playerOrder
+        .map((pid) => {
+          const p = sps.players[pid]!;
+          const netWorth = calculateStockpileNetWorth(sps, pid);
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: p.cash - p.endGameMajorityBonus,
+            ticketPoints: p.endGameMajorityBonus,
+            totalScore: netWorth,
+            trainsRemaining: 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
     }
     if ('gameId' in localGameState && localGameState.gameId === 'euchre') {
       const es = localGameState as EuchreGameState;
@@ -1057,6 +1086,19 @@ export const SandboxApp: React.FC = () => {
                 dispatchEngineAction(actorId, action)
               }
             />
+          ) : stockpileSanitized ? (
+            /* Mount <StockpileBoard /> when `selectedGameId === 'stockpile'` */
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-950">
+              <StockpileBoard
+                state={stockpileSanitized}
+                viewingPlayerId={viewedPlayerId}
+                playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+                isSpectator={false}
+                onDispatchAction={(action) =>
+                  dispatchEngineAction(viewedPlayerId, action)
+                }
+              />
+            </div>
           ) : (
             /* Mount <TTRBoard /> when `selectedGameId === 'ttr'` */
             ttrSanitized && (

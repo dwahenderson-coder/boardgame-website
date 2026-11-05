@@ -39,6 +39,26 @@ import {
   validateKingsCornersAction,
 } from './kings-corners/index.js';
 import {
+  applyPowerGridAction,
+  calculatePowerGridFinalScores,
+  getPowerGridPlayerPerspective,
+  initPowerGridGame,
+  PowerGridAction,
+  PowerGridGameState,
+  SanitizedPowerGridState,
+  validatePowerGridAction,
+} from './power-grid/index.js';
+import {
+  applyStockpileAction,
+  calculateStockpileFinalScores,
+  getStockpilePlayerPerspective,
+  initStockpileGame,
+  StockpileAction,
+  StockpileGameState,
+  StockpileSanitizedGameState,
+  validateStockpileAction,
+} from './stockpile/index.js';
+import {
   applyHoldemAction,
   calculateHoldemFinalScores,
   getHoldemPlayerPerspective,
@@ -65,6 +85,8 @@ export type GameCategory = 'BOARD' | 'CARD';
 export type GameId =
   | 'ttr'
   | 'catan'
+  | 'stockpile'
+  | 'power_grid'
   | 'holdem'
   | 'euchre'
   | 'cribbage'
@@ -73,6 +95,8 @@ export type GameId =
 export type AnyGameState =
   | TTRGameState
   | CatanGameState
+  | StockpileGameState
+  | PowerGridGameState
   | HoldemGameState
   | EuchreGameState
   | CribbageGameState
@@ -81,6 +105,8 @@ export type AnyGameState =
 export type AnySanitizedGameState =
   | TTRSanitizedGameState
   | CatanSanitizedGameState
+  | StockpileSanitizedGameState
+  | SanitizedPowerGridState
   | HoldemSanitizedGameState
   | EuchreSanitizedGameState
   | CribbageSanitizedGameState
@@ -89,6 +115,8 @@ export type AnySanitizedGameState =
 export type AnyGameAction =
   | TTRAction
   | CatanAction
+  | StockpileAction
+  | PowerGridAction
   | HoldemAction
   | EuchreAction
   | CribbageAction
@@ -156,6 +184,30 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = [
     mechanicsLabel: 'Trading, Building & Dice Production',
     badgeColor: 'emerald',
   },
+  {
+    id: 'stockpile',
+    category: 'BOARD',
+    icon: '📈',
+    title: 'Stockpile',
+    subtitle: 'Insider Trading & Market Manipulation',
+    minPlayers: 2,
+    maxPlayers: 5,
+    durationLabel: '~45 min',
+    mechanicsLabel: 'Insider Info, Blind Stockpiles & Bidding',
+    badgeColor: 'cyan',
+  },
+  {
+    id: 'power_grid',
+    category: 'BOARD',
+    icon: '⚡',
+    title: 'Power Grid',
+    subtitle: 'Industrial Power Plant Auctions & Grid Expansion',
+    minPlayers: 2,
+    maxPlayers: 6,
+    durationLabel: '~90 min',
+    mechanicsLabel: 'Plant Auctions, Fuel Scarcity & Dijkstra Grid',
+    badgeColor: 'amber',
+  },
   // --- CARD GAMES ---
   {
     id: 'holdem',
@@ -217,7 +269,7 @@ export const GameRegistry: Readonly<
   Record<GameId, GameEngineModule<any, any, any>>
 > = {
   ttr: {
-    ...GAME_METADATA_LIST[0]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'ttr')!,
     initGame: (playerIds: string[], seed: number) =>
       initTTRGame(playerIds, seed),
     validateAction: validateTTRAction,
@@ -226,15 +278,32 @@ export const GameRegistry: Readonly<
     calculateFinalScores: calculateTTRFinalScores,
   },
   catan: {
-    ...GAME_METADATA_LIST[1]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'catan')!,
     initGame: initCatanGame,
     validateAction: validateCatanAction,
     applyAction: applyCatanAction,
     getPlayerPerspective: getCatanPlayerPerspective,
     calculateFinalScores: calculateCatanFinalScores,
   },
+  stockpile: {
+    ...GAME_METADATA_LIST.find((g) => g.id === 'stockpile')!,
+    initGame: initStockpileGame,
+    validateAction: validateStockpileAction,
+    applyAction: applyStockpileAction,
+    getPlayerPerspective: getStockpilePlayerPerspective,
+    calculateFinalScores: calculateStockpileFinalScores,
+  },
+  power_grid: {
+    ...GAME_METADATA_LIST.find((g) => g.id === 'power_grid')!,
+    initGame: (playerIds: string[], seed: number) =>
+      initPowerGridGame(playerIds, seed),
+    validateAction: validatePowerGridAction,
+    applyAction: applyPowerGridAction,
+    getPlayerPerspective: getPowerGridPlayerPerspective,
+    calculateFinalScores: calculatePowerGridFinalScores,
+  },
   holdem: {
-    ...GAME_METADATA_LIST[2]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'holdem')!,
     initGame: initHoldemGame,
     validateAction: validateHoldemAction,
     applyAction: applyHoldemAction,
@@ -242,7 +311,7 @@ export const GameRegistry: Readonly<
     calculateFinalScores: calculateHoldemFinalScores,
   },
   euchre: {
-    ...GAME_METADATA_LIST[3]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'euchre')!,
     initGame: initEuchreGame,
     validateAction: validateEuchreAction,
     applyAction: applyEuchreAction,
@@ -250,7 +319,7 @@ export const GameRegistry: Readonly<
     calculateFinalScores: calculateEuchreFinalScores,
   },
   cribbage: {
-    ...GAME_METADATA_LIST[4]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'cribbage')!,
     initGame: initCribbageGame,
     validateAction: validateCribbageAction,
     applyAction: applyCribbageAction,
@@ -258,7 +327,7 @@ export const GameRegistry: Readonly<
     calculateFinalScores: calculateCribbageFinalScores,
   },
   kings_corners: {
-    ...GAME_METADATA_LIST[5]!,
+    ...GAME_METADATA_LIST.find((g) => g.id === 'kings_corners')!,
     initGame: initKingsCornersGame,
     validateAction: validateKingsCornersAction,
     applyAction: applyKingsCornersAction,
