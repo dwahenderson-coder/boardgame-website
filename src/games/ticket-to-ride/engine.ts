@@ -17,12 +17,15 @@ import {
 } from './constants.js';
 import {
   Action,
+  AlvinAndDexterState,
   ClaimRouteAction,
   DestinationTicket,
   DrawCardsAction,
   GameState,
   HandCounts,
   KeepTicketsAction,
+  MoveMonsterAction,
+  PlaceMonsterAction,
   PlayerState,
   RouteEdge,
   SanitizedGameState,
@@ -30,6 +33,10 @@ import {
   TrainCardColor,
   ValidationResult,
 } from './types.js';
+
+export const INITIAL_MONSTER_DECK_SIZE = 20;
+export const ALVIN_BONUS_POINTS = 15;
+export const DEXTER_BONUS_POINTS = 15;
 
 // --- Internal Pure Helpers ---
 
@@ -50,6 +57,122 @@ function getTotalCardsInHand(hand: HandCounts): number {
     sum += hand[color];
   }
   return sum;
+}
+
+/**
+ * Returns all unique city names present in the route network, sorted alphabetically.
+ */
+export function getAllBoardCities(routes: readonly RouteEdge[]): string[] {
+  const cities = new Set<string>();
+  for (const r of routes) {
+    cities.add(r.from);
+    cities.add(r.to);
+  }
+  return Array.from(cities).sort();
+}
+
+/**
+ * Computes all valid destination cities a monster can move to from `startCity`:
+ * - `locomotivesSpent === 1`: cities at 1 to 3 city hops away
+ * - `locomotivesSpent === 2`: cities at 4 to 6 city hops away
+ * A monster cannot end its move on `startCity` or on `otherMonsterCity`.
+ */
+export function getReachableMonsterCities(
+  routes: readonly RouteEdge[],
+  startCity: string,
+  otherMonsterCity: string | null,
+  locomotivesSpent: 1 | 2
+): string[] {
+  const adj = new Map<string, Set<string>>();
+  for (const r of routes) {
+    if (!adj.has(r.from)) {
+      adj.set(r.from, new Set());
+    }
+    if (!adj.has(r.to)) {
+      adj.set(r.to, new Set());
+    }
+    adj.get(r.from)!.add(r.to);
+    adj.get(r.to)!.add(r.from);
+  }
+
+  if (!adj.has(startCity)) {
+    return [];
+  }
+
+  const minSteps = locomotivesSpent === 1 ? 1 : 4;
+  const maxSteps = locomotivesSpent === 1 ? 3 : 6;
+
+  // BFS for shortest-path city hop distances
+  const dist = new Map<string, number>();
+  const queue: string[] = [startCity];
+  dist.set(startCity, 0);
+
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    const d = dist.get(curr)!;
+    if (d >= maxSteps) {
+      continue;
+    }
+    for (const neighbor of adj.get(curr) ?? []) {
+      if (!dist.has(neighbor)) {
+        dist.set(neighbor, d + 1);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  const reachable: string[] = [];
+  for (const [city, d] of dist.entries()) {
+    if (
+      d >= minSteps &&
+      d <= maxSteps &&
+      city !== startCity &&
+      city !== otherMonsterCity
+    ) {
+      reachable.push(city);
+    }
+  }
+
+  return reachable.sort();
+}
+
+/**
+ * Checks whether `cityName` currently has Alvin or Dexter in it ("City in Chaos").
+ */
+export function isCityInChaos(
+  state: Pick<GameState, 'alvinAndDexter'>,
+  cityName: string
+): boolean {
+  if (!state.alvinAndDexter?.enabled) {
+    return false;
+  }
+  return (
+    state.alvinAndDexter.alvinCity === cityName ||
+    state.alvinAndDexter.dexterCity === cityName
+  );
+}
+
+/**
+ * Calculates the end-of-game point value of a Destination Ticket.
+ * Any ticket whose `from` or `to` city is a "City in Chaos" at the end of the game
+ * is worth half its normal point value rounded down (both when completed and when uncompleted).
+ */
+export function getEffectiveTicketPoints(
+  ticket: DestinationTicket,
+  state: Pick<GameState, 'alvinAndDexter'>
+): { readonly points: number; readonly isChaosHalved: boolean } {
+  const inChaos =
+    isCityInChaos(state, ticket.from) || isCityInChaos(state, ticket.to);
+  if (inChaos) {
+    return {
+      points: Math.floor(ticket.points / 2),
+      isChaosHalved: true,
+    };
+  }
+  return {
+    points: ticket.points,
+    isChaosHalved: false,
+  };
 }
 
 /**
@@ -81,7 +204,6 @@ function replenishFaceUpCards(
       break;
     }
 
-    // Check if there are enough non-locomotive cards across deck + discard + faceUp to ever have < 3 locomotives
     const activeCards = slots.filter((c): c is TrainCardColor => c !== null);
     const totalNonLocoAvailable =
       activeCards.filter((c) => c !== 'LOCOMOTIVE').length +
@@ -92,7 +214,6 @@ function replenishFaceUpCards(
       break;
     }
 
-    // Discard all face-up cards and redraw 5
     deck.discard(activeCards);
     for (let i = 0; i < FACE_UP_SLOTS; i++) {
       slots[i] = null;
@@ -117,6 +238,38 @@ function advanceTurn(state: GameState): GameState {
   const currentPlayerId = state.playerOrder[state.activePlayerIndex]!;
   const currentPlayer = state.players[currentPlayerId]!;
 
+  // Decrement face-up monster card timers at the end of this player's turn.
+  // A card received on Turn T starts at 2 -> becomes 1 at the end of Turn T -> becomes 0 at the end of Turn T+1.
+  const nextFaceUpAlvin = Math.max(
+    0,
+    (currentPlayer.faceUpAlvinTurnsRemaining ?? 0) - 1
+  );
+  const nextFaceUpDexter = Math.max(
+    0,
+    (currentPlayer.faceUpDexterTurnsRemaining ?? 0) - 1
+  );
+
+  const updatedPlayers: Record<string, PlayerState> = {
+    ...state.players,
+    [currentPlayerId]: {
+      ...currentPlayer,
+      ...(state.alvinAndDexter?.enabled
+        ? {
+            faceUpAlvinTurnsRemaining: nextFaceUpAlvin,
+            faceUpDexterTurnsRemaining: nextFaceUpDexter,
+          }
+        : {}),
+    },
+  };
+
+  const resetMonsterTurnState: AlvinAndDexterState | undefined =
+    state.alvinAndDexter
+      ? {
+          ...state.alvinAndDexter,
+          movedMonsterThisTurn: false,
+        }
+      : undefined;
+
   let nextPhase = state.phase;
   let finalRoundTriggeredBy = state.finalRoundTriggeredBy;
   let turnsRemaining = state.turnsRemainingInFinalRound;
@@ -125,7 +278,6 @@ function advanceTurn(state: GameState): GameState {
     if (currentPlayer.trainsRemaining <= 2) {
       nextPhase = 'FINAL_ROUND';
       finalRoundTriggeredBy = currentPlayerId;
-      // Every player (including the triggering player) gets 1 final turn
       turnsRemaining = state.playerOrder.length;
     }
   } else if (state.phase === 'FINAL_ROUND') {
@@ -133,6 +285,10 @@ function advanceTurn(state: GameState): GameState {
     if (turnsRemaining <= 0) {
       return {
         ...state,
+        players: updatedPlayers,
+        ...(resetMonsterTurnState !== undefined
+          ? { alvinAndDexter: resetMonsterTurnState }
+          : {}),
         phase: 'GAME_OVER',
         turnStep: 'AWAITING_ACTION',
         turnsRemainingInFinalRound: 0,
@@ -145,6 +301,10 @@ function advanceTurn(state: GameState): GameState {
 
   return {
     ...state,
+    players: updatedPlayers,
+    ...(resetMonsterTurnState !== undefined
+      ? { alvinAndDexter: resetMonsterTurnState }
+      : {}),
     phase: nextPhase,
     activePlayerIndex: nextPlayerIndex,
     turnStep: 'AWAITING_ACTION',
@@ -159,13 +319,16 @@ function advanceTurn(state: GameState): GameState {
 export interface InitGameOptions {
   /**
    * If true, deals initial destination tickets directly into each player's active
-   * `tickets` list and begins in the `'PLAYING'` phase immediately.
-   * Defaults to `false` so every player starts in `'INITIAL_TICKET_SELECTION'`
-   * and chooses at least 2 of their 3 initial Destination Tickets.
+   * `tickets` list and begins in the `'PLAYING'` (or `'MONSTER_PLACEMENT'`) phase immediately.
    */
   readonly skipInitialTicketSelection?: boolean;
   readonly customRoutes?: readonly RouteEdge[];
   readonly customTickets?: readonly DestinationTicket[];
+  readonly enableAlvinAndDexter?: boolean;
+  readonly initialMonsterCities?: {
+    readonly alvinCity: string;
+    readonly dexterCity: string;
+  };
 }
 
 /**
@@ -190,7 +353,6 @@ export function initGame(
     createStandardTrainDeckCards(),
     seed
   );
-  // Derive a distinct deterministic seed for the ticket deck
   const ticketSeed = (seed ^ 0x9e3779b9) >>> 0;
   const ticketDeck = new Deck<DestinationTicket>(
     options.customTickets ?? STANDARD_DESTINATION_TICKETS,
@@ -198,6 +360,7 @@ export function initGame(
   );
 
   const skipInitialSelection = options.skipInitialTicketSelection ?? false;
+  const enableMonsters = options.enableAlvinAndDexter ?? false;
   const players: Record<string, PlayerState> = {};
 
   for (const playerId of playerIds) {
@@ -213,6 +376,14 @@ export function initGame(
       trainsRemaining: INITIAL_TRAINS_PER_PLAYER,
       claimedRoutePoints: 0,
       recentDrawnCards: {},
+      ...(enableMonsters
+        ? {
+            alvinCards: 0,
+            dexterCards: 0,
+            faceUpAlvinTurnsRemaining: 0,
+            faceUpDexterTurnsRemaining: 0,
+          }
+        : {}),
     };
   }
 
@@ -231,11 +402,51 @@ export function initGame(
     ...route,
   }));
 
+  const prePlacedMonsters = Boolean(
+    enableMonsters &&
+      options.initialMonsterCities?.alvinCity &&
+      options.initialMonsterCities?.dexterCity
+  );
+
+  const alvinAndDexter: AlvinAndDexterState | undefined = enableMonsters
+    ? {
+        enabled: true,
+        alvinCity: options.initialMonsterCities?.alvinCity ?? null,
+        dexterCity: options.initialMonsterCities?.dexterCity ?? null,
+        alvinDeckRemaining: INITIAL_MONSTER_DECK_SIZE,
+        dexterDeckRemaining: INITIAL_MONSTER_DECK_SIZE,
+        movedMonsterThisTurn: false,
+        monsterToPlace: prePlacedMonsters ? null : 'ALVIN',
+      }
+    : undefined;
+
+  // Determine initial phase, activePlayerIndex, and turnStep
+  let initialPhase: GameState['phase'] = 'INITIAL_TICKET_SELECTION';
+  let initialActiveIndex = 0;
+  let initialTurnStep: GameState['turnStep'] = 'CHOOSING_TICKETS';
+  let initialSummary =
+    'Game started! Each player is choosing their initial Destination Tickets.';
+
+  if (skipInitialSelection) {
+    if (enableMonsters && !prePlacedMonsters) {
+      initialPhase = 'MONSTER_PLACEMENT';
+      // Last player in turn order places Alvin first
+      initialActiveIndex = playerIds.length - 1;
+      initialTurnStep = 'PLACING_MONSTER';
+      initialSummary = `${playerIds[initialActiveIndex]} must select the starting city for Alvin (🛸 Flying Saucer).`;
+    } else {
+      initialPhase = 'PLAYING';
+      initialActiveIndex = 0;
+      initialTurnStep = 'AWAITING_ACTION';
+      initialSummary = 'Game started! Waiting for first player action.';
+    }
+  }
+
   return {
-    phase: skipInitialSelection ? 'PLAYING' : 'INITIAL_TICKET_SELECTION',
+    phase: initialPhase,
     playerOrder: [...playerIds],
-    activePlayerIndex: 0,
-    turnStep: skipInitialSelection ? 'AWAITING_ACTION' : 'CHOOSING_TICKETS',
+    activePlayerIndex: initialActiveIndex,
+    turnStep: initialTurnStep,
     players,
     routes,
     faceUpCards,
@@ -244,9 +455,8 @@ export function initGame(
     finalRoundTriggeredBy: null,
     turnsRemainingInFinalRound: 0,
     turnNumber: 1,
-    lastActionSummary: skipInitialSelection
-      ? 'Game started! Waiting for first player action.'
-      : 'Game started! Each player is choosing their initial Destination Tickets.',
+    lastActionSummary: initialSummary,
+    ...(alvinAndDexter !== undefined ? { alvinAndDexter } : {}),
   };
 }
 
@@ -267,7 +477,7 @@ export function validateAction(
     return { valid: false, reason: `Unknown player ID: ${playerId}.` };
   }
 
-  // Handle INITIAL_TICKET_SELECTION phase (all players choose simultaneously or in order)
+  // 1. Handle INITIAL_TICKET_SELECTION phase
   if (state.phase === 'INITIAL_TICKET_SELECTION') {
     if (action.type !== 'KEEP_TICKETS') {
       return {
@@ -278,7 +488,18 @@ export function validateAction(
     return validateKeepTickets(player, action);
   }
 
-  // In PLAYING or FINAL_ROUND, strictly enforce turn order
+  // 2. Handle MONSTER_PLACEMENT setup phase (Alvin & Dexter expansion)
+  if (state.phase === 'MONSTER_PLACEMENT') {
+    if (action.type !== 'PLACE_MONSTER') {
+      return {
+        valid: false,
+        reason: 'Must place Alvin and Dexter on their starting cities first.',
+      };
+    }
+    return validatePlaceMonster(state, playerId, action);
+  }
+
+  // 3. In PLAYING or FINAL_ROUND, strictly enforce turn order
   const activePlayerId = state.playerOrder[state.activePlayerIndex];
   if (playerId !== activePlayerId) {
     return {
@@ -302,6 +523,13 @@ export function validateAction(
         };
       }
       return validateKeepTickets(player, action);
+    case 'MOVE_MONSTER':
+      return validateMoveMonster(state, player, action);
+    case 'PLACE_MONSTER':
+      return {
+        valid: false,
+        reason: 'Monsters have already been placed on the board.',
+      };
     default: {
       const _exhaustive: never = action;
       return {
@@ -310,6 +538,161 @@ export function validateAction(
       };
     }
   }
+}
+
+function validatePlaceMonster(
+  state: GameState,
+  playerId: string,
+  action: PlaceMonsterAction
+): ValidationResult {
+  if (!state.alvinAndDexter?.enabled) {
+    return {
+      valid: false,
+      reason: 'Alvin & Dexter expansion is not enabled in this match.',
+    };
+  }
+
+  const expectedPlayerId = state.playerOrder[state.activePlayerIndex];
+  if (playerId !== expectedPlayerId) {
+    return {
+      valid: false,
+      reason: `Waiting for ${expectedPlayerId} to place ${state.alvinAndDexter.monsterToPlace}.`,
+    };
+  }
+
+  if (action.monster !== state.alvinAndDexter.monsterToPlace) {
+    return {
+      valid: false,
+      reason: `Expected placement of ${state.alvinAndDexter.monsterToPlace}, but received ${action.monster}.`,
+    };
+  }
+
+  const allCities = getAllBoardCities(state.routes);
+  if (!allCities.includes(action.cityName)) {
+    return {
+      valid: false,
+      reason: `City "${action.cityName}" does not exist on the board.`,
+    };
+  }
+
+  if (
+    action.monster === 'DEXTER' &&
+    state.alvinAndDexter.alvinCity === action.cityName
+  ) {
+    return {
+      valid: false,
+      reason: `Dexter cannot start in ${action.cityName} because Alvin is already there.`,
+    };
+  }
+
+  return { valid: true };
+}
+
+function validateMoveMonster(
+  state: GameState,
+  player: PlayerState,
+  action: MoveMonsterAction
+): ValidationResult {
+  const ad = state.alvinAndDexter;
+  if (!ad?.enabled) {
+    return {
+      valid: false,
+      reason: 'Alvin & Dexter expansion is not enabled in this match.',
+    };
+  }
+
+  if (ad.movedMonsterThisTurn) {
+    return {
+      valid: false,
+      reason:
+        'You have already moved a monster this turn (cannot move both monsters or move twice during the same turn).',
+    };
+  }
+
+  if (action.monster !== 'ALVIN' && action.monster !== 'DEXTER') {
+    return {
+      valid: false,
+      reason: `Invalid monster type: ${String(action.monster)}.`,
+    };
+  }
+
+  if (action.monster === 'ALVIN') {
+    if ((player.faceUpAlvinTurnsRemaining ?? 0) > 0) {
+      return {
+        valid: false,
+        reason:
+          'You cannot move Alvin while you have a face-up Alvin card in front of you.',
+      };
+    }
+    if (ad.alvinDeckRemaining <= 0) {
+      return {
+        valid: false,
+        reason: 'No Alvin cards remain in the deck; Alvin cannot be moved.',
+      };
+    }
+  } else {
+    if ((player.faceUpDexterTurnsRemaining ?? 0) > 0) {
+      return {
+        valid: false,
+        reason:
+          'You cannot move Dexter while you have a face-up Dexter card in front of you.',
+      };
+    }
+    if (ad.dexterDeckRemaining <= 0) {
+      return {
+        valid: false,
+        reason: 'No Dexter cards remain in the deck; Dexter cannot be moved.',
+      };
+    }
+  }
+
+  if (action.locomotivesSpent !== 1 && action.locomotivesSpent !== 2) {
+    return {
+      valid: false,
+      reason: 'Must spend either 1 or 2 Locomotives to move a monster.',
+    };
+  }
+
+  if (player.hand.LOCOMOTIVE < action.locomotivesSpent) {
+    return {
+      valid: false,
+      reason: `Insufficient Locomotives: moving ${action.monster} ${
+        action.locomotivesSpent === 1 ? '1–3' : '4–6'
+      } cities requires ${action.locomotivesSpent} Locomotive(s), but you have ${
+        player.hand.LOCOMOTIVE
+      }.`,
+    };
+  }
+
+  const currentCity =
+    action.monster === 'ALVIN' ? ad.alvinCity : ad.dexterCity;
+  const otherCity =
+    action.monster === 'ALVIN' ? ad.dexterCity : ad.alvinCity;
+
+  if (!currentCity) {
+    return {
+      valid: false,
+      reason: `${action.monster} has not been placed on the board yet.`,
+    };
+  }
+
+  const reachable = getReachableMonsterCities(
+    state.routes,
+    currentCity,
+    otherCity,
+    action.locomotivesSpent
+  );
+
+  if (!reachable.includes(action.targetCity)) {
+    return {
+      valid: false,
+      reason: `${action.targetCity} is not ${
+        action.locomotivesSpent === 1 ? '1–3' : '4–6'
+      } cities away from ${currentCity} (or is occupied by the other monster).`,
+    };
+  }
+
+  return { valid: true };
 }
 
 function validateDrawCard(
@@ -393,9 +776,30 @@ function validateClaimRoute(
     };
   }
 
+  // Alvin & Dexter Rule: Any city with Alvin or Dexter in it is a "City in Chaos"
+  // and prevents players from claiming routes into or out of that city.
+  if (state.alvinAndDexter?.enabled) {
+    if (
+      route.from === state.alvinAndDexter.alvinCity ||
+      route.to === state.alvinAndDexter.alvinCity
+    ) {
+      return {
+        valid: false,
+        reason: `Cannot claim ${route.from} ↔ ${route.to}: ${state.alvinAndDexter.alvinCity} is a City in Chaos (occupied by Alvin 🛸)!`,
+      };
+    }
+    if (
+      route.from === state.alvinAndDexter.dexterCity ||
+      route.to === state.alvinAndDexter.dexterCity
+    ) {
+      return {
+        valid: false,
+        reason: `Cannot claim ${route.from} ↔ ${route.to}: ${state.alvinAndDexter.dexterCity} is a City in Chaos (occupied by Dexter 🦖)!`,
+      };
+    }
+  }
+
   // Check sibling double-route rules:
-  // 1) A single player can NEVER claim both parallel routes between the same two cities.
-  // 2) In 2- or 3-player games, once one route of a double-route is claimed by ANY player, the sibling route is locked.
   const siblingRoutes = state.routes.filter(
     (r) =>
       r.id !== route.id &&
@@ -560,6 +964,102 @@ export function applyAction(
   const player = state.players[playerId]!;
 
   switch (action.type) {
+    case 'PLACE_MONSTER': {
+      const ad = state.alvinAndDexter!;
+      if (action.monster === 'ALVIN') {
+        // Next, the player who plays just before the last player selects the starting city for Dexter
+        const dexterPlayerIndex = Math.max(0, state.playerOrder.length - 2);
+        const dexterPlayerId = state.playerOrder[dexterPlayerIndex]!;
+        return {
+          ...state,
+          activePlayerIndex: dexterPlayerIndex,
+          turnStep: 'PLACING_MONSTER',
+          alvinAndDexter: {
+            ...ad,
+            alvinCity: action.cityName,
+            monsterToPlace: 'DEXTER',
+          },
+          lastActionSummary: `${playerId} placed Alvin (🛸 Flying Saucer) in ${action.cityName}! Waiting for ${dexterPlayerId} to place Dexter (🦖 T-Rex).`,
+        };
+      } else {
+        // Both monsters placed -> transition to PLAYING with first player (index 0)
+        return {
+          ...state,
+          phase: 'PLAYING',
+          activePlayerIndex: 0,
+          turnStep: 'AWAITING_ACTION',
+          alvinAndDexter: {
+            ...ad,
+            dexterCity: action.cityName,
+            monsterToPlace: null,
+          },
+          lastActionSummary: `${playerId} placed Dexter (🦖 T-Rex) in ${action.cityName}! Both monsters are on the map — Game on!`,
+        };
+      }
+    }
+
+    case 'MOVE_MONSTER': {
+      const ad = state.alvinAndDexter!;
+      const trainDeck = Deck.fromState(state.trainDeck);
+      const discardedLocos: TrainCardColor[] = Array.from(
+        { length: action.locomotivesSpent },
+        () => 'LOCOMOTIVE'
+      );
+      trainDeck.discard(discardedLocos);
+      const nextFaceUp = replenishFaceUpCards(state.faceUpCards, trainDeck);
+
+      const nextHand: HandCounts = {
+        ...player.hand,
+        LOCOMOTIVE: player.hand.LOCOMOTIVE - action.locomotivesSpent,
+      };
+
+      const isAlvin = action.monster === 'ALVIN';
+      const fromCity = isAlvin ? ad.alvinCity : ad.dexterCity;
+
+      const updatedPlayer: PlayerState = {
+        ...player,
+        hand: nextHand,
+        alvinCards: (player.alvinCards ?? 0) + (isAlvin ? 1 : 0),
+        dexterCards: (player.dexterCards ?? 0) + (isAlvin ? 0 : 1),
+        // Remains face-up until the end of this player's NEXT turn (2 turn-ends: end of current turn + end of next turn)
+        faceUpAlvinTurnsRemaining: isAlvin
+          ? 2
+          : player.faceUpAlvinTurnsRemaining ?? 0,
+        faceUpDexterTurnsRemaining: isAlvin
+          ? player.faceUpDexterTurnsRemaining ?? 0
+          : 2,
+      };
+
+      const updatedAlvinAndDexter: AlvinAndDexterState = {
+        ...ad,
+        alvinCity: isAlvin ? action.targetCity : ad.alvinCity,
+        dexterCity: isAlvin ? ad.dexterCity : action.targetCity,
+        alvinDeckRemaining: isAlvin
+          ? ad.alvinDeckRemaining - 1
+          : ad.alvinDeckRemaining,
+        dexterDeckRemaining: isAlvin
+          ? ad.dexterDeckRemaining
+          : ad.dexterDeckRemaining - 1,
+        movedMonsterThisTurn: true,
+      };
+
+      return {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: updatedPlayer,
+        },
+        faceUpCards: nextFaceUp,
+        trainDeck: trainDeck.toState(),
+        alvinAndDexter: updatedAlvinAndDexter,
+        lastActionSummary: `${playerId} played ${action.locomotivesSpent} Locomotive(s) to move ${
+          isAlvin ? 'Alvin 🛸' : 'Dexter 🦖'
+        } from ${fromCity} to ${action.targetCity} and claimed a face-up ${
+          isAlvin ? 'Alvin' : 'Dexter'
+        } card!`,
+      };
+    }
+
     case 'DRAW_CARDS': {
       const trainDeck = Deck.fromState(state.trainDeck);
       let nextFaceUp = [...state.faceUpCards];
@@ -569,7 +1069,6 @@ export function applyAction(
       if (action.source === 'DECK') {
         const drawn = trainDeck.draw(1, true);
         drawnCard = drawn[0]!;
-        // If any face-up slots were previously empty and cards were reshuffled, replenish
         nextFaceUp = replenishFaceUpCards(nextFaceUp, trainDeck);
       } else {
         drawnCard = nextFaceUp[action.slotIndex]!;
@@ -578,8 +1077,6 @@ export function applyAction(
         nextFaceUp = replenishFaceUpCards(nextFaceUp, trainDeck);
       }
 
-      // If starting a fresh turn ('AWAITING_ACTION'), reset recentDrawnCards;
-      // if drawing the 2nd card ('DREW_ONE_CARD'), accumulate onto the 1st card drawn this turn.
       const baseRecent =
         state.turnStep === 'DREW_ONE_CARD' ? { ...player.recentDrawnCards } : {};
       baseRecent[drawnCard] = (baseRecent[drawnCard] ?? 0) + 1;
@@ -612,8 +1109,6 @@ export function applyAction(
         lastActionSummary: actionDescription,
       };
 
-      // A face-up Locomotive costs both card draws; or if this was already the 2nd draw, end turn.
-      // Also end turn if no legal second card exists anywhere to be drawn.
       if (
         state.turnStep === 'DREW_ONE_CARD' ||
         tookFaceUpLocomotive ||
@@ -734,6 +1229,25 @@ export function applyAction(
           (id) => nextPlayers[id]!.pendingTickets.length > 0
         );
         const allReady = nextPendingPlayerIndex === -1;
+
+        if (
+          allReady &&
+          state.alvinAndDexter?.enabled &&
+          state.alvinAndDexter.monsterToPlace !== null
+        ) {
+          const alvinSelectorIndex = state.playerOrder.length - 1;
+          const alvinSelectorId = state.playerOrder[alvinSelectorIndex]!;
+          return {
+            ...state,
+            phase: 'MONSTER_PLACEMENT',
+            activePlayerIndex: alvinSelectorIndex,
+            turnStep: 'PLACING_MONSTER',
+            players: nextPlayers,
+            ticketDeck: ticketDeck.toState(),
+            lastActionSummary: `All players chose initial tickets! ${alvinSelectorId} must now select the starting city for Alvin (🛸 Flying Saucer).`,
+          };
+        }
+
         return {
           ...state,
           phase: allReady ? 'PLAYING' : 'INITIAL_TICKET_SELECTION',
@@ -789,6 +1303,14 @@ export function getPlayerPerspective(
       pendingTicketCount: opp.pendingTickets.length,
       trainsRemaining: opp.trainsRemaining,
       claimedRoutePoints: opp.claimedRoutePoints,
+      ...(state.alvinAndDexter?.enabled
+        ? {
+            alvinCards: opp.alvinCards ?? 0,
+            dexterCards: opp.dexterCards ?? 0,
+            hasFaceUpAlvin: (opp.faceUpAlvinTurnsRemaining ?? 0) > 0,
+            hasFaceUpDexter: (opp.faceUpDexterTurnsRemaining ?? 0) > 0,
+          }
+        : {}),
     };
   }
 
@@ -814,6 +1336,9 @@ export function getPlayerPerspective(
     turnsRemainingInFinalRound: state.turnsRemainingInFinalRound,
     turnNumber: state.turnNumber,
     lastActionSummary: state.lastActionSummary,
+    ...(state.alvinAndDexter !== undefined
+      ? { alvinAndDexter: { ...state.alvinAndDexter } }
+      : {}),
   };
 }
 
@@ -822,11 +1347,6 @@ export const TRANS_AMERICA_EXPRESS_BONUS = 10;
 /**
  * Calculates the length (in train cars) of the longest continuous path of routes
  * owned by `playerId`.
- *
- * Rules:
- * - A continuous path consists of connected routes all owned by `playerId`.
- * - It may include loops and pass through the same city multiple times,
- *   as long as it does NOT reuse the same route (`RouteEdge.id`) more than once.
  */
 export function calculateLongestContinuousPath(
   routes: readonly RouteEdge[],
@@ -885,7 +1405,6 @@ export function calculateLongestContinuousPath(
 /**
  * Evaluates all players' longest continuous paths and returns the recipient(s)
  * of the 10-point Trans America Express bonus.
- * If two or more players tie for the longest continuous path (> 0), all tied players receive the bonus.
  */
 export function getTransAmericaExpressRecipients(state: GameState): {
   readonly maxPathLength: number;
@@ -918,11 +1437,68 @@ export function getTransAmericaExpressRecipients(state: GameState): {
 }
 
 /**
+ * Evaluates the +15 point Alvin & Dexter end-of-game bonuses:
+ * - Player(s) with the most Alvin cards (> 0) each receive +15 points.
+ * - Player(s) with the most Dexter cards (> 0) each receive +15 points.
+ */
+export function getMonsterBonusRecipients(state: GameState): {
+  readonly maxAlvinCards: number;
+  readonly maxDexterCards: number;
+  readonly alvinRecipients: readonly string[];
+  readonly dexterRecipients: readonly string[];
+} {
+  if (!state.alvinAndDexter?.enabled) {
+    return {
+      maxAlvinCards: 0,
+      maxDexterCards: 0,
+      alvinRecipients: [],
+      dexterRecipients: [],
+    };
+  }
+
+  let maxAlvinCards = 0;
+  let maxDexterCards = 0;
+
+  for (const pid of state.playerOrder) {
+    const p = state.players[pid];
+    const aCount = p?.alvinCards ?? 0;
+    const dCount = p?.dexterCards ?? 0;
+    if (aCount > maxAlvinCards) {
+      maxAlvinCards = aCount;
+    }
+    if (dCount > maxDexterCards) {
+      maxDexterCards = dCount;
+    }
+  }
+
+  const alvinRecipients =
+    maxAlvinCards > 0
+      ? state.playerOrder.filter(
+          (pid) => (state.players[pid]?.alvinCards ?? 0) === maxAlvinCards
+        )
+      : [];
+
+  const dexterRecipients =
+    maxDexterCards > 0
+      ? state.playerOrder.filter(
+          (pid) => (state.players[pid]?.dexterCards ?? 0) === maxDexterCards
+        )
+      : [];
+
+  return {
+    maxAlvinCards,
+    maxDexterCards,
+    alvinRecipients,
+    dexterRecipients,
+  };
+}
+
+/**
  * Calculates final scores for all players:
  * - Sum of claimed route points
- * - Plus points for each completed Destination Ticket (verified via Graph connectivity)
- * - Minus points for each uncompleted Destination Ticket
+ * - Plus/minus Destination Ticket points (any ticket containing a City in Chaos is worth half its normal value rounded down)
  * - Plus 10 points (Trans America Express) for the player(s) with the longest continuous path
+ * - Plus 15 points for the player(s) with the most Alvin cards, and +15 points for the player(s) with the most Dexter cards
  */
 export function calculateFinalScores(
   state: GameState
@@ -930,11 +1506,14 @@ export function calculateFinalScores(
   const scores: Record<string, number> = {};
   const { recipients } = getTransAmericaExpressRecipients(state);
   const recipientSet = new Set(recipients);
+  const { alvinRecipients, dexterRecipients } =
+    getMonsterBonusRecipients(state);
+  const alvinBonusSet = new Set(alvinRecipients);
+  const dexterBonusSet = new Set(dexterRecipients);
 
   for (const playerId of state.playerOrder) {
     const player = state.players[playerId]!;
 
-    // Build a player-specific Graph from all routes claimed by this player
     const playerGraph = new Graph<RouteEdge>();
     for (const route of state.routes) {
       if (route.ownerId === playerId) {
@@ -946,10 +1525,11 @@ export function calculateFinalScores(
 
     for (const ticket of player.tickets) {
       const completed = playerGraph.isConnected(ticket.from, ticket.to);
+      const { points: effectivePts } = getEffectiveTicketPoints(ticket, state);
       if (completed) {
-        totalScore += ticket.points;
+        totalScore += effectivePts;
       } else {
-        totalScore -= ticket.points;
+        totalScore -= effectivePts;
       }
     }
 
@@ -957,9 +1537,16 @@ export function calculateFinalScores(
       totalScore += TRANS_AMERICA_EXPRESS_BONUS;
     }
 
+    if (alvinBonusSet.has(playerId)) {
+      totalScore += ALVIN_BONUS_POINTS;
+    }
+
+    if (dexterBonusSet.has(playerId)) {
+      totalScore += DEXTER_BONUS_POINTS;
+    }
+
     scores[playerId] = totalScore;
   }
 
   return scores;
 }
-

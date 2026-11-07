@@ -65,6 +65,8 @@ export interface DispatchActionResponse {
 export interface TicketBreakdown {
   readonly ticket: DestinationTicket;
   readonly completed: boolean;
+  readonly effectivePoints?: number;
+  readonly isChaosHalved?: boolean;
 }
 
 export interface PlayerFinalStanding {
@@ -78,6 +80,10 @@ export interface PlayerFinalStanding {
   readonly longestPathLength?: number;
   readonly hasTransAmericaExpress?: boolean;
   readonly transAmericaExpressBonus?: number;
+  readonly alvinCards?: number;
+  readonly dexterCards?: number;
+  readonly alvinBonus?: number;
+  readonly dexterBonus?: number;
 }
 
 export interface StateSyncPayload {

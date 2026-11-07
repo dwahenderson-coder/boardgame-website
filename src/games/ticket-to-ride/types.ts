@@ -13,6 +13,8 @@ export type TrainCardColor =
 
 export type RouteColor = TrainCardColor | 'GRAY';
 
+export type MonsterType = 'ALVIN' | 'DEXTER';
+
 export interface DestinationTicket {
   readonly id: string;
   readonly from: string;
@@ -41,10 +43,25 @@ export interface PlayerState {
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
   readonly recentDrawnCards: Partial<Record<TrainCardColor, number>>;
+  readonly alvinCards?: number;
+  readonly dexterCards?: number;
+  readonly faceUpAlvinTurnsRemaining?: number;
+  readonly faceUpDexterTurnsRemaining?: number;
+}
+
+export interface AlvinAndDexterState {
+  readonly enabled: boolean;
+  readonly alvinCity: string | null;
+  readonly dexterCity: string | null;
+  readonly alvinDeckRemaining: number;
+  readonly dexterDeckRemaining: number;
+  readonly movedMonsterThisTurn: boolean;
+  readonly monsterToPlace: MonsterType | null;
 }
 
 export type GamePhase =
   | 'INITIAL_TICKET_SELECTION'
+  | 'MONSTER_PLACEMENT'
   | 'PLAYING'
   | 'FINAL_ROUND'
   | 'GAME_OVER';
@@ -52,7 +69,8 @@ export type GamePhase =
 export type TurnStep =
   | 'AWAITING_ACTION'
   | 'DREW_ONE_CARD'
-  | 'CHOOSING_TICKETS';
+  | 'CHOOSING_TICKETS'
+  | 'PLACING_MONSTER';
 
 export interface GameState {
   readonly phase: GamePhase;
@@ -68,6 +86,7 @@ export interface GameState {
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
   readonly lastActionSummary: string | null;
+  readonly alvinAndDexter?: AlvinAndDexterState;
 }
 
 export interface SanitizedOpponentState {
@@ -77,6 +96,10 @@ export interface SanitizedOpponentState {
   readonly pendingTicketCount: number;
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
+  readonly alvinCards?: number;
+  readonly dexterCards?: number;
+  readonly hasFaceUpAlvin?: boolean;
+  readonly hasFaceUpDexter?: boolean;
 }
 
 export interface SanitizedGameState {
@@ -95,6 +118,7 @@ export interface SanitizedGameState {
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
   readonly lastActionSummary: string | null;
+  readonly alvinAndDexter?: AlvinAndDexterState;
 }
 
 // --- Turn Actions ---
@@ -127,14 +151,28 @@ export interface KeepTicketsAction {
   readonly ticketIds: readonly string[];
 }
 
+export interface PlaceMonsterAction {
+  readonly type: 'PLACE_MONSTER';
+  readonly monster: MonsterType;
+  readonly cityName: string;
+}
+
+export interface MoveMonsterAction {
+  readonly type: 'MOVE_MONSTER';
+  readonly monster: MonsterType;
+  readonly locomotivesSpent: 1 | 2;
+  readonly targetCity: string;
+}
+
 export type Action =
   | DrawCardsAction
   | ClaimRouteAction
   | DrawTicketsAction
-  | KeepTicketsAction;
+  | KeepTicketsAction
+  | PlaceMonsterAction
+  | MoveMonsterAction;
 
 export interface ValidationResult {
   readonly valid: boolean;
   readonly reason?: string;
 }
-

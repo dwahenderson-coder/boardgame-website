@@ -87,6 +87,12 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [
       {
+        id: 'alvin_and_dexter',
+        name: 'Alvin & Dexter',
+        description:
+          'Adds Alvin the Alien (🛸 Flying Saucer) & Dexter the Dinosaur (🦖 T-Rex)! Cities in Chaos block route claims and halve ticket values. Spend 1–2 Locomotives on your turn to move a monster and collect Monster cards (+15 pts for most Alvin / Dexter cards).',
+      },
+      {
         id: '1910_mystery_train',
         name: '1910 Mystery Train',
         description:

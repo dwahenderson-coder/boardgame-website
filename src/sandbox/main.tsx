@@ -44,7 +44,15 @@ import {
 } from '../games/registry.js';
 import {
   ALL_TRAIN_CARD_COLORS,
+  ALVIN_BONUS_POINTS,
+  DEXTER_BONUS_POINTS,
+  getAllBoardCities,
+  getEffectiveTicketPoints,
+  getMonsterBonusRecipients,
+  getReachableMonsterCities,
   getTransAmericaExpressRecipients,
+  isCityInChaos,
+  MonsterType,
   TRANS_AMERICA_EXPRESS_BONUS,
 } from '../games/ticket-to-ride/index.js';
 import {
@@ -170,6 +178,13 @@ export const SandboxApp: React.FC = () => {
   const [localSelectedGameId, setLocalSelectedGameId] = useState<GameId>('ttr');
   const [playerCountInput, setPlayerCountInput] = useState<number>(3);
   const [seedInput, setSeedInput] = useState<string>('20261031');
+  const [localEnableAlvinAndDexter, setLocalEnableAlvinAndDexter] =
+    useState<boolean>(false);
+
+  // --- Alvin & Dexter Move Monster UI State ---
+  const [moveMonsterOpen, setMoveMonsterOpen] = useState<boolean>(false);
+  const [selectedMonster, setSelectedMonster] = useState<MonsterType>('ALVIN');
+  const [selectedLocoCost, setSelectedLocoCost] = useState<1 | 2>(1);
 
   // --- Local Core Engine State ---
   const [localGameState, setLocalGameState] = useState<AnyGameState>(() =>
@@ -464,6 +479,10 @@ export const SandboxApp: React.FC = () => {
     const { longestPathByPlayer, recipients } =
       getTransAmericaExpressRecipients(ts);
     const recipientSet = new Set(recipients);
+    const { alvinRecipients, dexterRecipients } =
+      getMonsterBonusRecipients(ts);
+    const alvinSet = new Set(alvinRecipients);
+    const dexterSet = new Set(dexterRecipients);
 
     return ts.playerOrder
       .map((pid) => {
@@ -477,25 +496,37 @@ export const SandboxApp: React.FC = () => {
         let ticketPoints = 0;
         const tickets = p.tickets.map((ticket) => {
           const completed = g.isConnected(ticket.from, ticket.to);
-          ticketPoints += completed ? ticket.points : -ticket.points;
-          return { ticket, completed };
+          const { points: effectivePoints, isChaosHalved } =
+            getEffectiveTicketPoints(ticket, ts);
+          ticketPoints += completed ? effectivePoints : -effectivePoints;
+          return { ticket, completed, effectivePoints, isChaosHalved };
         });
         const hasTransAmericaExpress = recipientSet.has(pid);
         const transAmericaExpressBonus = hasTransAmericaExpress
           ? TRANS_AMERICA_EXPRESS_BONUS
           : 0;
+        const alvinBonus = alvinSet.has(pid) ? ALVIN_BONUS_POINTS : 0;
+        const dexterBonus = dexterSet.has(pid) ? DEXTER_BONUS_POINTS : 0;
         return {
           playerId: pid,
           name: pid,
           routePoints: p.claimedRoutePoints,
           ticketPoints,
           totalScore:
-            p.claimedRoutePoints + ticketPoints + transAmericaExpressBonus,
+            p.claimedRoutePoints +
+            ticketPoints +
+            transAmericaExpressBonus +
+            alvinBonus +
+            dexterBonus,
           trainsRemaining: p.trainsRemaining,
           tickets,
           longestPathLength: longestPathByPlayer[pid] ?? 0,
           hasTransAmericaExpress,
           transAmericaExpressBonus,
+          alvinCards: p.alvinCards ?? 0,
+          dexterCards: p.dexterCards ?? 0,
+          alvinBonus,
+          dexterBonus,
         };
       })
       .sort((a, b) => {
@@ -526,10 +557,14 @@ export const SandboxApp: React.FC = () => {
     }
     let score = ttrSanitized.self.claimedRoutePoints;
     for (const tkt of ttrSanitized.self.tickets) {
+      const { points: effectivePoints } = getEffectiveTicketPoints(
+        tkt,
+        ttrSanitized
+      );
       if (viewedPlayerGraph.isConnected(tkt.from, tkt.to)) {
-        score += tkt.points;
+        score += effectivePoints;
       } else {
-        score -= tkt.points;
+        score -= effectivePoints;
       }
     }
     return score;
@@ -587,7 +622,8 @@ export const SandboxApp: React.FC = () => {
 
   const handleStartNewLocalGame = (
     overrideGameId?: GameId,
-    overridePlayerCount?: number
+    overridePlayerCount?: number,
+    overrideAlvinAndDexter?: boolean
   ) => {
     const targetGameId = overrideGameId ?? localSelectedGameId;
     const engine = GameRegistry[targetGameId];
@@ -596,6 +632,8 @@ export const SandboxApp: React.FC = () => {
       engine.maxPlayers,
       Math.max(engine.minPlayers, requestedCount)
     );
+    const useAlvinAndDexter =
+      overrideAlvinAndDexter ?? localEnableAlvinAndDexter;
     setLocalSelectedGameId(targetGameId);
     setPlayerCountInput(clampedCount);
 
@@ -604,10 +642,14 @@ export const SandboxApp: React.FC = () => {
       ? Math.floor(Math.random() * 1_000_000)
       : parsedSeed;
     const ids = generatePlayerIds(clampedCount);
-    const nextState = engine.initGame(ids, effectiveSeed);
+    const nextState = engine.initGame(ids, effectiveSeed, {
+      selectedExpansions:
+        targetGameId === 'ttr' && useAlvinAndDexter ? ['alvin_and_dexter'] : [],
+    });
     setLocalGameState(nextState);
     setSelectedRouteId(null);
     setSelectedPendingIds([]);
+    setMoveMonsterOpen(false);
     setLocalErrorBanner(null);
     setActionLog([]);
     if (viewport !== 'GOD_MODE' && !ids.includes(viewport)) {
@@ -742,6 +784,48 @@ export const SandboxApp: React.FC = () => {
     }
     return set;
   }, [hoveredTicket, selectedRoute]);
+
+  const selectableMonsterCities = useMemo<ReadonlySet<string>>(() => {
+    const empty = new Set<string>();
+    if (!ttrSanitized?.alvinAndDexter?.enabled || isControlsLocked) {
+      return empty;
+    }
+    const ad = ttrSanitized.alvinAndDexter;
+    if (ttrSanitized.phase === 'MONSTER_PLACEMENT') {
+      const cities = new Set(getAllBoardCities(ttrSanitized.routes));
+      if (ad.alvinCity) {
+        cities.delete(ad.alvinCity);
+      }
+      return cities;
+    }
+    if (
+      moveMonsterOpen &&
+      (ttrSanitized.phase === 'PLAYING' || ttrSanitized.phase === 'FINAL_ROUND')
+    ) {
+      const startCity =
+        selectedMonster === 'ALVIN' ? ad.alvinCity : ad.dexterCity;
+      const otherMonsterCity =
+        selectedMonster === 'ALVIN' ? ad.dexterCity : ad.alvinCity;
+      if (!startCity) {
+        return empty;
+      }
+      return new Set(
+        getReachableMonsterCities(
+          ttrSanitized.routes,
+          startCity,
+          otherMonsterCity,
+          selectedLocoCost
+        )
+      );
+    }
+    return empty;
+  }, [
+    ttrSanitized,
+    isControlsLocked,
+    moveMonsterOpen,
+    selectedMonster,
+    selectedLocoCost,
+  ]);
 
   const togglePendingTicketSelection = (ticketId: string) => {
     setSelectedPendingIds((prev) =>
@@ -890,6 +974,26 @@ export const SandboxApp: React.FC = () => {
                   className="w-20 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 font-mono text-xs focus:outline-none focus:border-amber-400"
                 />
               </div>
+
+              {localSelectedGameId === 'ttr' && (
+                <label className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-800/80 border border-purple-500/40 text-purple-200 text-xs font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localEnableAlvinAndDexter}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setLocalEnableAlvinAndDexter(next);
+                      handleStartNewLocalGame(
+                        localSelectedGameId,
+                        playerCountInput,
+                        next
+                      );
+                    }}
+                    className="accent-purple-400 rounded"
+                  />
+                  <span>🛸🦖 Alvin & Dexter</span>
+                </label>
+              )}
 
               <button
                 onClick={() => handleStartNewLocalGame()}
@@ -1198,6 +1302,34 @@ export const SandboxApp: React.FC = () => {
                     }
                     selectedRouteId={selectedRouteId}
                     highlightedCities={highlightedCities}
+                    alvinCity={ttrSanitized.alvinAndDexter?.alvinCity ?? null}
+                    dexterCity={ttrSanitized.alvinAndDexter?.dexterCity ?? null}
+                    selectableMonsterCities={selectableMonsterCities}
+                    onSelectCity={(cityName) => {
+                      if (isControlsLocked) {
+                        return;
+                      }
+                      if (
+                        ttrSanitized.phase === 'MONSTER_PLACEMENT' &&
+                        ttrSanitized.alvinAndDexter?.monsterToPlace
+                      ) {
+                        dispatchEngineAction(viewedPlayerId, {
+                          type: 'PLACE_MONSTER',
+                          monster: ttrSanitized.alvinAndDexter.monsterToPlace,
+                          cityName,
+                        });
+                        return;
+                      }
+                      if (moveMonsterOpen) {
+                        dispatchEngineAction(viewedPlayerId, {
+                          type: 'MOVE_MONSTER',
+                          monster: selectedMonster,
+                          locomotivesSpent: selectedLocoCost,
+                          targetCity: cityName,
+                        });
+                        setMoveMonsterOpen(false);
+                      }
+                    }}
                     onSelectRoute={(route) => {
                       if (isControlsLocked) {
                         return;
@@ -1207,6 +1339,222 @@ export const SandboxApp: React.FC = () => {
                       );
                     }}
                   />
+
+                  {/* Alvin & Dexter Initial Placement Banner */}
+                  {ttrSanitized.phase === 'MONSTER_PLACEMENT' &&
+                    ttrSanitized.alvinAndDexter?.monsterToPlace && (
+                      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 w-[480px] bg-slate-900/95 border-2 border-purple-500/80 rounded-2xl shadow-2xl backdrop-blur-md p-4 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                            Alvin & Dexter Setup • Initial Monster Placement
+                          </span>
+                          <span className="font-mono text-[11px] text-amber-300 font-bold">
+                            {ttrSanitized.alvinAndDexter.monsterToPlace ===
+                            'ALVIN'
+                              ? '🛸 Step 1/2: Place Alvin'
+                              : '🦖 Step 2/2: Place Dexter'}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-slate-100 mt-1.5">
+                          {formatPlayerLabel(activePlayerId)}: Select a Starting
+                          City for{' '}
+                          {ttrSanitized.alvinAndDexter.monsterToPlace ===
+                          'ALVIN'
+                            ? 'Alvin (Flying Saucer)'
+                            : 'Dexter (T-Rex)'}
+                        </h3>
+                        <p className="text-[11px] text-slate-300 mt-1">
+                          {isMyTurn || runnerMode === 'LOCAL'
+                            ? 'Click any highlighted city on the map to place the monster and plunge that city into chaos!'
+                            : `Waiting for ${formatPlayerLabel(
+                                activePlayerId
+                              )} to select a starting city on the map...`}
+                        </p>
+                      </div>
+                    )}
+
+                  {/* Alvin & Dexter HUD & Move Monster Drawer */}
+                  {ttrSanitized.alvinAndDexter?.enabled && (
+                    <div className="absolute top-3 right-3 z-30 w-80 bg-slate-900/95 border border-purple-500/50 rounded-2xl shadow-2xl backdrop-blur-md p-3 text-xs">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="font-black text-purple-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                          <span>🛸🦖</span>
+                          <span>Alvin & Dexter Chaos</span>
+                        </span>
+                        {(ttrSanitized.phase === 'PLAYING' ||
+                          ttrSanitized.phase === 'FINAL_ROUND') && (
+                          <button
+                            type="button"
+                            disabled={
+                              isControlsLocked ||
+                              ttrSanitized.alvinAndDexter.movedMonsterThisTurn
+                            }
+                            onClick={() => setMoveMonsterOpen((o) => !o)}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border transition ${
+                              moveMonsterOpen
+                                ? 'bg-purple-500 text-slate-950 border-purple-300'
+                                : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border-purple-500/50 disabled:opacity-40'
+                            }`}
+                          >
+                            {ttrSanitized.alvinAndDexter.movedMonsterThisTurn
+                              ? '✓ Monster Moved'
+                              : moveMonsterOpen
+                              ? '✕ Cancel Move'
+                              : '🛸🦖 Move Monster'}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="p-2 rounded-xl bg-slate-950/90 border border-emerald-500/30">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-emerald-300">
+                              🛸 Alvin
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              Deck:{' '}
+                              {ttrSanitized.alvinAndDexter.alvinDeckRemaining}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-semibold text-white mt-0.5 truncate">
+                            {ttrSanitized.alvinAndDexter.alvinCity ??
+                              'Unplaced'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
+                            <span>
+                              Your Cards:{' '}
+                              <strong className="text-emerald-300">
+                                {ttrSanitized.self.alvinCards ?? 0}
+                              </strong>
+                            </span>
+                            {(ttrSanitized.self.faceUpAlvinTurnsRemaining ??
+                              0) > 0 && (
+                              <span
+                                className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 font-bold text-[9px]"
+                                title="Face-up until the end of your next turn (blocks moving Alvin)"
+                              >
+                                FACE-UP
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-2 rounded-xl bg-slate-950/90 border border-orange-500/30">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-orange-300">
+                              🦖 Dexter
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              Deck:{' '}
+                              {ttrSanitized.alvinAndDexter.dexterDeckRemaining}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-semibold text-white mt-0.5 truncate">
+                            {ttrSanitized.alvinAndDexter.dexterCity ??
+                              'Unplaced'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
+                            <span>
+                              Your Cards:{' '}
+                              <strong className="text-orange-300">
+                                {ttrSanitized.self.dexterCards ?? 0}
+                              </strong>
+                            </span>
+                            {(ttrSanitized.self.faceUpDexterTurnsRemaining ??
+                              0) > 0 && (
+                              <span
+                                className="px-1.5 py-0.2 rounded bg-orange-500/20 border border-orange-400/50 text-orange-200 font-bold text-[9px]"
+                                title="Face-up until the end of your next turn (blocks moving Dexter)"
+                              >
+                                FACE-UP
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {moveMonsterOpen && (
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMonster('ALVIN')}
+                              className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] border transition ${
+                                selectedMonster === 'ALVIN'
+                                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              🛸 Move Alvin
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMonster('DEXTER')}
+                              className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] border transition ${
+                                selectedMonster === 'DEXTER'
+                                  ? 'bg-orange-500/25 border-orange-400 text-orange-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              🦖 Move Dexter
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedLocoCost(1)}
+                              className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] border transition ${
+                                selectedLocoCost === 1
+                                  ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              🌈 1 Loco (1–3 hops)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedLocoCost(2)}
+                              className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] border transition ${
+                                selectedLocoCost === 2
+                                  ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-400'
+                              }`}
+                            >
+                              🌈🌈 2 Locos (4–6 hops)
+                            </button>
+                          </div>
+
+                          <div className="text-[10px] text-slate-300 bg-slate-950/90 border border-slate-800 rounded-lg p-2">
+                            {(selectedMonster === 'ALVIN' &&
+                              (ttrSanitized.self.faceUpAlvinTurnsRemaining ??
+                                0) > 0) ||
+                            (selectedMonster === 'DEXTER' &&
+                              (ttrSanitized.self.faceUpDexterTurnsRemaining ??
+                                0) > 0) ? (
+                              <span className="text-rose-300 font-semibold">
+                                ⚠️ You have a face-up {selectedMonster} card!
+                                You cannot move {selectedMonster} until after
+                                your next turn.
+                              </span>
+                            ) : ttrSanitized.self.hand.LOCOMOTIVE <
+                              selectedLocoCost ? (
+                              <span className="text-rose-300 font-semibold">
+                                ⚠️ Requires {selectedLocoCost} Locomotive(s)
+                                (you have {ttrSanitized.self.hand.LOCOMOTIVE}).
+                              </span>
+                            ) : (
+                              <span>
+                                Click any pulsing purple city on the map (
+                                <strong>{selectableMonsterCities.size}</strong>{' '}
+                                reachable) to move {selectedMonster} there!
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Claim Route Interactive Popover when a route is clicked */}
                   {selectedRoute && !isControlsLocked && (
@@ -1463,7 +1811,7 @@ export const SandboxApp: React.FC = () => {
                     {/* Opponent Sanitized Summary Strip */}
                     <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
                       <span>Opponents (Sanitized Counts Only):</span>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         {Object.values(ttrSanitized.opponents).map((opp) => (
                           <span
                             key={opp.id}
@@ -1471,6 +1819,15 @@ export const SandboxApp: React.FC = () => {
                           >
                             {formatPlayerLabel(opp.id)}: 🃏{opp.handCount} 🎫
                             {opp.ticketCount}
+                            {ttrSanitized.alvinAndDexter?.enabled && (
+                              <>
+                                {' '}
+                                🛸{opp.alvinCards ?? 0}
+                                {opp.hasFaceUpAlvin ? '*' : ''} 🦖
+                                {opp.dexterCards ?? 0}
+                                {opp.hasFaceUpDexter ? '*' : ''}
+                              </>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -1584,11 +1941,15 @@ export const SandboxApp: React.FC = () => {
                           tkt.from,
                           tkt.to
                         );
+                        const { points: effectivePoints, isChaosHalved } =
+                          getEffectiveTicketPoints(tkt, ttrSanitized);
                         return (
                           <DestinationTicketCardVisual
                             key={tkt.id}
                             ticket={tkt}
                             completed={completed}
+                            isChaosHalved={isChaosHalved}
+                            effectivePoints={effectivePoints}
                             onMouseEnter={() => setHoveredTicket(tkt)}
                             onMouseLeave={() => setHoveredTicket(null)}
                           />
@@ -1936,7 +2297,7 @@ export const SandboxApp: React.FC = () => {
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-3 font-mono">
+                          <div className="flex items-center gap-2 font-mono flex-wrap justify-end">
                             {activeGameId === 'ttr' &&
                               standing.longestPathLength !== undefined && (
                                 <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300">
@@ -1956,6 +2317,24 @@ export const SandboxApp: React.FC = () => {
                                 {standing.transAmericaExpressBonus ?? 10} pts)
                               </span>
                             )}
+                            {(standing.alvinBonus ?? 0) > 0 && (
+                              <span
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/60 text-emerald-300 text-xs font-extrabold"
+                                title="Awarded +15 points for holding the most Alvin monster cards"
+                              >
+                                🛸 Most Alvin ({standing.alvinCards ?? 0} cards:
+                                +{standing.alvinBonus} pts)
+                              </span>
+                            )}
+                            {(standing.dexterBonus ?? 0) > 0 && (
+                              <span
+                                className="px-2.5 py-1 rounded-lg bg-orange-500/20 border border-orange-400/60 text-orange-300 text-xs font-extrabold"
+                                title="Awarded +15 points for holding the most Dexter monster cards"
+                              >
+                                🦖 Most Dexter ({standing.dexterCards ?? 0}{' '}
+                                cards: +{standing.dexterBonus} pts)
+                              </span>
+                            )}
                             <span className="px-3 py-1 rounded-lg bg-slate-900 border border-emerald-500/40 text-base font-black text-emerald-300">
                               {standing.totalScore}{' '}
                               {activeGameId === 'catan' ? 'VP' : 'pts'}
@@ -1966,26 +2345,42 @@ export const SandboxApp: React.FC = () => {
                         {/* Revealed Destination Tickets (for TTR) */}
                         {standing.tickets.length > 0 && (
                           <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap gap-2">
-                            {standing.tickets.map(({ ticket, completed }) => (
-                              <div
-                                key={ticket.id}
-                                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${
-                                  completed
-                                    ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
-                                    : 'bg-rose-950/60 border-rose-500/50 text-rose-200'
-                                }`}
-                              >
-                                <span>{completed ? '✓' : '✗'}</span>
-                                <span>
-                                  {ticket.from} → {ticket.to}
-                                </span>
-                                <span className="font-mono font-bold">
-                                  {completed
-                                    ? `+${ticket.points}`
-                                    : `-${ticket.points}`}
-                                </span>
-                              </div>
-                            ))}
+                            {standing.tickets.map(
+                              ({
+                                ticket,
+                                completed,
+                                effectivePoints,
+                                isChaosHalved,
+                              }) => {
+                                const pts = effectivePoints ?? ticket.points;
+                                return (
+                                  <div
+                                    key={ticket.id}
+                                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${
+                                      completed
+                                        ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+                                        : 'bg-rose-950/60 border-rose-500/50 text-rose-200'
+                                    }`}
+                                  >
+                                    <span>{completed ? '✓' : '✗'}</span>
+                                    <span>
+                                      {ticket.from} → {ticket.to}
+                                    </span>
+                                    {isChaosHalved && (
+                                      <span
+                                        className="px-1 py-0.2 rounded bg-purple-950/90 border border-purple-500/50 text-purple-200 text-[9px] font-bold"
+                                        title={`City in Chaos: Halved from ${ticket.points} to ${pts} (rounded down)`}
+                                      >
+                                        🛸🦖 Chaos ½ ({ticket.points}→{pts})
+                                      </span>
+                                    )}
+                                    <span className="font-mono font-bold">
+                                      {completed ? `+${pts}` : `-${pts}`}
+                                    </span>
+                                  </div>
+                                );
+                              }
+                            )}
                           </div>
                         )}
                       </div>

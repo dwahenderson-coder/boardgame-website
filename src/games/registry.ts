@@ -225,8 +225,16 @@ export const GameRegistry: Readonly<
 > = {
   ttr: {
     ...findMetadata('ttr'),
-    initGame: (playerIds: string[], seed: number) =>
-      initTTRGame(playerIds, seed),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) =>
+      initTTRGame(playerIds, seed, {
+        enableAlvinAndDexter: Boolean(
+          options?.selectedExpansions?.includes('alvin_and_dexter')
+        ),
+      }),
     validateAction: validateTTRAction,
     applyAction: applyTTRAction,
     getPlayerPerspective: getTTRPlayerPerspective,

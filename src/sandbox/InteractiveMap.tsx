@@ -14,7 +14,11 @@ interface InteractiveMapProps {
   readonly playerColors?: Readonly<Record<string, string>>;
   readonly selectedRouteId: string | null;
   readonly highlightedCities: ReadonlySet<string>;
+  readonly alvinCity?: string | null;
+  readonly dexterCity?: string | null;
+  readonly selectableMonsterCities?: ReadonlySet<string>;
   readonly onSelectRoute: (route: RouteEdge) => void;
+  readonly onSelectCity?: (cityName: string) => void;
 }
 
 interface ComputedRouteGeometry {
@@ -99,7 +103,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   playerColors = {},
   selectedRouteId,
   highlightedCities,
+  alvinCity = null,
+  dexterCity = null,
+  selectableMonsterCities,
   onSelectRoute,
+  onSelectCity,
 }) => {
   const [hoveredRouteId, setHoveredRouteId] = useState<string | null>(null);
 
@@ -696,11 +704,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </g>
 
         {/* =================================================================
-            4. RENDER CITIES (NODES)
+            4. RENDER CITIES (NODES) & ALVIN / DEXTER MONSTERS
            ================================================================= */}
         <g>
           {Object.entries(CITY_COORDINATES).map(([cityName, coord]) => {
             const isHighlighted = highlightedCities.has(cityName);
+            const isAlvinHere = alvinCity === cityName;
+            const isDexterHere = dexterCity === cityName;
+            const isChaosCity = isAlvinHere || isDexterHere;
+            const isSelectableMonsterTarget =
+              selectableMonsterCities?.has(cityName) ?? false;
             const dx = coord.labelOffset?.dx ?? 0;
             const dy = coord.labelOffset?.dy ?? -14;
 
@@ -708,8 +721,46 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               <g
                 key={cityName}
                 transform={`translate(${coord.x}, ${coord.y})`}
-                className="pointer-events-none"
+                onClick={() => {
+                  if (isSelectableMonsterTarget && onSelectCity) {
+                    onSelectCity(cityName);
+                  }
+                }}
+                className={
+                  isSelectableMonsterTarget
+                    ? 'cursor-pointer'
+                    : 'pointer-events-none'
+                }
               >
+                {/* Clickable target halo when placing or moving Alvin / Dexter */}
+                {isSelectableMonsterTarget && (
+                  <>
+                    <circle
+                      r="20"
+                      fill="rgba(250, 204, 21, 0.22)"
+                      stroke="#facc15"
+                      strokeWidth="2.5"
+                      strokeDasharray="4 2"
+                    />
+                    <circle r="13" fill="rgba(250, 204, 21, 0.35)" />
+                  </>
+                )}
+
+                {/* City in Chaos Hazard Aura */}
+                {isChaosCity && (
+                  <circle
+                    r="21"
+                    fill={
+                      isAlvinHere
+                        ? 'rgba(168, 85, 247, 0.28)'
+                        : 'rgba(249, 115, 22, 0.28)'
+                    }
+                    stroke={isAlvinHere ? '#c084fc' : '#fb923c'}
+                    strokeWidth="2.5"
+                    strokeDasharray="3 2"
+                  />
+                )}
+
                 {isHighlighted && (
                   <circle
                     r="16"
@@ -719,18 +770,144 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     strokeDasharray="3 2"
                   />
                 )}
+
                 {/* Outer Brass/Station Ring */}
                 <circle
-                  r={isHighlighted ? 8.5 : 6.5}
-                  fill={isHighlighted ? '#10b981' : '#fef3c7'}
+                  r={isHighlighted || isSelectableMonsterTarget ? 8.5 : 6.5}
+                  fill={
+                    isAlvinHere
+                      ? '#a855f7'
+                      : isDexterHere
+                      ? '#f97316'
+                      : isSelectableMonsterTarget
+                      ? '#facc15'
+                      : isHighlighted
+                      ? '#10b981'
+                      : '#fef3c7'
+                  }
                   stroke="#020617"
                   strokeWidth="2.5"
                 />
                 {/* Inner Station Hub */}
                 <circle
                   r="2.8"
-                  fill={isHighlighted ? '#022c22' : '#78350f'}
+                  fill={
+                    isHighlighted || isChaosCity ? '#020617' : '#78350f'
+                  }
                 />
+
+                {/* ALVIN: Represented on the Board as a Flying Saucer (UFO) */}
+                {isAlvinHere && (
+                  <g transform="translate(0, -24)">
+                    {/* Tractor Beam */}
+                    <polygon
+                      points="-8,6 8,6 13,22 -13,22"
+                      fill="rgba(74, 222, 128, 0.32)"
+                    />
+                    {/* Alien Glass Cockpit Dome */}
+                    <path
+                      d="M -9,1 A 9,8 0 0,1 9,1 Z"
+                      fill="#4ade80"
+                      stroke="#020617"
+                      strokeWidth="1.4"
+                    />
+                    {/* Metallic Flying Saucer Disc */}
+                    <ellipse
+                      cx="0"
+                      cy="2"
+                      rx="16"
+                      ry="5"
+                      fill="#cbd5e1"
+                      stroke="#020617"
+                      strokeWidth="1.6"
+                    />
+                    {/* Glowing UFO Lights */}
+                    <circle cx="-9" cy="2" r="1.6" fill="#a855f7" />
+                    <circle cx="0" cy="3" r="1.8" fill="#fde047" />
+                    <circle cx="9" cy="2" r="1.6" fill="#a855f7" />
+                    {/* ALVIN Chaos Label */}
+                    <rect
+                      x="-26"
+                      y="-17"
+                      width="52"
+                      height="11"
+                      rx="4"
+                      fill="#581c87"
+                      stroke="#e9d5ff"
+                      strokeWidth="1"
+                    />
+                    <text
+                      y="-11.5"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#f3e8ff"
+                      fontSize="6.8"
+                      fontWeight="900"
+                    >
+                      🛸 ALVIN • CHAOS
+                    </text>
+                  </g>
+                )}
+
+                {/* DEXTER: Represented on the Board as a Godzilla-like T-Rex */}
+                {isDexterHere && (
+                  <g transform="translate(0, -24)">
+                    {/* Kaiju Badge Backdrop */}
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r="13"
+                      fill="#7c2d12"
+                      stroke="#fdba74"
+                      strokeWidth="1.6"
+                    />
+                    {/* Dorsal Spikes */}
+                    <polygon
+                      points="-11,-4 -15,-8 -9,-9 -12,-13 -6,-11"
+                      fill="#facc15"
+                      stroke="#020617"
+                      strokeWidth="0.8"
+                    />
+                    {/* Godzilla / T-Rex Head, Jaws & Neck */}
+                    <path
+                      d="M -7,9 L -7,-5 L -2,-10 L 9,-9 L 11,-4 L 3,-3 L 10,1 L 8,4 L 0,2 L 0,9 Z"
+                      fill="#22c55e"
+                      stroke="#020617"
+                      strokeWidth="1.3"
+                      strokeLinejoin="round"
+                    />
+                    {/* Glowing Kaiju Eye */}
+                    <circle cx="1" cy="-6" r="1.5" fill="#fef08a" />
+                    {/* Sharp Teeth */}
+                    <polyline
+                      points="3,-3 5,-1 7,-3 9,-1"
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth="1"
+                    />
+                    {/* DEXTER Chaos Label */}
+                    <rect
+                      x="-28"
+                      y="-23"
+                      width="56"
+                      height="11"
+                      rx="4"
+                      fill="#7c2d12"
+                      stroke="#fed7aa"
+                      strokeWidth="1"
+                    />
+                    <text
+                      y="-17.5"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#ffedd5"
+                      fontSize="6.8"
+                      fontWeight="900"
+                    >
+                      🦖 DEXTER • CHAOS
+                    </text>
+                  </g>
+                )}
 
                 {/* City Name Label */}
                 <g transform={`translate(${dx}, ${dy})`}>
@@ -749,7 +926,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   <text
                     textAnchor="middle"
                     dominantBaseline="central"
-                    fill={isHighlighted ? '#6ee7b7' : '#fef3c7'}
+                    fill={
+                      isSelectableMonsterTarget
+                        ? '#fde047'
+                        : isAlvinHere
+                        ? '#e9d5ff'
+                        : isDexterHere
+                        ? '#fed7aa'
+                        : isHighlighted
+                        ? '#6ee7b7'
+                        : '#fef3c7'
+                    }
                     fontSize="10.5"
                     fontWeight="800"
                   >
@@ -796,6 +983,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   Claimed by{' '}
                   {playerNames[hoveredGeometry.route.ownerId] ??
                     hoveredGeometry.route.ownerId}
+                </span>
+              ) : hoveredGeometry.route.from === alvinCity ||
+                hoveredGeometry.route.to === alvinCity ? (
+                <span className="text-purple-300 font-bold">
+                  🛸 City in Chaos (Alvin) — Blocked!
+                </span>
+              ) : hoveredGeometry.route.from === dexterCity ||
+                hoveredGeometry.route.to === dexterCity ? (
+                <span className="text-orange-300 font-bold">
+                  🦖 City in Chaos (Dexter) — Blocked!
                 </span>
               ) : (
                 <span className="text-emerald-400 font-semibold">

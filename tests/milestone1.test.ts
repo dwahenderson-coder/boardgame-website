@@ -1386,6 +1386,250 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 12. Ticket to Ride Expansion — Alvin & Dexter
+  // ---------------------------------------------------------------------------
+  describe('Ticket to Ride Expansion: Alvin & Dexter', () => {
+    it('places Alvin (last player) and Dexter (second-to-last player), blocks City in Chaos routes, enforces Move Monster hop/deck/face-up rules, and scores chaos tickets + monster bonuses', () => {
+      let state = initGame(['p1', 'p2', 'p3'], 20261107, {
+        enableAlvinAndDexter: true,
+      });
+      expect(state.alvinAndDexter?.enabled).toBe(true);
+      expect(state.alvinAndDexter?.alvinDeckRemaining).toBe(20);
+      expect(state.alvinAndDexter?.dexterDeckRemaining).toBe(20);
+
+      // Complete initial ticket selection for all 3 players
+      for (const pid of ['p1', 'p2', 'p3']) {
+        const pendingIds = state.players[pid]!.pendingTickets.map((t) => t.id);
+        state = applyAction(state, pid, {
+          type: 'KEEP_TICKETS',
+          ticketIds: pendingIds,
+        });
+      }
+
+      // Now in MONSTER_PLACEMENT: last player in turn order (p3) selects starting city for Alvin
+      expect(state.phase).toBe('MONSTER_PLACEMENT');
+      expect(state.turnStep).toBe('PLACING_MONSTER');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p3');
+      expect(state.alvinAndDexter?.monsterToPlace).toBe('ALVIN');
+
+      // Non-active player cannot place Alvin
+      expect(
+        validateAction(state, 'p1', {
+          type: 'PLACE_MONSTER',
+          monster: 'ALVIN',
+          cityName: 'Denver',
+        }).valid
+      ).toBe(false);
+
+      state = applyAction(state, 'p3', {
+        type: 'PLACE_MONSTER',
+        monster: 'ALVIN',
+        cityName: 'Denver',
+      });
+
+      // Next, the player who plays just before p3 (p2) selects starting city for Dexter
+      expect(state.phase).toBe('MONSTER_PLACEMENT');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+      expect(state.alvinAndDexter?.monsterToPlace).toBe('DEXTER');
+
+      // Dexter cannot be placed in the same city as Alvin
+      expect(
+        validateAction(state, 'p2', {
+          type: 'PLACE_MONSTER',
+          monster: 'DEXTER',
+          cityName: 'Denver',
+        }).valid
+      ).toBe(false);
+
+      state = applyAction(state, 'p2', {
+        type: 'PLACE_MONSTER',
+        monster: 'DEXTER',
+        cityName: 'Atlanta',
+      });
+
+      // Now normal play begins with p1 (first player in turn order)
+      expect(state.phase).toBe('PLAYING');
+      expect(state.turnStep).toBe('AWAITING_ACTION');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+      expect(state.alvinAndDexter?.alvinCity).toBe('Denver');
+      expect(state.alvinAndDexter?.dexterCity).toBe('Atlanta');
+
+      // Give p1 plenty of train cards & locomotives to test City in Chaos and Move Monster
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            hand: {
+              ...state.players['p1']!.hand,
+              LOCOMOTIVE: 6,
+              RED: 6,
+              BLUE: 6,
+              GREEN: 6,
+              YELLOW: 6,
+            },
+          },
+          p2: {
+            ...state.players['p2']!,
+            hand: {
+              ...state.players['p2']!.hand,
+              LOCOMOTIVE: 4,
+            },
+          },
+        },
+      };
+
+      // City in Chaos check: Denver (Alvin) and Atlanta (Dexter) block route claiming into/out of them
+      const denverRoute = state.routes.find(
+        (r) =>
+          (r.from === 'Denver' && r.to === 'Omaha') ||
+          (r.from === 'Omaha' && r.to === 'Denver')
+      )!;
+      const chaosClaimCheck = validateAction(state, 'p1', {
+        type: 'CLAIM_ROUTE',
+        routeId: denverRoute.id,
+        payment: { LOCOMOTIVE: denverRoute.length },
+      });
+      expect(chaosClaimCheck.valid).toBe(false);
+      expect(chaosClaimCheck.reason).toContain('City in Chaos');
+
+      // Move Monster: 1 Locomotive allows moving 1-3 cities away (not 4-6 cities away)
+      // From Denver, Helena is 2 hops away (Denver -> Salt Lake City -> Helena)
+      // whereas Miami is >3 hops away
+      expect(
+        validateAction(state, 'p1', {
+          type: 'MOVE_MONSTER',
+          monster: 'ALVIN',
+          locomotivesSpent: 1,
+          targetCity: 'Miami',
+        }).valid
+      ).toBe(false);
+
+      state = applyAction(state, 'p1', {
+        type: 'MOVE_MONSTER',
+        monster: 'ALVIN',
+        locomotivesSpent: 1,
+        targetCity: 'Helena',
+      });
+
+      // Moving a monster is in addition to the player's turn action (still p1's turn!)
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+      expect(state.alvinAndDexter?.alvinCity).toBe('Helena');
+      expect(state.alvinAndDexter?.alvinDeckRemaining).toBe(19);
+      expect(state.players['p1']!.alvinCards).toBe(1);
+      expect(state.players['p1']!.faceUpAlvinTurnsRemaining).toBe(2);
+
+      // Cannot move both monsters during the same turn
+      expect(
+        validateAction(state, 'p1', {
+          type: 'MOVE_MONSTER',
+          monster: 'DEXTER',
+          locomotivesSpent: 1,
+          targetCity: 'Miami',
+        }).valid
+      ).toBe(false);
+
+      // Now that Alvin left Denver, p1 can claim the Denver route as their normal turn action!
+      state = applyAction(state, 'p1', {
+        type: 'CLAIM_ROUTE',
+        routeId: denverRoute.id,
+        payment: { LOCOMOTIVE: denverRoute.length },
+      });
+
+      // After p1's turn ends, p1's face-up Alvin card remains face-up (turnsRemaining = 1)
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+      expect(state.players['p1']!.faceUpAlvinTurnsRemaining).toBe(1);
+      const p2Perspective = getPlayerPerspective(state, 'p2');
+      expect(p2Perspective.opponents['p1']!.hasFaceUpAlvin).toBe(true);
+
+      // p2 uses 2 Locomotives to move Dexter 4-6 cities away from Atlanta (e.g. to Denver or Seattle)
+      // Let's complete p2 and p3 turns by drawing from deck so it returns to p1's next turn
+      state = applyAction(state, 'p2', { type: 'DRAW_CARDS', source: 'DECK' });
+      state = applyAction(state, 'p2', { type: 'DRAW_CARDS', source: 'DECK' });
+      state = applyAction(state, 'p3', { type: 'DRAW_CARDS', source: 'DECK' });
+      state = applyAction(state, 'p3', { type: 'DRAW_CARDS', source: 'DECK' });
+
+      // Now it is p1's next turn: p1 STILL has a face-up Alvin card until the end of this turn!
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p1');
+      expect(state.players['p1']!.faceUpAlvinTurnsRemaining).toBe(1);
+      const repeatAlvinCheck = validateAction(state, 'p1', {
+        type: 'MOVE_MONSTER',
+        monster: 'ALVIN',
+        locomotivesSpent: 1,
+        targetCity: 'Denver',
+      });
+      expect(repeatAlvinCheck.valid).toBe(false);
+      expect(repeatAlvinCheck.reason).toContain('face-up');
+
+      // When p1 finishes their next turn, the face-up Alvin card turns face-down (0 remaining)
+      state = applyAction(state, 'p1', { type: 'DRAW_CARDS', source: 'DECK' });
+      state = applyAction(state, 'p1', { type: 'DRAW_CARDS', source: 'DECK' });
+      expect(state.players['p1']!.faceUpAlvinTurnsRemaining).toBe(0);
+
+      // End-of-game scoring verification:
+      // - Alvin is in Helena, Dexter is in Atlanta ("Cities in Chaos")
+      // - Ticket containing a City in Chaos is worth half its normal value rounded down (13 -> 6)
+      //   for both completed and uncompleted tickets.
+      // - Most Alvin cards awards +15 pts (ties award +15 to all tied players).
+      // - Most Dexter cards awards +15 pts (ties award +15 to all tied players).
+      const scoringState: GameState = {
+        ...state,
+        routes: state.routes.map((r) => {
+          if (
+            (r.from === 'Seattle' && r.to === 'Helena') ||
+            (r.from === 'Helena' && r.to === 'Seattle')
+          ) {
+            return { ...r, ownerId: 'p1' }; // p1 connects Seattle -> Helena
+          }
+          return { ...r, ownerId: null };
+        }),
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            claimedRoutePoints: 0,
+            alvinCards: 2, // tied for most Alvin with p2 -> +15
+            dexterCards: 1, // most Dexter -> +15
+            tickets: [
+              // Completed ticket containing Helena (City in Chaos): 13 -> floor(13/2) = +6
+              { id: 't1', from: 'Seattle', to: 'Helena', points: 13 },
+            ],
+          },
+          p2: {
+            ...state.players['p2']!,
+            claimedRoutePoints: 0,
+            alvinCards: 2, // tied for most Alvin with p1 -> +15
+            dexterCards: 0,
+            tickets: [
+              // Uncompleted ticket containing Atlanta (City in Chaos): 13 -> -floor(13/2) = -6
+              { id: 't2', from: 'Miami', to: 'Atlanta', points: 13 },
+            ],
+          },
+          p3: {
+            ...state.players['p3']!,
+            claimedRoutePoints: 0,
+            alvinCards: 0,
+            dexterCards: 0,
+            tickets: [
+              // Uncompleted ticket NOT in chaos: 11 -> -11
+              { id: 't3', from: 'Boston', to: 'Miami', points: 11 },
+            ],
+          },
+        },
+      };
+
+      const finalScores = calculateFinalScores(scoringState);
+      // p1: +6 (completed chaos ticket) + 10 (Trans America Express) + 15 (Alvin tie) + 15 (Dexter) = 46
+      expect(finalScores['p1']).toBe(46);
+      // p2: -6 (uncompleted chaos ticket) + 15 (Alvin tie) = 9
+      expect(finalScores['p2']).toBe(9);
+      // p3: -11 (uncompleted normal ticket) = -11
+      expect(finalScores['p3']).toBe(-11);
+    });
+  });
 });
 
 

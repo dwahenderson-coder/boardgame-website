@@ -15,6 +15,10 @@ import {
 import { HoldemGameState } from '../games/texas-holdem/index.js';
 import { GameId } from '../games/registry.js';
 import {
+  ALVIN_BONUS_POINTS,
+  DEXTER_BONUS_POINTS,
+  getEffectiveTicketPoints,
+  getMonsterBonusRecipients,
   getTransAmericaExpressRecipients,
   TRANS_AMERICA_EXPRESS_BONUS,
 } from '../games/ticket-to-ride/engine.js';
@@ -476,6 +480,10 @@ export class RoomManager {
     const { longestPathByPlayer, recipients } =
       getTransAmericaExpressRecipients(state);
     const recipientSet = new Set(recipients);
+    const { alvinRecipients, dexterRecipients } =
+      getMonsterBonusRecipients(state);
+    const alvinBonusSet = new Set(alvinRecipients);
+    const dexterBonusSet = new Set(dexterRecipients);
 
     const standings: PlayerFinalStanding[] = state.playerOrder.map(
       (playerId) => {
@@ -490,16 +498,31 @@ export class RoomManager {
         let ticketPoints = 0;
         const tickets = player.tickets.map((ticket) => {
           const completed = graph.isConnected(ticket.from, ticket.to);
-          ticketPoints += completed ? ticket.points : -ticket.points;
-          return { ticket, completed };
+          const { points: effectivePoints, isChaosHalved } =
+            getEffectiveTicketPoints(ticket, state);
+          ticketPoints += completed ? effectivePoints : -effectivePoints;
+          return {
+            ticket,
+            completed,
+            effectivePoints,
+            isChaosHalved,
+          };
         });
 
         const hasTransAmericaExpress = recipientSet.has(playerId);
         const transAmericaExpressBonus = hasTransAmericaExpress
           ? TRANS_AMERICA_EXPRESS_BONUS
           : 0;
+        const alvinBonus = alvinBonusSet.has(playerId) ? ALVIN_BONUS_POINTS : 0;
+        const dexterBonus = dexterBonusSet.has(playerId)
+          ? DEXTER_BONUS_POINTS
+          : 0;
         const totalScore =
-          player.claimedRoutePoints + ticketPoints + transAmericaExpressBonus;
+          player.claimedRoutePoints +
+          ticketPoints +
+          transAmericaExpressBonus +
+          alvinBonus +
+          dexterBonus;
 
         return {
           playerId,
@@ -512,6 +535,14 @@ export class RoomManager {
           longestPathLength: longestPathByPlayer[playerId] ?? 0,
           hasTransAmericaExpress,
           transAmericaExpressBonus,
+          ...(state.alvinAndDexter?.enabled
+            ? {
+                alvinCards: player.alvinCards ?? 0,
+                dexterCards: player.dexterCards ?? 0,
+                alvinBonus,
+                dexterBonus,
+              }
+            : {}),
         };
       }
     );

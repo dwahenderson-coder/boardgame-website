@@ -364,6 +364,8 @@ export const TrainCardDeckVisual: React.FC<TrainCardDeckVisualProps> = ({
 interface DestinationTicketCardVisualProps {
   readonly ticket: DestinationTicket;
   readonly completed: boolean;
+  readonly isChaosHalved?: boolean;
+  readonly effectivePoints?: number;
   readonly onMouseEnter: () => void;
   readonly onMouseLeave: () => void;
 }
@@ -374,9 +376,13 @@ interface DestinationTicketCardVisualProps {
 export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualProps> = ({
   ticket,
   completed,
+  isChaosHalved = false,
+  effectivePoints,
   onMouseEnter,
   onMouseLeave,
 }) => {
+  const displayPts = effectivePoints ?? ticket.points;
+
   return (
     <div
       onMouseEnter={onMouseEnter}
@@ -384,6 +390,8 @@ export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualPr
       className={`relative rounded-xl border-2 px-3 py-2 transition cursor-default select-none shadow-sm ${
         completed
           ? 'bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/80 border-emerald-400/80 text-emerald-100'
+          : isChaosHalved
+          ? 'bg-gradient-to-r from-purple-950/50 via-slate-900 to-orange-950/40 border-purple-400/70 text-slate-100'
           : 'bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/30 border-amber-500/40 hover:border-amber-400/80 text-slate-100'
       }`}
     >
@@ -408,6 +416,11 @@ export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualPr
                 Hover to locate terminals on map
               </span>
             )}
+            {isChaosHalved && (
+              <span className="px-1.5 py-0.2 rounded bg-purple-500/30 border border-purple-400/60 text-purple-200 font-bold text-[9px]">
+                ⚠️ Chaos ½ ({ticket.points}→{displayPts})
+              </span>
+            )}
           </div>
         </div>
 
@@ -416,11 +429,13 @@ export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualPr
           className={`w-8 h-8 rounded-full border-2 flex flex-col items-center justify-center font-mono shrink-0 shadow ${
             completed
               ? 'bg-emerald-500 border-emerald-200 text-slate-950'
+              : isChaosHalved
+              ? 'bg-purple-500/25 border-purple-400 text-purple-200'
               : 'bg-amber-500/20 border-amber-400/80 text-amber-300'
           }`}
         >
           <span className="text-xs font-black leading-none">
-            {completed ? `+${ticket.points}` : ticket.points}
+            {completed ? `+${displayPts}` : displayPts}
           </span>
           <span className="text-[7px] font-bold uppercase leading-none">pts</span>
         </div>
