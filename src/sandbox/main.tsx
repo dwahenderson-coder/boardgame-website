@@ -58,6 +58,7 @@ import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
 import { CribbageBoard } from './CribbageBoard.js';
 import { EuchreBoard } from './EuchreBoard.js';
+import { GameLobby } from './GameLobby.js';
 import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
@@ -750,19 +751,6 @@ export const SandboxApp: React.FC = () => {
     );
   };
 
-  // Player count validation helper for the Waiting Room Lobby
-  const selectedLobbyGameMeta = GameRegistry[mp.selectedGameId];
-  const currentLobbyCount = mp.lobbyPlayers.length;
-  const lobbyShortfall = Math.max(
-    0,
-    selectedLobbyGameMeta.minPlayers - currentLobbyCount
-  );
-  const lobbyExcess = Math.max(
-    0,
-    currentLobbyCount - selectedLobbyGameMeta.maxPlayers
-  );
-  const canStartLobbyGame = lobbyShortfall === 0 && lobbyExcess === 0;
-
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 select-none overflow-hidden">
       {/* =====================================================================
@@ -1091,9 +1079,18 @@ export const SandboxApp: React.FC = () => {
                 {formattedLastAction}
               </div>
             </div>
-            <div className="text-[11px] font-mono text-slate-400 shrink-0">
-              {GameRegistry[activeGameId].title} • Turn #
-              {activeSanitized.turnNumber}
+            <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0">
+              {runnerMode === 'MULTIPLAYER' &&
+                mp.selectedExpansions.length > 0 && (
+                  <span className="px-2 py-0.5 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 font-sans font-bold text-[10px]">
+                    🧩 {mp.selectedExpansions.length} Expansion
+                    {mp.selectedExpansions.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              <span>
+                {GameRegistry[activeGameId].title} • Turn #
+                {activeSanitized.turnNumber}
+              </span>
             </div>
           </div>
 
@@ -1195,6 +1192,9 @@ export const SandboxApp: React.FC = () => {
                     )}
                     playerNames={
                       runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}
+                    }
+                    playerColors={
+                      runnerMode === 'MULTIPLAYER' ? mp.playerColors : {}
                     }
                     selectedRouteId={selectedRouteId}
                     highlightedCities={highlightedCities}
@@ -1766,15 +1766,30 @@ export const SandboxApp: React.FC = () => {
                             ).
                           </p>
                         </div>
-                        <button
-                          onClick={() =>
-                            mp.createRoom(playerNameInput, entrySelectedGameId)
-                          }
-                          disabled={!mp.connected || !playerNameInput.trim()}
-                          className="mt-4 w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black text-xs transition shadow-lg"
-                        >
-                          + Create {GameRegistry[entrySelectedGameId].title} Room
-                        </button>
+                        <div className="flex flex-col gap-2 mt-4">
+                          <button
+                            onClick={() =>
+                              mp.createRoom(
+                                playerNameInput,
+                                entrySelectedGameId
+                              )
+                            }
+                            disabled={!mp.connected || !playerNameInput.trim()}
+                            className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black text-xs transition shadow-lg"
+                          >
+                            + Create {GameRegistry[entrySelectedGameId].title}{' '}
+                            Room
+                          </button>
+                          <button
+                            onClick={() =>
+                              mp.createRoom(playerNameInput, null)
+                            }
+                            disabled={!mp.connected || !playerNameInput.trim()}
+                            className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-bold text-[11px] border border-slate-700 transition"
+                          >
+                            Open Full Game Catalog in Lobby →
+                          </button>
+                        </div>
                       </div>
 
                       {/* Join Flow */}
@@ -1815,250 +1830,26 @@ export const SandboxApp: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                /* 1B. THE WAITING ROOM VIEW (`/room/:id`) WITH GAME SELECTOR CAROUSEL */
-                <div className="w-full max-w-2xl bg-slate-900 border border-amber-500/50 rounded-2xl shadow-2xl p-6 text-xs">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                        Waiting Room • /room/{mp.roomId}
-                      </span>
-                      <h2 className="text-xl font-bold text-slate-100 mt-1">
-                        Game Lobby ({mp.lobbyPlayers.length} Seated)
-                      </h2>
-                    </div>
-                    <button
-                      onClick={mp.leaveRoom}
-                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950 hover:text-rose-200 text-slate-300 font-semibold transition"
-                    >
-                      Leave Lobby
-                    </button>
-                  </div>
-
-                  {/* =========================================================
-                      CATEGORIZED GAME SELECTION MENU (Board Games & Card Games)
-                     ========================================================= */}
-                  <div className="mt-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold uppercase tracking-wider text-slate-300 text-[11px]">
-                        Game Selection Menu
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        {mp.playerId === mp.hostPlayerId
-                          ? '👑 Host Controls: Click any Board or Card game below to switch'
-                          : `🔒 Guest View: Host (${formatPlayerLabel(mp.hostPlayerId ?? 'p1')}) selects the game`}
-                      </span>
-                    </div>
-
-                    {(
-                      [
-                        {
-                          label: '🎲 Board Games',
-                          accent: 'text-emerald-300',
-                          items: BOARD_GAME_METADATA_LIST,
-                        },
-                        {
-                          label: '🃏 Card Games',
-                          accent: 'text-amber-300',
-                          items: CARD_GAME_METADATA_LIST,
-                        },
-                      ] as const
-                    ).map((section) => (
-                      <div key={section.label}>
-                        <div
-                          className={`text-[11px] font-black uppercase tracking-wider mb-1.5 ${section.accent}`}
-                        >
-                          {section.label}
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          {section.items.map((game) => {
-                            const isSelected = mp.selectedGameId === game.id;
-                            const isHost = mp.playerId === mp.hostPlayerId;
-                            const neededForThisGame = Math.max(
-                              0,
-                              game.minPlayers - currentLobbyCount
-                            );
-                            const tooManyForThisGame = Math.max(
-                              0,
-                              currentLobbyCount - game.maxPlayers
-                            );
-
-                            return (
-                              <div
-                                key={game.id}
-                                onClick={() => {
-                                  if (isHost && !isSelected) {
-                                    mp.selectGame(game.id);
-                                  }
-                                }}
-                                className={`p-3.5 rounded-xl border-2 transition flex flex-col justify-between ${
-                                  isSelected
-                                    ? 'bg-emerald-950/45 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
-                                    : 'bg-slate-950/70 border-slate-800 opacity-75'
-                                } ${
-                                  isHost
-                                    ? 'cursor-pointer hover:border-emerald-400/70 hover:opacity-100'
-                                    : 'cursor-default'
-                                }`}
-                              >
-                                <div>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-sm font-black text-slate-100">
-                                      {game.icon} {game.title}
-                                    </span>
-                                    {isSelected ? (
-                                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] uppercase">
-                                        ✓ Active Game
-                                      </span>
-                                    ) : (
-                                      isHost && (
-                                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-semibold">
-                                          Click to Select
-                                        </span>
-                                      )
-                                    )}
-                                  </div>
-
-                                  <div className="mt-1.5 inline-block px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-semibold text-[10px]">
-                                    {game.minPlayers}–{game.maxPlayers} Players
-                                    | {game.durationLabel} |{' '}
-                                    {game.mechanicsLabel}
-                                  </div>
-                                </div>
-
-                                {/* Live Player Requirement Badge */}
-                                <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                                  {neededForThisGame > 0 ? (
-                                    <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-semibold text-[10px]">
-                                      ⏳ Need {neededForThisGame} more player
-                                      {neededForThisGame === 1 ? '' : 's'} for{' '}
-                                      {game.title}
-                                    </span>
-                                  ) : tooManyForThisGame > 0 ? (
-                                    <span className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold text-[10px]">
-                                      ⚠️ Max {game.maxPlayers} players for{' '}
-                                      {game.title}
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold text-[10px]">
-                                      ✓ Player count ready ({currentLobbyCount}/
-                                      {game.maxPlayers})
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Direct Invite URL & Copy Button */}
-                  <div className="mt-4 p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-slate-400 text-[11px] font-medium">
-                        Shareable Direct Invite Link (Room Code:{' '}
-                        <strong className="font-mono text-amber-400">
-                          {mp.roomId}
-                        </strong>
-                        ):
-                      </div>
-                      <div className="font-mono text-xs text-emerald-300 truncate mt-0.5">
-                        {`${window.location.origin}/join/${mp.roomId}`}
-                      </div>
-                    </div>
-                    <button
-                      onClick={handleCopyInviteLink}
-                      className={`px-3.5 py-2 rounded-xl font-bold shrink-0 border transition shadow ${
-                        copiedLink
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700'
-                      }`}
-                    >
-                      {copiedLink ? '✓ Link Copied!' : '📋 Copy Invite Link'}
-                    </button>
-                  </div>
-
-                  {/* Connected Players List with Live Connection Indicators */}
-                  <div className="mt-4">
-                    <div className="text-slate-400 font-semibold mb-2 flex items-center justify-between">
-                      <span>
-                        Connected Players ({currentLobbyCount} /{' '}
-                        {selectedLobbyGameMeta.maxPlayers})
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        Green = Online • Yellow = Reconnecting
-                      </span>
-                    </div>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                      {mp.lobbyPlayers.map((p) => (
-                        <div
-                          key={p.playerId}
-                          className="px-3.5 py-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span
-                              className={`w-2.5 h-2.5 rounded-full ${
-                                p.connected
-                                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
-                                  : 'bg-amber-400 animate-pulse'
-                              }`}
-                            />
-                            <span className="font-bold text-sm text-slate-100">
-                              {p.name}
-                            </span>
-                            <span className="font-mono text-slate-400 text-xs">
-                              ({p.playerId})
-                            </span>
-                            {p.playerId === mp.playerId && (
-                              <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-bold">
-                                YOU
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {!p.connected && (
-                              <span className="text-[10px] text-amber-300 font-mono">
-                                Reconnecting...
-                              </span>
-                            )}
-                            {p.isHost && (
-                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold uppercase">
-                                👑 Host
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Host-Only Start Controls */}
-                  <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between">
-                    <span className="text-slate-400">
-                      {lobbyShortfall > 0
-                        ? `Need ${lobbyShortfall} more player${lobbyShortfall === 1 ? '' : 's'} for ${selectedLobbyGameMeta.title} (${selectedLobbyGameMeta.minPlayers}–${selectedLobbyGameMeta.maxPlayers}P)`
-                        : lobbyExcess > 0
-                        ? `Too many players for ${selectedLobbyGameMeta.title} (max ${selectedLobbyGameMeta.maxPlayers}P)`
-                        : `Ready to launch ${selectedLobbyGameMeta.title}!`}
-                    </span>
-                    {mp.playerId === mp.hostPlayerId ? (
-                      <button
-                        onClick={() => mp.startGame()}
-                        disabled={!canStartLobbyGame}
-                        className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black text-xs transition shadow-lg"
-                      >
-                        ▶ Start {selectedLobbyGameMeta.title}
-                      </button>
-                    ) : (
-                      <span className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-amber-300 font-semibold">
-                        Waiting for Host (
-                        {formatPlayerLabel(mp.hostPlayerId ?? 'p1')}) to start{' '}
-                        {selectedLobbyGameMeta.title}...
-                      </span>
-                    )}
-                  </div>
-                </div>
+                /* 1B. STRUCTURED MULTI-STEP GAME SETUP & CONFIGURATION LOBBY (`/room/:id`) */
+                <GameLobby
+                  roomId={mp.roomId}
+                  playerId={mp.playerId}
+                  hostPlayerId={mp.hostPlayerId}
+                  category={mp.category}
+                  selectedGameId={mp.selectedGameId}
+                  configuredGameId={mp.configuredGameId}
+                  selectedExpansions={mp.selectedExpansions}
+                  playerSettings={mp.playerSettings}
+                  players={mp.lobbyPlayers}
+                  errorBanner={mp.errorBanner}
+                  onSetCategory={(cat) => mp.setGameCategory(cat)}
+                  onSelectGame={(gameId) => mp.selectGame(gameId)}
+                  onToggleExpansion={(expId) => mp.toggleExpansion(expId)}
+                  onChooseColor={(colorId) => mp.chooseColor(colorId)}
+                  onToggleReady={(ready) => mp.toggleReady(ready)}
+                  onStartGame={() => mp.startGame()}
+                  onLeaveRoom={() => mp.leaveRoom()}
+                />
               )}
             </div>
           )}

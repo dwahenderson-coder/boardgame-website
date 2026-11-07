@@ -428,3 +428,4 @@ export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualPr
     </div>
   );
 };
+

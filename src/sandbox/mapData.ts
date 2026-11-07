@@ -188,10 +188,81 @@ export const PLAYER_PALETTES: readonly PlayerPalette[] = [
   },
 ];
 
+export const CUSTOM_COLOR_PALETTES: Readonly<Record<string, PlayerPalette>> = {
+  red: {
+    name: 'Red Express',
+    fillHex: '#ef4444',
+    strokeHex: '#fecaca',
+    badgeClass: 'bg-red-500/20 text-red-300 border-red-500/50',
+    dotClass: 'bg-red-500',
+  },
+  blue: {
+    name: 'Blue Line',
+    fillHex: '#3b82f6',
+    strokeHex: '#bfdbfe',
+    badgeClass: 'bg-blue-500/20 text-blue-300 border-blue-500/50',
+    dotClass: 'bg-blue-500',
+  },
+  green: {
+    name: 'Green Transit',
+    fillHex: '#22c55e',
+    strokeHex: '#bbf7d0',
+    badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50',
+    dotClass: 'bg-emerald-500',
+  },
+  yellow: {
+    name: 'Yellow Limited',
+    fillHex: '#eab308',
+    strokeHex: '#fef08a',
+    badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/50',
+    dotClass: 'bg-amber-400',
+  },
+  black: {
+    name: 'Black Iron',
+    fillHex: '#334155',
+    strokeHex: '#e2e8f0',
+    badgeClass: 'bg-slate-600/30 text-slate-200 border-slate-400/60',
+    dotClass: 'bg-slate-400',
+  },
+  white: {
+    name: 'White Star',
+    fillHex: '#f8fafc',
+    strokeHex: '#94a3b8',
+    badgeClass: 'bg-slate-100/20 text-white border-slate-200/60',
+    dotClass: 'bg-white',
+  },
+  orange: {
+    name: 'Orange Flyer',
+    fillHex: '#f97316',
+    strokeHex: '#fed7aa',
+    badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/50',
+    dotClass: 'bg-orange-500',
+  },
+  purple: {
+    name: 'Purple Royal',
+    fillHex: '#a855f7',
+    strokeHex: '#e9d5ff',
+    badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/50',
+    dotClass: 'bg-purple-500',
+  },
+  brown: {
+    name: 'Bronze Union',
+    fillHex: '#a16207',
+    strokeHex: '#fde047',
+    badgeClass: 'bg-yellow-700/30 text-yellow-200 border-yellow-500/50',
+    dotClass: 'bg-yellow-600',
+  },
+};
+
 export function getPlayerPalette(
   playerId: string,
-  playerOrder: readonly string[]
+  playerOrder: readonly string[],
+  playerColors?: Readonly<Record<string, string>>
 ): PlayerPalette {
+  const customColorId = playerColors?.[playerId];
+  if (customColorId && CUSTOM_COLOR_PALETTES[customColorId]) {
+    return CUSTOM_COLOR_PALETTES[customColorId]!;
+  }
   const idx = playerOrder.indexOf(playerId);
   return PLAYER_PALETTES[(idx >= 0 ? idx : 0) % PLAYER_PALETTES.length]!;
 }

@@ -12,6 +12,12 @@ import { createPRNG } from '../src/common/prng.js';
 import { Deck } from '../src/mechanics/deck.js';
 import { RoomManager } from '../src/server/rooms.js';
 import {
+  BOARD_GAMES_CATALOG,
+  CARD_GAMES_CATALOG,
+  GAME_CATALOG_BY_ID,
+} from '../src/registry/catalog.js';
+import { getEffectivePlayerBounds } from '../src/types/game.js';
+import {
   BOARD_GAME_METADATA_LIST,
   CARD_GAME_METADATA_LIST,
   GameRegistry,
@@ -1312,6 +1318,72 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(standings[1]!.totalScore).toBe(30);
       expect(standings[1]!.hasTransAmericaExpress).toBe(false);
       expect(standings[1]!.longestPathLength).toBe(6);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 11. Multi-Step Game Setup Catalog, Expansions & Lobby Color/Ready State
+  // ---------------------------------------------------------------------------
+  describe('Game Setup Catalog, Expansion Bounds & Lobby Player Settings', () => {
+    it('defines Board and Card game catalogs with colors, expansions, and dynamic player count overrides', () => {
+      expect(BOARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
+        'ttr',
+        'catan',
+        'stockpile',
+        'power_grid',
+      ]);
+      expect(CARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
+        'holdem',
+        'euchre',
+        'cribbage',
+        'kings_corners',
+      ]);
+
+      // Catan base bounds (3-4 players) vs 5-6 Player Extension override (3-6 players)
+      const catanDef = GAME_CATALOG_BY_ID.catan;
+      expect(getEffectivePlayerBounds(catanDef, [])).toEqual({
+        minPlayers: 3,
+        maxPlayers: 4,
+      });
+      expect(
+        getEffectivePlayerBounds(catanDef, ['catan_5_6_player'])
+      ).toEqual({
+        minPlayers: 3,
+        maxPlayers: 6,
+      });
+    });
+
+    it('tracks player color & ready settings and releases claimed color when a player disconnects in LOBBY', () => {
+      const manager = new RoomManager();
+      const { roomId, room } = manager.createRoom('HostAlice', 'sock_1', 'ttr');
+      const joinRes = manager.joinRoom(roomId, 'GuestBob', 'sock_2');
+      expect(joinRes.ok).toBe(true);
+
+      // Host claims 'red' and marks ready; Guest claims 'blue'
+      room.playerSettings.set('p1', { colorId: 'red', ready: true });
+      room.playerSettings.set('p2', { colorId: 'blue', ready: false });
+
+      expect(RoomManager.getPlayerColorsRecord(room)).toEqual({
+        p1: 'red',
+        p2: 'blue',
+      });
+
+      // Guest disconnects while in LOBBY -> 'blue' is released
+      manager.handleDisconnect('sock_2');
+      expect(room.playerSettings.get('p2')).toEqual({
+        colorId: null,
+        ready: false,
+      });
+      expect(RoomManager.getPlayerColorsRecord(room)).toEqual({
+        p1: 'red',
+      });
+
+      // Switching games resets all players' colors and ready flags
+      RoomManager.resetLobbyPlayerSettings(room);
+      expect(room.playerSettings.get('p1')).toEqual({
+        colorId: null,
+        ready: false,
+      });
     });
   });
 });

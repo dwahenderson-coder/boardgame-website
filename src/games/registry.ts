@@ -1,4 +1,14 @@
 import {
+  GAME_CATALOG,
+  GAME_CATALOG_BY_ID,
+} from '../registry/catalog.js';
+import {
+  GameColorDefinition,
+  GameExpansion,
+  GameId,
+  GameSetupOptions,
+} from '../types/game.js';
+import {
   applyCatanAction,
   calculateCatanFinalScores,
   CatanAction,
@@ -80,17 +90,9 @@ import {
   ValidationResult,
 } from './ticket-to-ride/index.js';
 
-export type GameCategory = 'BOARD' | 'CARD';
+export type { GameColorDefinition, GameExpansion, GameId, GameSetupOptions };
 
-export type GameId =
-  | 'ttr'
-  | 'catan'
-  | 'stockpile'
-  | 'power_grid'
-  | 'holdem'
-  | 'euchre'
-  | 'cribbage'
-  | 'kings_corners';
+export type GameCategory = 'BOARD' | 'CARD';
 
 export type AnyGameState =
   | TTRGameState
@@ -127,12 +129,17 @@ export interface GameMetadata {
   readonly category: GameCategory;
   readonly icon: string;
   readonly title: string;
+  readonly name: string;
   readonly subtitle: string;
+  readonly description: string;
   readonly minPlayers: number;
   readonly maxPlayers: number;
+  readonly estimatedMinutes: number;
   readonly durationLabel: string;
   readonly mechanicsLabel: string;
   readonly badgeColor: string;
+  readonly availableColors: readonly GameColorDefinition[];
+  readonly expansions: readonly GameExpansion[];
 }
 
 export interface GameEngineModule<
@@ -140,7 +147,11 @@ export interface GameEngineModule<
   TAction extends AnyGameAction = AnyGameAction,
   TSanitized extends AnySanitizedGameState = AnySanitizedGameState,
 > extends GameMetadata {
-  readonly initGame: (playerIds: string[], seed: number) => TState;
+  readonly initGame: (
+    playerIds: string[],
+    seed: number,
+    options?: GameSetupOptions
+  ) => TState;
   readonly validateAction: (
     state: TState,
     playerId: string,
@@ -158,106 +169,25 @@ export interface GameEngineModule<
   readonly calculateFinalScores: (state: TState) => Record<string, number>;
 }
 
-export const GAME_METADATA_LIST: readonly GameMetadata[] = [
-  // --- BOARD GAMES ---
-  {
-    id: 'ttr',
-    category: 'BOARD',
-    icon: '🚂',
-    title: 'Ticket to Ride',
-    subtitle: 'Cross-Country Rail Adventure',
-    minPlayers: 2,
-    maxPlayers: 5,
-    durationLabel: '~45 min',
-    mechanicsLabel: 'Network & Card Drafting',
-    badgeColor: 'amber',
-  },
-  {
-    id: 'catan',
-    category: 'BOARD',
-    icon: '🏝️',
-    title: 'Catan',
-    subtitle: 'Settlers of the Hex Island',
-    minPlayers: 3,
-    maxPlayers: 4,
-    durationLabel: '~60 min',
-    mechanicsLabel: 'Trading, Building & Dice Production',
-    badgeColor: 'emerald',
-  },
-  {
-    id: 'stockpile',
-    category: 'BOARD',
-    icon: '📈',
-    title: 'Stockpile',
-    subtitle: 'Insider Trading & Market Manipulation',
-    minPlayers: 2,
-    maxPlayers: 5,
-    durationLabel: '~45 min',
-    mechanicsLabel: 'Insider Info, Blind Stockpiles & Bidding',
-    badgeColor: 'cyan',
-  },
-  {
-    id: 'power_grid',
-    category: 'BOARD',
-    icon: '⚡',
-    title: 'Power Grid',
-    subtitle: 'Industrial Power Plant Auctions & Grid Expansion',
-    minPlayers: 2,
-    maxPlayers: 6,
-    durationLabel: '~90 min',
-    mechanicsLabel: 'Plant Auctions, Fuel Scarcity & Dijkstra Grid',
-    badgeColor: 'amber',
-  },
-  // --- CARD GAMES ---
-  {
-    id: 'holdem',
-    category: 'CARD',
-    icon: '🃏',
-    title: "Texas Hold'em",
-    subtitle: 'No-Limit Casino Poker',
-    minPlayers: 2,
-    maxPlayers: 6,
-    durationLabel: '~30 min',
-    mechanicsLabel: 'No-Limit Betting & Hand Evaluation',
-    badgeColor: 'rose',
-  },
-  {
-    id: 'euchre',
-    category: 'CARD',
-    icon: '♠️',
-    title: 'Euchre',
-    subtitle: 'Classic 24-Card Bower Trick-Taking',
-    minPlayers: 2,
-    maxPlayers: 4,
-    durationLabel: '~25 min',
-    mechanicsLabel: 'Trump Calling, Right/Left Bowers & Tricks',
-    badgeColor: 'indigo',
-  },
-  {
-    id: 'cribbage',
-    category: 'CARD',
-    icon: '🪵',
-    title: 'Cribbage',
-    subtitle: '121-Point Pegging & Hand Counting',
-    minPlayers: 2,
-    maxPlayers: 4,
-    durationLabel: '~30 min',
-    mechanicsLabel: 'Crib Discards, 31 Pegging & 15s/Runs',
-    badgeColor: 'cyan',
-  },
-  {
-    id: 'kings_corners',
-    category: 'CARD',
-    icon: '👑',
-    title: 'Kings Corners',
-    subtitle: '4-Card Memory, Knocking & Quarters Pot',
-    minPlayers: 2,
-    maxPlayers: 6,
-    durationLabel: '~20 min',
-    mechanicsLabel: '2-Card Peek, Hidden Swaps & Low Score Knock',
-    badgeColor: 'amber',
-  },
-] as const;
+export const GAME_METADATA_LIST: readonly GameMetadata[] = GAME_CATALOG.map(
+  (def) => ({
+    id: def.id,
+    category: def.category === 'board' ? 'BOARD' : 'CARD',
+    icon: def.icon,
+    title: def.name,
+    name: def.name,
+    subtitle: def.subtitle,
+    description: def.description,
+    minPlayers: def.minPlayers,
+    maxPlayers: def.maxPlayers,
+    estimatedMinutes: def.estimatedMinutes,
+    durationLabel: `~${def.estimatedMinutes} min`,
+    mechanicsLabel: def.mechanicsLabel,
+    badgeColor: def.badgeColor,
+    availableColors: def.availableColors,
+    expansions: def.expansions,
+  })
+);
 
 export const BOARD_GAME_METADATA_LIST: readonly GameMetadata[] =
   GAME_METADATA_LIST.filter((g) => g.category === 'BOARD');
@@ -265,11 +195,36 @@ export const BOARD_GAME_METADATA_LIST: readonly GameMetadata[] =
 export const CARD_GAME_METADATA_LIST: readonly GameMetadata[] =
   GAME_METADATA_LIST.filter((g) => g.category === 'CARD');
 
+function findMetadata(id: GameId): GameMetadata {
+  const found = GAME_METADATA_LIST.find((g) => g.id === id);
+  if (!found) {
+    const def = GAME_CATALOG_BY_ID[id];
+    return {
+      id: def.id,
+      category: def.category === 'board' ? 'BOARD' : 'CARD',
+      icon: def.icon,
+      title: def.name,
+      name: def.name,
+      subtitle: def.subtitle,
+      description: def.description,
+      minPlayers: def.minPlayers,
+      maxPlayers: def.maxPlayers,
+      estimatedMinutes: def.estimatedMinutes,
+      durationLabel: `~${def.estimatedMinutes} min`,
+      mechanicsLabel: def.mechanicsLabel,
+      badgeColor: def.badgeColor,
+      availableColors: def.availableColors,
+      expansions: def.expansions,
+    };
+  }
+  return found;
+}
+
 export const GameRegistry: Readonly<
   Record<GameId, GameEngineModule<any, any, any>>
 > = {
   ttr: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'ttr')!,
+    ...findMetadata('ttr'),
     initGame: (playerIds: string[], seed: number) =>
       initTTRGame(playerIds, seed),
     validateAction: validateTTRAction,
@@ -278,57 +233,73 @@ export const GameRegistry: Readonly<
     calculateFinalScores: calculateTTRFinalScores,
   },
   catan: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'catan')!,
-    initGame: initCatanGame,
+    ...findMetadata('catan'),
+    initGame: (playerIds: string[], seed: number) =>
+      initCatanGame(playerIds, seed),
     validateAction: validateCatanAction,
     applyAction: applyCatanAction,
     getPlayerPerspective: getCatanPlayerPerspective,
     calculateFinalScores: calculateCatanFinalScores,
   },
   stockpile: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'stockpile')!,
-    initGame: initStockpileGame,
+    ...findMetadata('stockpile'),
+    initGame: (playerIds: string[], seed: number) =>
+      initStockpileGame(playerIds, seed),
     validateAction: validateStockpileAction,
     applyAction: applyStockpileAction,
     getPlayerPerspective: getStockpilePlayerPerspective,
     calculateFinalScores: calculateStockpileFinalScores,
   },
   power_grid: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'power_grid')!,
-    initGame: (playerIds: string[], seed: number) =>
-      initPowerGridGame(playerIds, seed),
+    ...findMetadata('power_grid'),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) =>
+      initPowerGridGame(
+        playerIds,
+        seed,
+        options?.mapRegionKeys
+          ? { mapRegionKeys: [...options.mapRegionKeys] }
+          : undefined
+      ),
     validateAction: validatePowerGridAction,
     applyAction: applyPowerGridAction,
     getPlayerPerspective: getPowerGridPlayerPerspective,
     calculateFinalScores: calculatePowerGridFinalScores,
   },
   holdem: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'holdem')!,
-    initGame: initHoldemGame,
+    ...findMetadata('holdem'),
+    initGame: (playerIds: string[], seed: number) =>
+      initHoldemGame(playerIds, seed),
     validateAction: validateHoldemAction,
     applyAction: applyHoldemAction,
     getPlayerPerspective: getHoldemPlayerPerspective,
     calculateFinalScores: calculateHoldemFinalScores,
   },
   euchre: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'euchre')!,
-    initGame: initEuchreGame,
+    ...findMetadata('euchre'),
+    initGame: (playerIds: string[], seed: number) =>
+      initEuchreGame(playerIds, seed),
     validateAction: validateEuchreAction,
     applyAction: applyEuchreAction,
     getPlayerPerspective: getEuchrePlayerPerspective,
     calculateFinalScores: calculateEuchreFinalScores,
   },
   cribbage: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'cribbage')!,
-    initGame: initCribbageGame,
+    ...findMetadata('cribbage'),
+    initGame: (playerIds: string[], seed: number) =>
+      initCribbageGame(playerIds, seed),
     validateAction: validateCribbageAction,
     applyAction: applyCribbageAction,
     getPlayerPerspective: getCribbagePlayerPerspective,
     calculateFinalScores: calculateCribbageFinalScores,
   },
   kings_corners: {
-    ...GAME_METADATA_LIST.find((g) => g.id === 'kings_corners')!,
-    initGame: initKingsCornersGame,
+    ...findMetadata('kings_corners'),
+    initGame: (playerIds: string[], seed: number) =>
+      initKingsCornersGame(playerIds, seed),
     validateAction: validateKingsCornersAction,
     applyAction: applyKingsCornersAction,
     getPlayerPerspective: getKingsCornersPlayerPerspective,

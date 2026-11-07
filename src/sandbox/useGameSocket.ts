@@ -8,10 +8,12 @@ import {
 import {
   ClientToServerEvents,
   PlayerFinalStanding,
+  PlayerLobbySettings,
   RoomPlayerSummary,
   RoomStatus,
   ServerToClientEvents,
 } from '../network/socketTypes.js';
+import { GameCategorySlug } from '../types/game.js';
 
 function resolveDefaultServerUrl(): string {
   const envUrl = (import.meta as unknown as { env?: Record<string, string> })
@@ -20,8 +22,6 @@ function resolveDefaultServerUrl(): string {
     return envUrl;
   }
   if (typeof window !== 'undefined') {
-    // When running Vite dev server on :5173, connect to local backend on :3001;
-    // When deployed on Render (same origin), connect directly to window.location.origin!
     if (window.location.port === '5173') {
       return 'http://localhost:3001';
     }
@@ -43,7 +43,12 @@ export interface UseGameSocketResult {
   readonly reconnecting: boolean;
   readonly pendingAction: boolean;
   readonly roomId: string | null;
+  readonly category: GameCategorySlug | null;
   readonly selectedGameId: GameId;
+  readonly configuredGameId: GameId | null;
+  readonly selectedExpansions: readonly string[];
+  readonly playerSettings: Readonly<Record<string, PlayerLobbySettings>>;
+  readonly playerColors: Readonly<Record<string, string>>;
   readonly playerId: string | null;
   readonly roomStatus: RoomStatus | null;
   readonly hostPlayerId: string | null;
@@ -56,9 +61,16 @@ export interface UseGameSocketResult {
   readonly toasts: readonly ToastMessage[];
   readonly dismissToast: (id: number) => void;
   readonly clearError: () => void;
-  readonly createRoom: (playerName: string, initialGameId?: GameId) => void;
+  readonly createRoom: (
+    playerName: string,
+    initialGameId?: GameId | null
+  ) => void;
   readonly joinRoom: (roomId: string, playerName: string) => void;
-  readonly selectGame: (gameId: GameId) => void;
+  readonly setGameCategory: (category: GameCategorySlug) => void;
+  readonly selectGame: (gameId: GameId | null) => void;
+  readonly toggleExpansion: (expansionId: string) => void;
+  readonly chooseColor: (colorId: string) => void;
+  readonly toggleReady: (ready?: boolean) => void;
   readonly startGame: (seed?: number) => void;
   readonly resetToLobby: () => void;
   readonly sendAction: (action: AnyGameAction) => void;
@@ -86,7 +98,18 @@ export function useGameSocket(
   const [reconnecting, setReconnecting] = useState(false);
   const [pendingAction, setPendingAction] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [category, setCategory] = useState<GameCategorySlug | null>('board');
   const [selectedGameId, setSelectedGameId] = useState<GameId>('ttr');
+  const [configuredGameId, setConfiguredGameId] = useState<GameId | null>(null);
+  const [selectedExpansions, setSelectedExpansions] = useState<
+    readonly string[]
+  >([]);
+  const [playerSettings, setPlayerSettings] = useState<
+    Readonly<Record<string, PlayerLobbySettings>>
+  >({});
+  const [playerColors, setPlayerColors] = useState<
+    Readonly<Record<string, string>>
+  >({});
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [roomStatus, setRoomStatus] = useState<RoomStatus | null>(null);
   const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
@@ -151,7 +174,6 @@ export function useGameSocket(
       setConnected(true);
       setReconnecting(false);
 
-      // Automatic session re-binding on page refresh (F5) or after network drop recovery
       const targetRoom = activeSessionRef.current.roomId;
       if (targetRoom) {
         const storedToken =
@@ -178,6 +200,12 @@ export function useGameSocket(
                 if (res.selectedGameId) {
                   setSelectedGameId(res.selectedGameId);
                 }
+                if (res.configuredGameId !== undefined) {
+                  setConfiguredGameId(res.configuredGameId);
+                }
+                if (res.category !== undefined) {
+                  setCategory(res.category);
+                }
               }
             }
           );
@@ -196,7 +224,12 @@ export function useGameSocket(
     socket.on('room_updated', (payload) => {
       setRoomId(payload.roomId);
       activeSessionRef.current.roomId = payload.roomId;
+      setCategory(payload.category);
       setSelectedGameId(payload.selectedGameId);
+      setConfiguredGameId(payload.configuredGameId);
+      setSelectedExpansions(payload.selectedExpansions);
+      setPlayerSettings(payload.playerSettings);
+      setPlayerColors(payload.playerColors);
       setRoomStatus(payload.status);
       setHostPlayerId(payload.hostPlayerId);
       setLobbyPlayers(payload.players);
@@ -217,6 +250,8 @@ export function useGameSocket(
       setRoomId(payload.roomId);
       activeSessionRef.current.roomId = payload.roomId;
       setSelectedGameId(payload.selectedGameId);
+      setSelectedExpansions(payload.selectedExpansions);
+      setPlayerColors(payload.playerColors);
       setRoomStatus(payload.status);
       setSanitizedView(payload.view);
       setPlayerNames(payload.playerNames);
@@ -237,7 +272,7 @@ export function useGameSocket(
   }, [enabled, serverUrl, pushToast]);
 
   const createRoom = useCallback(
-    (playerName: string, initialGameId: GameId = 'ttr') => {
+    (playerName: string, initialGameId: GameId | null = null) => {
       const socket = socketRef.current;
       if (!socket) {
         const msg = 'Socket is not connected to multiplayer server.';
@@ -261,6 +296,12 @@ export function useGameSocket(
             setPlayerId(res.playerId ?? 'p1');
             if (res.selectedGameId) {
               setSelectedGameId(res.selectedGameId);
+            }
+            if (res.configuredGameId !== undefined) {
+              setConfiguredGameId(res.configuredGameId);
+            }
+            if (res.category !== undefined) {
+              setCategory(res.category);
             }
             window.history.replaceState(
               {},
@@ -327,6 +368,12 @@ export function useGameSocket(
             if (res.selectedGameId) {
               setSelectedGameId(res.selectedGameId);
             }
+            if (res.configuredGameId !== undefined) {
+              setConfiguredGameId(res.configuredGameId);
+            }
+            if (res.category !== undefined) {
+              setCategory(res.category);
+            }
             window.history.replaceState(
               {},
               '',
@@ -343,14 +390,65 @@ export function useGameSocket(
     [pushToast]
   );
 
+  const setGameCategory = useCallback(
+    (nextCategory: GameCategorySlug) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) {
+        return;
+      }
+      setErrorBanner(null);
+      socket.emit('set_game_category', { roomId, category: nextCategory });
+    },
+    [roomId]
+  );
+
   const selectGame = useCallback(
-    (gameId: GameId) => {
+    (gameId: GameId | null) => {
       const socket = socketRef.current;
       if (!socket || !roomId) {
         return;
       }
       setErrorBanner(null);
       socket.emit('select_game', { roomId, gameId });
+    },
+    [roomId]
+  );
+
+  const toggleExpansion = useCallback(
+    (expansionId: string) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) {
+        return;
+      }
+      setErrorBanner(null);
+      socket.emit('toggle_expansion', { roomId, expansionId });
+    },
+    [roomId]
+  );
+
+  const chooseColor = useCallback(
+    (colorId: string) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) {
+        return;
+      }
+      setErrorBanner(null);
+      socket.emit('choose_color', { roomId, colorId });
+    },
+    [roomId]
+  );
+
+  const toggleReady = useCallback(
+    (ready?: boolean) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) {
+        return;
+      }
+      setErrorBanner(null);
+      socket.emit('toggle_ready', {
+        roomId,
+        ...(ready !== undefined ? { ready } : {}),
+      });
     },
     [roomId]
   );
@@ -401,6 +499,10 @@ export function useGameSocket(
     setRoomId(null);
     setPlayerId(null);
     setRoomStatus(null);
+    setConfiguredGameId(null);
+    setSelectedExpansions([]);
+    setPlayerSettings({});
+    setPlayerColors({});
     setSanitizedView(null);
     setFinalScores(null);
     setFinalStandings(null);
@@ -419,7 +521,12 @@ export function useGameSocket(
     reconnecting,
     pendingAction,
     roomId,
+    category,
     selectedGameId,
+    configuredGameId,
+    selectedExpansions,
+    playerSettings,
+    playerColors,
     playerId,
     roomStatus,
     hostPlayerId,
@@ -434,7 +541,11 @@ export function useGameSocket(
     clearError,
     createRoom,
     joinRoom,
+    setGameCategory,
     selectGame,
+    toggleExpansion,
+    chooseColor,
+    toggleReady,
     startGame,
     resetToLobby,
     sendAction,

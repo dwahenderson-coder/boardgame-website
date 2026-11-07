@@ -11,6 +11,7 @@ interface InteractiveMapProps {
   readonly playerOrder: readonly string[];
   readonly playerScores?: Readonly<Record<string, number>>;
   readonly playerNames?: Readonly<Record<string, string>>;
+  readonly playerColors?: Readonly<Record<string, string>>;
   readonly selectedRouteId: string | null;
   readonly highlightedCities: ReadonlySet<string>;
   readonly onSelectRoute: (route: RouteEdge) => void;
@@ -95,6 +96,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   playerOrder,
   playerScores = {},
   playerNames = {},
+  playerColors = {},
   selectedRouteId,
   highlightedCities,
   onSelectRoute,
@@ -457,7 +459,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             return (
               <g key={`tokens-${spaceIdx}`} transform={`translate(${sp.x}, ${sp.y})`}>
                 {occupants.map((occ, idx) => {
-                  const palette = getPlayerPalette(occ.playerId, playerOrder);
+                  const palette = getPlayerPalette(
+                    occ.playerId,
+                    playerOrder,
+                    playerColors
+                  );
                   // Fan multiple tokens slightly if they share the same space
                   const count = occupants.length;
                   const angle =
@@ -530,7 +536,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             const isSelected = route.id === selectedRouteId;
             const isHovered = route.id === hoveredRouteId;
             const ownerPalette = isClaimed
-              ? getPlayerPalette(route.ownerId!, playerOrder)
+              ? getPlayerPalette(route.ownerId!, playerOrder, playerColors)
               : null;
 
             const dx = x2 - x1;

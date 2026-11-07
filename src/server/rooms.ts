@@ -25,9 +25,11 @@ import {
 import {
   GameRoom,
   PlayerFinalStanding,
+  PlayerLobbySettings,
   PlayerSession,
   RoomPlayerSummary,
 } from '../network/socketTypes.js';
+import { GAME_CATALOG_BY_ID } from '../registry/catalog.js';
 
 const generateRoomCode = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZ', 6);
 const generateToken = customAlphabet(
@@ -55,7 +57,7 @@ export class RoomManager {
   public createRoom(
     hostName: string,
     socketId: string,
-    initialGameId: GameId = 'ttr'
+    initialGameId: GameId | null = 'ttr'
   ): {
     roomId: string;
     playerId: string;
@@ -80,10 +82,20 @@ export class RoomManager {
       seatIndex: 0,
     };
 
+    const resolvedGameId: GameId =
+      initialGameId && initialGameId in GAME_CATALOG_BY_ID
+        ? initialGameId
+        : 'ttr';
+    const catalogEntry = GAME_CATALOG_BY_ID[resolvedGameId];
+
     const room: GameRoom = {
       roomId,
       hostPlayerId,
-      selectedGameId: initialGameId,
+      category: catalogEntry.category,
+      selectedGameId: resolvedGameId,
+      configuredGameId: initialGameId ? resolvedGameId : null,
+      selectedExpansions: [],
+      playerSettings: new Map([[hostPlayerId, { colorId: null, ready: false }]]),
       status: 'LOBBY',
       players: new Map([[sessionToken, hostSession]]),
       gameState: null,
@@ -115,6 +127,12 @@ export class RoomManager {
       session.connected = true;
       if (playerName.trim()) {
         session.name = playerName.trim();
+      }
+      if (!room.playerSettings.has(session.playerId)) {
+        room.playerSettings.set(session.playerId, {
+          colorId: null,
+          ready: false,
+        });
       }
       this.socketToToken.set(socketId, existingToken);
 
@@ -158,6 +176,7 @@ export class RoomManager {
     };
 
     room.players.set(sessionToken, newSession);
+    room.playerSettings.set(playerId, { colorId: null, ready: false });
     this.socketToToken.set(socketId, sessionToken);
 
     return {
@@ -190,8 +209,8 @@ export class RoomManager {
   }
 
   /**
-   * Marks the socket's session as disconnected and performs automatic Host Migration
-   * if the departing player was the room's host and another connected player exists.
+   * Marks the socket's session as disconnected, releases any claimed lobby color
+   * so other players can use it while in LOBBY, and performs automatic Host Migration.
    */
   public handleDisconnect(socketId: string): {
     room: GameRoom;
@@ -204,6 +223,14 @@ export class RoomManager {
     const { room, session } = data;
     session.connected = false;
     this.socketToToken.delete(socketId);
+
+    // Release claimed color and ready status if still in LOBBY
+    if (room.status === 'LOBBY') {
+      room.playerSettings.set(session.playerId, {
+        colorId: null,
+        ready: false,
+      });
+    }
 
     let migratedToHostId: string | undefined;
     if (room.hostPlayerId === session.playerId) {
@@ -223,16 +250,54 @@ export class RoomManager {
     };
   }
 
+  public static resetLobbyPlayerSettings(room: GameRoom): void {
+    for (const session of room.players.values()) {
+      room.playerSettings.set(session.playerId, {
+        colorId: null,
+        ready: false,
+      });
+    }
+  }
+
+  public static getPlayerSettingsRecord(
+    room: GameRoom
+  ): Record<string, PlayerLobbySettings> {
+    const record: Record<string, PlayerLobbySettings> = {};
+    for (const session of room.players.values()) {
+      record[session.playerId] = room.playerSettings.get(session.playerId) ?? {
+        colorId: null,
+        ready: false,
+      };
+    }
+    return record;
+  }
+
+  public static getPlayerColorsRecord(room: GameRoom): Record<string, string> {
+    const colors: Record<string, string> = {};
+    for (const session of room.players.values()) {
+      const colorId = room.playerSettings.get(session.playerId)?.colorId;
+      if (colorId) {
+        colors[session.playerId] = colorId;
+      }
+    }
+    return colors;
+  }
+
   public static getPlayerSummaries(room: GameRoom): RoomPlayerSummary[] {
     return Array.from(room.players.values())
       .sort((a, b) => a.seatIndex - b.seatIndex)
-      .map((p) => ({
-        playerId: p.playerId,
-        name: p.name,
-        connected: p.connected,
-        isHost: p.playerId === room.hostPlayerId,
-        seatIndex: p.seatIndex,
-      }));
+      .map((p) => {
+        const settings = room.playerSettings.get(p.playerId);
+        return {
+          playerId: p.playerId,
+          name: p.name,
+          connected: p.connected,
+          isHost: p.playerId === room.hostPlayerId,
+          seatIndex: p.seatIndex,
+          colorId: settings?.colorId ?? null,
+          ready: settings?.ready ?? false,
+        };
+      });
   }
 
   public static getPlayerNameMap(room: GameRoom): Record<string, string> {
