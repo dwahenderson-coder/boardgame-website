@@ -15,6 +15,10 @@ import {
 import { HoldemGameState } from '../games/texas-holdem/index.js';
 import { GameId } from '../games/registry.js';
 import {
+  getTransAmericaExpressRecipients,
+  TRANS_AMERICA_EXPRESS_BONUS,
+} from '../games/ticket-to-ride/engine.js';
+import {
   GameState as TTRGameState,
   RouteEdge,
 } from '../games/ticket-to-ride/types.js';
@@ -404,6 +408,9 @@ export class RoomManager {
     }
 
     const state = room.gameState as TTRGameState;
+    const { longestPathByPlayer, recipients } =
+      getTransAmericaExpressRecipients(state);
+    const recipientSet = new Set(recipients);
 
     const standings: PlayerFinalStanding[] = state.playerOrder.map(
       (playerId) => {
@@ -422,7 +429,12 @@ export class RoomManager {
           return { ticket, completed };
         });
 
-        const totalScore = player.claimedRoutePoints + ticketPoints;
+        const hasTransAmericaExpress = recipientSet.has(playerId);
+        const transAmericaExpressBonus = hasTransAmericaExpress
+          ? TRANS_AMERICA_EXPRESS_BONUS
+          : 0;
+        const totalScore =
+          player.claimedRoutePoints + ticketPoints + transAmericaExpressBonus;
 
         return {
           playerId,
@@ -432,10 +444,21 @@ export class RoomManager {
           totalScore,
           trainsRemaining: player.trainsRemaining,
           tickets,
+          longestPathLength: longestPathByPlayer[playerId] ?? 0,
+          hasTransAmericaExpress,
+          transAmericaExpressBonus,
         };
       }
     );
 
-    return standings.sort((a, b) => b.totalScore - a.totalScore);
+    return standings.sort((a, b) => {
+      if (b.totalScore !== a.totalScore) {
+        return b.totalScore - a.totalScore;
+      }
+      // Tie-breaker: The player who has the Trans America Express wins a tie!
+      const aExpress = a.hasTransAmericaExpress ? 1 : 0;
+      const bExpress = b.hasTransAmericaExpress ? 1 : 0;
+      return bExpress - aExpress;
+    });
   }
 }

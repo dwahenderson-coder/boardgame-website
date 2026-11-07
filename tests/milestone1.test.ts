@@ -39,6 +39,7 @@ import {
 import {
   applyAction,
   calculateFinalScores,
+  calculateLongestContinuousPath,
   createEmptyHand,
   getPlayerPerspective,
   initGame,
@@ -352,14 +353,15 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect('hand' in aliceView.opponents['bob']!).toBe(false);
       expect('tickets' in aliceView.opponents['bob']!).toBe(false);
 
-      // 7. Verify calculateFinalScores with Graph route completion
-      // Alice has connected Vancouver -> Seattle -> Helena, so:
+      // 7. Verify calculateFinalScores with Graph route completion + Trans America Express (+10 pts)
+      // Alice has connected Vancouver -> Seattle -> Helena (longest path = 7 trains), so:
       // - TKT_VAN_SEA (Vancouver -> Seattle, +3) is COMPLETED (+3)
       // - TKT_VAN_DEN (Vancouver -> Denver, 11) is UNCOMPLETED (-11)
-      // Alice total = 16 (routes) + 3 - 11 = 8
+      // - Trans America Express (longest continuous path: 7 > 0) = +10
+      // Alice total = 16 (routes) + 3 - 11 + 10 = 18
       // Bob has 0 routes claimed, and TKT_HEL_DEN (5) is UNCOMPLETED (-5)
       const scores = calculateFinalScores(state);
-      expect(scores['alice']).toBe(8);
+      expect(scores['alice']).toBe(18);
       expect(scores['bob']).toBe(-5);
     });
 
@@ -1240,6 +1242,76 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(state.phase).toBe('GAME_OVER');
       expect(state.roundNumber).toBe(6);
       expect(state.winnerId).not.toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 10. Ticket to Ride: Trans America Express (+10 pts) & Tie-Breaker
+  // ---------------------------------------------------------------------------
+  describe('Ticket to Ride - Trans America Express & Tie-Breaker', () => {
+    it('computes longest continuous path allowing loops and repeated cities without reusing routes, awards +10 pts, and breaks final score ties', () => {
+      // p1 owns a loop with a tail: A-B (3), B-C (4), C-A (5), and A-D (2).
+      // Continuous path D -> A -> B -> C -> A traverses all 4 distinct routes (passing through A twice) for length 2 + 3 + 4 + 5 = 14!
+      // Plus a disconnected branch E-F (6) which cannot be combined with the 14-length component.
+      const testRoutes: RouteEdge[] = [
+        { id: 'R1', from: 'CityA', to: 'CityB', length: 3, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+        { id: 'R2', from: 'CityB', to: 'CityC', length: 4, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+        { id: 'R3', from: 'CityC', to: 'CityA', length: 5, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+        { id: 'R4', from: 'CityA', to: 'CityD', length: 2, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+        { id: 'R5', from: 'CityE', to: 'CityF', length: 6, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+        // p2 owns a single path of length 10
+        { id: 'R6', from: 'CityX', to: 'CityY', length: 6, color: 'GRAY', routeIndex: 0, ownerId: 'p2' },
+        { id: 'R7', from: 'CityY', to: 'CityZ', length: 4, color: 'GRAY', routeIndex: 0, ownerId: 'p2' },
+      ];
+
+      expect(calculateLongestContinuousPath(testRoutes, 'p1')).toBe(14);
+      expect(calculateLongestContinuousPath(testRoutes, 'p2')).toBe(10);
+
+      // Set up a room where p1 ( seated 2nd in playerOrder: ['p2', 'p1'] ) and p2 end in an exact final score tie (30 pts each):
+      // - p2 has 30 route points, 0 ticket points, longest path = 10 -> no Trans America Express -> total = 30
+      // - p1 has 20 route points, 0 ticket points, longest path = 14 -> +10 Trans America Express -> total = 30!
+      // Verify p1 is ranked #1 (winner) ahead of p2 because p1 holds the Trans America Express!
+      const manager = new RoomManager();
+      const created = manager.createRoom('BobFirst', 'sock_p2');
+      manager.joinRoom(created.roomId, 'AliceSecond', 'sock_p1');
+
+      const baseState = initGame(['p1', 'p2'], 123, {
+        skipInitialTicketSelection: true,
+      });
+
+      created.room.gameState = {
+        ...baseState,
+        phase: 'GAME_OVER',
+        playerOrder: ['p1', 'p2'], // p1 = BobFirst (10-length path), p2 = AliceSecond (14-length path)
+        routes: [
+          { id: 'R_P1', from: 'CityX', to: 'CityY', length: 6, color: 'GRAY', routeIndex: 0, ownerId: 'p1' },
+          { id: 'R_P2_1', from: 'CityA', to: 'CityB', length: 5, color: 'GRAY', routeIndex: 0, ownerId: 'p2' },
+          { id: 'R_P2_2', from: 'CityB', to: 'CityC', length: 5, color: 'GRAY', routeIndex: 0, ownerId: 'p2' },
+        ],
+        players: {
+          p1: {
+            ...baseState.players['p1']!,
+            claimedRoutePoints: 30,
+            tickets: [],
+          },
+          p2: {
+            ...baseState.players['p2']!,
+            claimedRoutePoints: 20, // 20 route pts + 10 Trans America Express = 30 total pts (tied with p1!)
+            tickets: [],
+          },
+        },
+      };
+
+      const standings = RoomManager.buildFinalStandings(created.room);
+      expect(standings[0]!.playerId).toBe('p2');
+      expect(standings[0]!.totalScore).toBe(30);
+      expect(standings[0]!.hasTransAmericaExpress).toBe(true);
+      expect(standings[0]!.longestPathLength).toBe(10);
+
+      expect(standings[1]!.playerId).toBe('p1');
+      expect(standings[1]!.totalScore).toBe(30);
+      expect(standings[1]!.hasTransAmericaExpress).toBe(false);
+      expect(standings[1]!.longestPathLength).toBe(6);
     });
   });
 });

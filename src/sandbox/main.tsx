@@ -42,7 +42,11 @@ import {
   GameId,
   GameRegistry,
 } from '../games/registry.js';
-import { ALL_TRAIN_CARD_COLORS } from '../games/ticket-to-ride/index.js';
+import {
+  ALL_TRAIN_CARD_COLORS,
+  getTransAmericaExpressRecipients,
+  TRANS_AMERICA_EXPRESS_BONUS,
+} from '../games/ticket-to-ride/index.js';
 import {
   DestinationTicket,
   GameState as TTRGameState,
@@ -59,6 +63,11 @@ import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
 import { PowerGridBoard } from './PowerGridBoard.js';
 import { StockpileBoard } from './StockpileBoard.js';
+import {
+  DestinationTicketCardVisual,
+  TrainCardDeckVisual,
+  TrainCardVisual,
+} from './TrainCardVisual.js';
 import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
 import { useGameSocket } from './useGameSocket.js';
@@ -451,6 +460,10 @@ export const SandboxApp: React.FC = () => {
     }
 
     const ts = localGameState as TTRGameState;
+    const { longestPathByPlayer, recipients } =
+      getTransAmericaExpressRecipients(ts);
+    const recipientSet = new Set(recipients);
+
     return ts.playerOrder
       .map((pid) => {
         const p = ts.players[pid]!;
@@ -466,17 +479,33 @@ export const SandboxApp: React.FC = () => {
           ticketPoints += completed ? ticket.points : -ticket.points;
           return { ticket, completed };
         });
+        const hasTransAmericaExpress = recipientSet.has(pid);
+        const transAmericaExpressBonus = hasTransAmericaExpress
+          ? TRANS_AMERICA_EXPRESS_BONUS
+          : 0;
         return {
           playerId: pid,
           name: pid,
           routePoints: p.claimedRoutePoints,
           ticketPoints,
-          totalScore: p.claimedRoutePoints + ticketPoints,
+          totalScore:
+            p.claimedRoutePoints + ticketPoints + transAmericaExpressBonus,
           trainsRemaining: p.trainsRemaining,
           tickets,
+          longestPathLength: longestPathByPlayer[pid] ?? 0,
+          hasTransAmericaExpress,
+          transAmericaExpressBonus,
         };
       })
-      .sort((a, b) => b.totalScore - a.totalScore);
+      .sort((a, b) => {
+        if (b.totalScore !== a.totalScore) {
+          return b.totalScore - a.totalScore;
+        }
+        // Tie-breaker: The player who has the Trans America Express wins a tie!
+        const aExpress = a.hasTransAmericaExpress ? 1 : 0;
+        const bExpress = b.hasTransAmericaExpress ? 1 : 0;
+        return bExpress - aExpress;
+      });
   }, [localGameState]);
 
   const effectiveFinalStandings = isMultiplayerActive
@@ -1155,6 +1184,18 @@ export const SandboxApp: React.FC = () => {
                   <InteractiveMap
                     routes={ttrSanitized.routes}
                     playerOrder={ttrSanitized.playerOrder}
+                    playerScores={Object.fromEntries(
+                      ttrSanitized.playerOrder.map((pid) => [
+                        pid,
+                        pid === ttrSanitized.self.id
+                          ? ttrSanitized.self.claimedRoutePoints
+                          : ttrSanitized.opponents[pid]?.claimedRoutePoints ??
+                            0,
+                      ])
+                    )}
+                    playerNames={
+                      runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}
+                    }
                     selectedRouteId={selectedRouteId}
                     highlightedCities={highlightedCities}
                     onSelectRoute={(route) => {
@@ -1401,41 +1442,20 @@ export const SandboxApp: React.FC = () => {
                       )}
                     </div>
 
-                    {/* 9 Card Color Stacks */}
+                    {/* 9 Illustrated Train Car Card Stacks */}
                     <div className="grid grid-cols-9 gap-1.5 my-auto pt-3">
                       {ALL_TRAIN_CARD_COLORS.map((color) => {
                         const count = ttrSanitized.self.hand[color];
                         const drawnCount =
                           ttrSanitized.self.recentDrawnCards?.[color] ?? 0;
-                        const theme = ROUTE_COLOR_THEMES[color];
                         return (
-                          <div
+                          <TrainCardVisual
                             key={color}
-                            className={`relative flex flex-col items-center justify-between rounded-lg p-1.5 border transition ${
-                              drawnCount > 0
-                                ? 'bg-slate-900 border-amber-400 ring-1 ring-amber-400/50 shadow-md'
-                                : count > 0
-                                ? 'bg-slate-900 border-slate-700 shadow-sm'
-                                : 'bg-slate-950/40 border-slate-800/60 opacity-45'
-                            }`}
-                          >
-                            {drawnCount > 0 && (
-                              <span
-                                className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono text-[10px] font-black shadow-md border border-amber-200 animate-bounce"
-                                title={`Drew ${drawnCount}x ${color} on last action`}
-                              >
-                                {drawnCount}x
-                              </span>
-                            )}
-                            <div
-                              className={`w-full h-9 rounded border flex items-center justify-center font-mono text-sm font-black shadow-inner ${theme.badgeBg} ${theme.badgeBorder}`}
-                            >
-                              {count}
-                            </div>
-                            <span className="text-[9px] font-bold tracking-tight text-slate-300 mt-1 truncate max-w-full">
-                              {color === 'LOCOMOTIVE' ? 'LOCO' : color}
-                            </span>
-                          </div>
+                            color={color}
+                            count={count}
+                            recentDrawnCount={drawnCount}
+                            variant="hand"
+                          />
                         );
                       })}
                     </div>
@@ -1458,7 +1478,7 @@ export const SandboxApp: React.FC = () => {
                   </div>
 
                   {/* Column B: Face-Up Train Market & Blind Deck */}
-                  <div className="w-[410px] shrink-0 flex flex-col justify-between bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                  <div className="w-[460px] shrink-0 flex flex-col justify-between bg-slate-950/70 border border-slate-800 rounded-xl p-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
                         Train Card Market
@@ -1476,47 +1496,37 @@ export const SandboxApp: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-6 gap-1.5 my-auto pt-1">
-                      {/* Blind Deck Button */}
-                      <button
+                      {/* Physical Blind Deck Card Pile */}
+                      <TrainCardDeckVisual
+                        deckCount={ttrSanitized.trainDeckCount}
                         disabled={isControlsLocked}
+                        pending={mp.pendingAction}
                         onClick={() =>
                           dispatchEngineAction(viewedPlayerId, {
                             type: 'DRAW_CARDS',
                             source: 'DECK',
                           })
                         }
-                        className="flex flex-col items-center justify-center rounded-lg p-1.5 bg-indigo-950/70 hover:bg-indigo-900/80 disabled:opacity-40 disabled:cursor-not-allowed border border-indigo-500/50 text-indigo-200 transition shadow group"
-                        title="Draw 1 blind card from top of Train Deck"
-                      >
-                        <div className="w-full h-11 rounded bg-indigo-600/40 border border-indigo-400/50 flex flex-col items-center justify-center">
-                          <span className="text-xs font-black">
-                            {mp.pendingAction ? '...' : 'DECK'}
-                          </span>
-                          <span className="text-[9px] font-mono">
-                            ({ttrSanitized.trainDeckCount})
-                          </span>
-                        </div>
-                        <span className="text-[9px] font-bold mt-1 text-indigo-300 group-hover:text-white">
-                          Draw Blind
-                        </span>
-                      </button>
+                      />
 
-                      {/* 5 Face-Up Slots */}
+                      {/* 5 Face-Up Illustrated Train Car Cards */}
                       {ttrSanitized.faceUpCards.map((card, slotIdx) => {
                         if (!card) {
                           return (
                             <div
                               key={slotIdx}
-                              className="flex flex-col items-center justify-center rounded-lg p-1.5 bg-slate-900/40 border border-slate-800 text-slate-600 text-[10px]"
+                              className="flex flex-col items-center justify-center rounded-xl p-1.5 bg-slate-900/40 border border-dashed border-slate-800 text-slate-600 text-[10px]"
                             >
                               Empty
                             </div>
                           );
                         }
-                        const theme = ROUTE_COLOR_THEMES[card];
                         return (
-                          <button
+                          <TrainCardVisual
                             key={slotIdx}
+                            color={card}
+                            variant="market"
+                            slotIndex={slotIdx}
                             disabled={isControlsLocked}
                             onClick={() =>
                               dispatchEngineAction(viewedPlayerId, {
@@ -1525,18 +1535,7 @@ export const SandboxApp: React.FC = () => {
                                 slotIndex: slotIdx,
                               })
                             }
-                            className="flex flex-col items-center justify-between rounded-lg p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 hover:border-amber-400 transition group"
-                            title={`Draw face-up ${card} from slot #${slotIdx}`}
-                          >
-                            <div
-                              className={`w-full h-11 rounded border flex items-center justify-center font-black text-[10px] shadow ${theme.badgeBg} ${theme.badgeBorder}`}
-                            >
-                              {card === 'LOCOMOTIVE' ? '🌈 LOCO' : card}
-                            </div>
-                            <span className="text-[9px] font-mono text-slate-400 group-hover:text-amber-300 mt-1">
-                              Slot #{slotIdx}
-                            </span>
-                          </button>
+                          />
                         );
                       })}
                     </div>
@@ -1554,7 +1553,7 @@ export const SandboxApp: React.FC = () => {
                             or blind deck)
                           </strong>
                         ) : (
-                          'Click any slot or Deck to draw cards (Face-up Loco costs 2 draws)'
+                          'Click any face-up card or Deck to draw (Face-up Loco costs 2 draws)'
                         )}
                       </span>
                     </div>
@@ -1586,38 +1585,13 @@ export const SandboxApp: React.FC = () => {
                           tkt.to
                         );
                         return (
-                          <div
+                          <DestinationTicketCardVisual
                             key={tkt.id}
+                            ticket={tkt}
+                            completed={completed}
                             onMouseEnter={() => setHoveredTicket(tkt)}
                             onMouseLeave={() => setHoveredTicket(null)}
-                            className={`px-2.5 py-1.5 rounded-lg border text-xs flex items-center justify-between transition cursor-default ${
-                              completed
-                                ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-200'
-                                : 'bg-slate-900/90 border-slate-800 text-slate-200 hover:border-slate-700'
-                            }`}
-                          >
-                            <div className="truncate pr-2">
-                              <div className="font-semibold flex items-center gap-1.5">
-                                <span>
-                                  {tkt.from} → {tkt.to}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                {completed
-                                  ? '✓ Route Connected'
-                                  : 'Hover to highlight cities'}
-                              </div>
-                            </div>
-                            <span
-                              className={`px-2 py-0.5 rounded font-mono font-bold text-xs shrink-0 ${
-                                completed
-                                  ? 'bg-emerald-500 text-slate-950'
-                                  : 'bg-slate-800 text-amber-300'
-                              }`}
-                            >
-                              {completed ? `+${tkt.points}` : `±${tkt.points}`}
-                            </span>
-                          </div>
+                          />
                         );
                       })}
                     </div>
@@ -2172,6 +2146,25 @@ export const SandboxApp: React.FC = () => {
                           </div>
 
                           <div className="flex items-center gap-3 font-mono">
+                            {activeGameId === 'ttr' &&
+                              standing.longestPathLength !== undefined && (
+                                <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300">
+                                  Longest Path:{' '}
+                                  <strong className="text-white">
+                                    {standing.longestPathLength}
+                                  </strong>{' '}
+                                  trains
+                                </span>
+                              )}
+                            {standing.hasTransAmericaExpress && (
+                              <span
+                                className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/60 text-amber-300 text-xs font-extrabold"
+                                title="Awarded +10 points for the Longest Continuous Path of routes (and wins final score ties)"
+                              >
+                                🚂 Trans America Express (+
+                                {standing.transAmericaExpressBonus ?? 10} pts)
+                              </span>
+                            )}
                             <span className="px-3 py-1 rounded-lg bg-slate-900 border border-emerald-500/40 text-base font-black text-emerald-300">
                               {standing.totalScore}{' '}
                               {activeGameId === 'catan' ? 'VP' : 'pts'}

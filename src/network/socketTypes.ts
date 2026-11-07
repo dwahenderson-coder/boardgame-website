@@ -61,6 +61,9 @@ export interface PlayerFinalStanding {
   readonly totalScore: number;
   readonly trainsRemaining: number;
   readonly tickets: readonly TicketBreakdown[];
+  readonly longestPathLength?: number;
+  readonly hasTransAmericaExpress?: boolean;
+  readonly transAmericaExpressBonus?: number;
 }
 
 export interface StateSyncPayload {

@@ -817,16 +817,119 @@ export function getPlayerPerspective(
   };
 }
 
+export const TRANS_AMERICA_EXPRESS_BONUS = 10;
+
+/**
+ * Calculates the length (in train cars) of the longest continuous path of routes
+ * owned by `playerId`.
+ *
+ * Rules:
+ * - A continuous path consists of connected routes all owned by `playerId`.
+ * - It may include loops and pass through the same city multiple times,
+ *   as long as it does NOT reuse the same route (`RouteEdge.id`) more than once.
+ */
+export function calculateLongestContinuousPath(
+  routes: readonly RouteEdge[],
+  playerId: string
+): number {
+  const ownedRoutes = routes.filter((r) => r.ownerId === playerId);
+  if (ownedRoutes.length === 0) {
+    return 0;
+  }
+
+  interface AdjEdge {
+    readonly routeId: string;
+    readonly to: string;
+    readonly length: number;
+  }
+
+  const adj = new Map<string, AdjEdge[]>();
+  for (const r of ownedRoutes) {
+    if (!adj.has(r.from)) {
+      adj.set(r.from, []);
+    }
+    if (!adj.has(r.to)) {
+      adj.set(r.to, []);
+    }
+    adj.get(r.from)!.push({ routeId: r.id, to: r.to, length: r.length });
+    adj.get(r.to)!.push({ routeId: r.id, to: r.from, length: r.length });
+  }
+
+  const usedRouteIds = new Set<string>();
+  let maxLength = 0;
+
+  const dfs = (currentCity: string, currentLength: number): void => {
+    if (currentLength > maxLength) {
+      maxLength = currentLength;
+    }
+    const edges = adj.get(currentCity);
+    if (!edges) return;
+
+    for (const edge of edges) {
+      if (usedRouteIds.has(edge.routeId)) {
+        continue;
+      }
+      usedRouteIds.add(edge.routeId);
+      dfs(edge.to, currentLength + edge.length);
+      usedRouteIds.delete(edge.routeId);
+    }
+  };
+
+  for (const startCity of adj.keys()) {
+    dfs(startCity, 0);
+  }
+
+  return maxLength;
+}
+
+/**
+ * Evaluates all players' longest continuous paths and returns the recipient(s)
+ * of the 10-point Trans America Express bonus.
+ * If two or more players tie for the longest continuous path (> 0), all tied players receive the bonus.
+ */
+export function getTransAmericaExpressRecipients(state: GameState): {
+  readonly maxPathLength: number;
+  readonly longestPathByPlayer: Record<string, number>;
+  readonly recipients: readonly string[];
+} {
+  const longestPathByPlayer: Record<string, number> = {};
+  let maxPathLength = 0;
+
+  for (const playerId of state.playerOrder) {
+    const len = calculateLongestContinuousPath(state.routes, playerId);
+    longestPathByPlayer[playerId] = len;
+    if (len > maxPathLength) {
+      maxPathLength = len;
+    }
+  }
+
+  const recipients =
+    maxPathLength > 0
+      ? state.playerOrder.filter(
+          (pid) => longestPathByPlayer[pid] === maxPathLength
+        )
+      : [];
+
+  return {
+    maxPathLength,
+    longestPathByPlayer,
+    recipients,
+  };
+}
+
 /**
  * Calculates final scores for all players:
  * - Sum of claimed route points
  * - Plus points for each completed Destination Ticket (verified via Graph connectivity)
  * - Minus points for each uncompleted Destination Ticket
+ * - Plus 10 points (Trans America Express) for the player(s) with the longest continuous path
  */
 export function calculateFinalScores(
   state: GameState
 ): Record<string, number> {
   const scores: Record<string, number> = {};
+  const { recipients } = getTransAmericaExpressRecipients(state);
+  const recipientSet = new Set(recipients);
 
   for (const playerId of state.playerOrder) {
     const player = state.players[playerId]!;
@@ -848,6 +951,10 @@ export function calculateFinalScores(
       } else {
         totalScore -= ticket.points;
       }
+    }
+
+    if (recipientSet.has(playerId)) {
+      totalScore += TRANS_AMERICA_EXPRESS_BONUS;
     }
 
     scores[playerId] = totalScore;
