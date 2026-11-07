@@ -96,8 +96,6 @@ export interface SanitizedOpponentState {
   readonly pendingTicketCount: number;
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
-  readonly alvinCards?: number;
-  readonly dexterCards?: number;
   readonly hasFaceUpAlvin?: boolean;
   readonly hasFaceUpDexter?: boolean;
 }

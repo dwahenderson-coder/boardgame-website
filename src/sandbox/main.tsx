@@ -61,7 +61,16 @@ import {
   RouteEdge,
   SanitizedGameState as TTRSanitizedGameState,
 } from '../games/ticket-to-ride/types.js';
-import { PlayerFinalStanding } from '../network/socketTypes.js';
+import {
+  PlayerFinalStanding,
+  PlayerLobbySettings,
+  RoomPlayerSummary,
+} from '../network/socketTypes.js';
+import { GAME_CATALOG_BY_ID } from '../registry/catalog.js';
+import {
+  GameCategorySlug,
+  getEffectivePlayerBounds,
+} from '../types/game.js';
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
 import { CribbageBoard } from './CribbageBoard.js';
@@ -180,6 +189,16 @@ export const SandboxApp: React.FC = () => {
   const [seedInput, setSeedInput] = useState<string>('20261031');
   const [localEnableAlvinAndDexter, setLocalEnableAlvinAndDexter] =
     useState<boolean>(false);
+  const [isLocalSetupOpen, setIsLocalSetupOpen] = useState<boolean>(true);
+  const [localCategory, setLocalCategory] = useState<GameCategorySlug>('board');
+  const [localConfiguredGameId, setLocalConfiguredGameId] =
+    useState<GameId | null>(null);
+  const [localSelectedExpansions, setLocalSelectedExpansions] = useState<
+    string[]
+  >([]);
+  const [localPlayerColors, setLocalPlayerColors] = useState<
+    Record<string, string>
+  >({});
 
   // --- Alvin & Dexter Move Monster UI State ---
   const [moveMonsterOpen, setMoveMonsterOpen] = useState<boolean>(false);
@@ -620,21 +639,170 @@ export const SandboxApp: React.FC = () => {
     window.setTimeout(() => setCopiedLink(false), 2500);
   };
 
+  // Compute default colors & readiness for Local Dev Sandbox Lobby
+  const localStagedGameDef = useMemo(
+    () =>
+      localConfiguredGameId
+        ? GAME_CATALOG_BY_ID[localConfiguredGameId]
+        : GAME_CATALOG_BY_ID[localSelectedGameId],
+    [localConfiguredGameId, localSelectedGameId]
+  );
+
+  const localEffectiveBounds = useMemo(
+    () => getEffectivePlayerBounds(localStagedGameDef, localSelectedExpansions),
+    [localStagedGameDef, localSelectedExpansions]
+  );
+
+  const localClampedPlayerCount = useMemo(
+    () =>
+      Math.min(
+        localEffectiveBounds.maxPlayers,
+        Math.max(localEffectiveBounds.minPlayers, playerCountInput)
+      ),
+    [localEffectiveBounds, playerCountInput]
+  );
+
+  const localEffectivePlayerColors = useMemo(() => {
+    const ids = generatePlayerIds(localClampedPlayerCount);
+    const palette = localStagedGameDef.availableColors;
+    const assigned: Record<string, string> = {};
+    const used = new Set<string>();
+
+    // First honor any custom color selections that are valid for this game
+    for (const pid of ids) {
+      const custom = localPlayerColors[pid];
+      if (
+        custom &&
+        palette.some((c) => c.id === custom) &&
+        !used.has(custom)
+      ) {
+        assigned[pid] = custom;
+        used.add(custom);
+      }
+    }
+
+    // Assign remaining players distinct default colors from the game's palette
+    for (const pid of ids) {
+      if (!assigned[pid]) {
+        const nextColor =
+          palette.find((c) => !used.has(c.id))?.id ??
+          palette[0]?.id ??
+          'red';
+        assigned[pid] = nextColor;
+        used.add(nextColor);
+      }
+    }
+
+    return assigned;
+  }, [localClampedPlayerCount, localStagedGameDef, localPlayerColors]);
+
+  const localLobbyPlayers = useMemo<readonly RoomPlayerSummary[]>(() => {
+    const ids = generatePlayerIds(localClampedPlayerCount);
+    return ids.map((pid, idx) => ({
+      playerId: pid,
+      name: idx === 0 ? `${pid} (Host / You)` : `${pid} (Sandbox Seat)`,
+      seatIndex: idx,
+      connected: true,
+      isHost: idx === 0,
+      colorId: localEffectivePlayerColors[pid] ?? null,
+      ready: true,
+    }));
+  }, [localClampedPlayerCount, localEffectivePlayerColors]);
+
+  const localLobbyPlayerSettings = useMemo<
+    Readonly<Record<string, PlayerLobbySettings>>
+  >(() => {
+    const map: Record<string, PlayerLobbySettings> = {};
+    for (const p of localLobbyPlayers) {
+      map[p.playerId] = {
+        colorId: p.colorId,
+        ready: true,
+      };
+    }
+    return map;
+  }, [localLobbyPlayers]);
+
+  const handleLocalSelectGame = (gameId: GameId | null) => {
+    setLocalConfiguredGameId(gameId);
+    if (gameId) {
+      const def = GAME_CATALOG_BY_ID[gameId];
+      setLocalSelectedGameId(gameId);
+      setLocalCategory(def.category);
+      setLocalSelectedExpansions([]);
+      setLocalEnableAlvinAndDexter(false);
+      setLocalPlayerColors({});
+      const clamped = Math.min(
+        def.maxPlayers,
+        Math.max(def.minPlayers, playerCountInput)
+      );
+      setPlayerCountInput(clamped);
+    }
+  };
+
+  const handleLocalToggleExpansion = (expansionId: string) => {
+    setLocalSelectedExpansions((prev) => {
+      const exists = prev.includes(expansionId);
+      const next = exists
+        ? prev.filter((id) => id !== expansionId)
+        : [...prev, expansionId];
+      if (expansionId === 'alvin_and_dexter') {
+        setLocalEnableAlvinAndDexter(!exists);
+      }
+      const bounds = getEffectivePlayerBounds(localStagedGameDef, next);
+      setPlayerCountInput((cnt) =>
+        Math.min(bounds.maxPlayers, Math.max(bounds.minPlayers, cnt))
+      );
+      return next;
+    });
+  };
+
+  const handleLocalChooseColor = (colorId: string) => {
+    setLocalPlayerColors((prev) => {
+      const next = { ...localEffectivePlayerColors, ...prev };
+      // If another simulated seat had `colorId`, swap with Player_1
+      const currentP1Color = next['Player_1'];
+      const otherOwner = Object.keys(next).find(
+        (pid) => pid !== 'Player_1' && next[pid] === colorId
+      );
+      if (otherOwner && currentP1Color) {
+        next[otherOwner] = currentP1Color;
+      }
+      next['Player_1'] = colorId;
+      return next;
+    });
+  };
+
   const handleStartNewLocalGame = (
     overrideGameId?: GameId,
     overridePlayerCount?: number,
-    overrideAlvinAndDexter?: boolean
+    overrideAlvinAndDexter?: boolean,
+    overrideExpansions?: readonly string[]
   ) => {
-    const targetGameId = overrideGameId ?? localSelectedGameId;
+    const targetGameId =
+      overrideGameId ?? localConfiguredGameId ?? localSelectedGameId;
+    const gameDef = GAME_CATALOG_BY_ID[targetGameId];
+    const effectiveExpansions =
+      overrideExpansions !== undefined
+        ? [...overrideExpansions]
+        : overrideAlvinAndDexter !== undefined
+        ? overrideAlvinAndDexter
+          ? Array.from(new Set([...localSelectedExpansions, 'alvin_and_dexter']))
+          : localSelectedExpansions.filter((e) => e !== 'alvin_and_dexter')
+        : localSelectedExpansions;
+
+    const bounds = getEffectivePlayerBounds(gameDef, effectiveExpansions);
     const engine = GameRegistry[targetGameId];
     const requestedCount = overridePlayerCount ?? playerCountInput;
     const clampedCount = Math.min(
-      engine.maxPlayers,
-      Math.max(engine.minPlayers, requestedCount)
+      bounds.maxPlayers,
+      Math.max(bounds.minPlayers, requestedCount)
     );
-    const useAlvinAndDexter =
-      overrideAlvinAndDexter ?? localEnableAlvinAndDexter;
+
     setLocalSelectedGameId(targetGameId);
+    setLocalSelectedExpansions(effectiveExpansions);
+    setLocalEnableAlvinAndDexter(
+      effectiveExpansions.includes('alvin_and_dexter')
+    );
     setPlayerCountInput(clampedCount);
 
     const parsedSeed = Number.parseInt(seedInput, 10);
@@ -643,10 +811,11 @@ export const SandboxApp: React.FC = () => {
       : parsedSeed;
     const ids = generatePlayerIds(clampedCount);
     const nextState = engine.initGame(ids, effectiveSeed, {
-      selectedExpansions:
-        targetGameId === 'ttr' && useAlvinAndDexter ? ['alvin_and_dexter'] : [],
+      selectedExpansions: effectiveExpansions,
+      playerColors: localEffectivePlayerColors,
     });
     setLocalGameState(nextState);
+    setIsLocalSetupOpen(false);
     setSelectedRouteId(null);
     setSelectedPendingIds([]);
     setMoveMonsterOpen(false);
@@ -898,7 +1067,11 @@ export const SandboxApp: React.FC = () => {
               )}
             </button>
             <button
-              onClick={() => setRunnerMode('LOCAL')}
+              onClick={() => {
+                setRunnerMode('LOCAL');
+                setIsLocalSetupOpen(true);
+                setLocalConfiguredGameId(null);
+              }}
               className={`px-2.5 py-1 rounded text-xs font-bold transition ${
                 runnerMode === 'LOCAL'
                   ? 'bg-amber-500 text-slate-950 shadow'
@@ -912,6 +1085,20 @@ export const SandboxApp: React.FC = () => {
           {runnerMode === 'LOCAL' ? (
             <>
               <div className="h-5 w-px bg-slate-800" />
+              <button
+                onClick={() => {
+                  setIsLocalSetupOpen(true);
+                  setLocalConfiguredGameId(null);
+                }}
+                className={`px-2.5 py-1 rounded-md border text-xs font-bold transition flex items-center gap-1.5 ${
+                  isLocalSetupOpen
+                    ? 'bg-purple-500/25 border-purple-400 text-purple-200'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-amber-300'
+                }`}
+                title="Open the Beginning Catalog Menu to select a game and drill down into expansions"
+              >
+                <span>🗂️ Catalog & Expansions</span>
+              </button>
               {/* Game Selector in Local Sandbox */}
               <div className="flex items-center gap-1.5 text-xs">
                 <label className="text-slate-400 font-medium">Game:</label>
@@ -1281,25 +1468,225 @@ export const SandboxApp: React.FC = () => {
             /* Mount <TTRBoard /> when `selectedGameId === 'ttr'` */
             ttrSanitized && (
               <>
-                <div className="flex-1 relative min-h-0">
-                  <InteractiveMap
-                    routes={ttrSanitized.routes}
-                    playerOrder={ttrSanitized.playerOrder}
-                    playerScores={Object.fromEntries(
-                      ttrSanitized.playerOrder.map((pid) => [
-                        pid,
-                        pid === ttrSanitized.self.id
+                <div className="flex-1 flex min-h-0 relative">
+                  {/* =========================================================
+                      LEFT-HAND PLAYER BREAKDOWN SIDEBAR (Player Blocks)
+                     ========================================================= */}
+                  <aside className="w-72 shrink-0 bg-slate-900/95 border-r border-slate-800 p-3 flex flex-col gap-2.5 overflow-y-auto z-20">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 block">
+                          Player Breakdown
+                        </span>
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          {ttrSanitized.playerOrder.length} Railroads Active
+                        </span>
+                      </div>
+                      {ttrSanitized.alvinAndDexter?.enabled && (
+                        <span className="px-2 py-0.5 rounded bg-purple-500/20 border border-purple-400/50 text-purple-200 text-[10px] font-bold">
+                          🛸🦖 Chaos Active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {ttrSanitized.playerOrder.map((pid) => {
+                        const isSelf = pid === ttrSanitized.self.id;
+                        const isTurn = pid === activePlayerId;
+                        const opp = ttrSanitized.opponents[pid];
+                        const palette = getPlayerPalette(
+                          pid,
+                          ttrSanitized.playerOrder,
+                          runnerMode === 'MULTIPLAYER'
+                            ? mp.playerColors
+                            : localEffectivePlayerColors
+                        );
+
+                        const claimedRoutesCount = ttrSanitized.routes.filter(
+                          (r) => r.ownerId === pid
+                        ).length;
+                        const claimedRoutePoints = isSelf
                           ? ttrSanitized.self.claimedRoutePoints
-                          : ttrSanitized.opponents[pid]?.claimedRoutePoints ??
-                            0,
-                      ])
-                    )}
-                    playerNames={
-                      runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}
-                    }
-                    playerColors={
-                      runnerMode === 'MULTIPLAYER' ? mp.playerColors : {}
-                    }
+                          : opp?.claimedRoutePoints ?? 0;
+                        const handCount = isSelf
+                          ? Object.values(ttrSanitized.self.hand).reduce(
+                              (sum, n) => sum + n,
+                              0
+                            )
+                          : opp?.handCount ?? 0;
+                        const ticketCount = isSelf
+                          ? ttrSanitized.self.tickets.length
+                          : opp?.ticketCount ?? 0;
+                        const pendingTicketsCount = isSelf
+                          ? ttrSanitized.self.pendingTickets.length
+                          : opp?.pendingTicketCount ?? 0;
+                        const trainsRemaining = isSelf
+                          ? ttrSanitized.self.trainsRemaining
+                          : opp?.trainsRemaining ?? 45;
+
+                        const hasFaceUpAlvin = isSelf
+                          ? (ttrSanitized.self.faceUpAlvinTurnsRemaining ?? 0) >
+                            0
+                          : Boolean(opp?.hasFaceUpAlvin);
+                        const hasFaceUpDexter = isSelf
+                          ? (ttrSanitized.self.faceUpDexterTurnsRemaining ??
+                              0) > 0
+                          : Boolean(opp?.hasFaceUpDexter);
+
+                        return (
+                          <div
+                            key={pid}
+                            className={`rounded-xl border p-2.5 transition-all ${
+                              isTurn
+                                ? 'bg-slate-950 border-amber-400/90 shadow-[0_0_14px_rgba(251,191,36,0.18)]'
+                                : 'bg-slate-950/75 border-slate-800'
+                            }`}
+                          >
+                            {/* Player Block Header */}
+                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/90">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full shrink-0 border"
+                                  style={{
+                                    backgroundColor: palette.fillHex,
+                                    borderColor: palette.strokeHex,
+                                  }}
+                                />
+                                <span className="font-bold text-xs text-slate-100 truncate">
+                                  {formatPlayerLabel(pid)}
+                                </span>
+                                {isSelf && (
+                                  <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-[9px] font-black uppercase shrink-0">
+                                    You
+                                  </span>
+                                )}
+                              </div>
+                              {isTurn ? (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider shrink-0">
+                                  ⚡ Turn
+                                </span>
+                              ) : (
+                                <span className="font-mono font-bold text-xs text-amber-300 shrink-0">
+                                  {claimedRoutePoints} pts
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Core Player Breakdown Grid: Routes, Cards, Trains, Tickets */}
+                            <div className="grid grid-cols-2 gap-1.5 mt-2 text-[11px]">
+                              <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg px-2 py-1.5 flex items-center justify-between">
+                                <span className="text-slate-400">🛤️ Routes</span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {claimedRoutesCount}{' '}
+                                  <span className="text-[10px] text-amber-300">
+                                    ({claimedRoutePoints}p)
+                                  </span>
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg px-2 py-1.5 flex items-center justify-between">
+                                <span className="text-slate-400">🃏 Cards</span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {handCount}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg px-2 py-1.5 flex items-center justify-between">
+                                <span className="text-slate-400">🚂 Trains</span>
+                                <span
+                                  className={`font-mono font-bold ${
+                                    trainsRemaining <= 5
+                                      ? 'text-rose-400'
+                                      : 'text-emerald-300'
+                                  }`}
+                                >
+                                  {trainsRemaining}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg px-2 py-1.5 flex items-center justify-between">
+                                <span className="text-slate-400">🎫 Tickets</span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {ticketCount}
+                                  {pendingTicketsCount > 0 && (
+                                    <span className="text-amber-300 text-[10px] ml-0.5">
+                                      (+{pendingTicketsCount})
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Alvin & Dexter Monster Cards Section (Total counts hidden; Face-Up status visible) */}
+                            {ttrSanitized.alvinAndDexter?.enabled && (
+                              <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1.5">
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-purple-300 font-bold uppercase tracking-wider">
+                                    Monster Cards
+                                  </span>
+                                  <span
+                                    className="text-slate-500 font-mono text-[9px]"
+                                    title="The specific amount of Alvin and Dexter cards each player holds is hidden until final scoring"
+                                  >
+                                    🔒 Totals Hidden
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <div
+                                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center justify-between ${
+                                      hasFaceUpAlvin
+                                        ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 shadow-[0_0_8px_rgba(52,211,153,0.25)]'
+                                        : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                                    }`}
+                                  >
+                                    <span>🛸 Alvin</span>
+                                    <span className="font-mono text-[9px] uppercase">
+                                      {hasFaceUpAlvin ? 'FACE-UP' : 'None Up'}
+                                    </span>
+                                  </div>
+
+                                  <div
+                                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center justify-between ${
+                                      hasFaceUpDexter
+                                        ? 'bg-orange-950/80 border-orange-400 text-orange-200 shadow-[0_0_8px_rgba(251,146,60,0.25)]'
+                                        : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                                    }`}
+                                  >
+                                    <span>🦖 Dexter</span>
+                                    <span className="font-mono text-[9px] uppercase">
+                                      {hasFaceUpDexter ? 'FACE-UP' : 'None Up'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </aside>
+
+                  <div className="flex-1 relative min-h-0">
+                    <InteractiveMap
+                      routes={ttrSanitized.routes}
+                      playerOrder={ttrSanitized.playerOrder}
+                      playerScores={Object.fromEntries(
+                        ttrSanitized.playerOrder.map((pid) => [
+                          pid,
+                          pid === ttrSanitized.self.id
+                            ? ttrSanitized.self.claimedRoutePoints
+                            : ttrSanitized.opponents[pid]?.claimedRoutePoints ??
+                              0,
+                        ])
+                      )}
+                      playerNames={
+                        runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}
+                      }
+                      playerColors={
+                        runnerMode === 'MULTIPLAYER'
+                          ? mp.playerColors
+                          : localEffectivePlayerColors
+                      }
                     selectedRouteId={selectedRouteId}
                     highlightedCities={highlightedCities}
                     alvinCity={ttrSanitized.alvinAndDexter?.alvinCity ?? null}
@@ -1421,19 +1808,20 @@ export const SandboxApp: React.FC = () => {
                               'Unplaced'}
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
-                            <span>
-                              Your Cards:{' '}
-                              <strong className="text-emerald-300">
-                                {ttrSanitized.self.alvinCards ?? 0}
-                              </strong>
+                            <span title="Specific amount of Alvin cards is hidden until end of game">
+                              Pile: <strong className="text-slate-300">🔒 Hidden</strong>
                             </span>
                             {(ttrSanitized.self.faceUpAlvinTurnsRemaining ??
-                              0) > 0 && (
+                              0) > 0 ? (
                               <span
                                 className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 font-bold text-[9px]"
                                 title="Face-up until the end of your next turn (blocks moving Alvin)"
                               >
                                 FACE-UP
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-slate-500 font-mono">
+                                None Up
                               </span>
                             )}
                           </div>
@@ -1454,19 +1842,20 @@ export const SandboxApp: React.FC = () => {
                               'Unplaced'}
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-between">
-                            <span>
-                              Your Cards:{' '}
-                              <strong className="text-orange-300">
-                                {ttrSanitized.self.dexterCards ?? 0}
-                              </strong>
+                            <span title="Specific amount of Dexter cards is hidden until end of game">
+                              Pile: <strong className="text-slate-300">🔒 Hidden</strong>
                             </span>
                             {(ttrSanitized.self.faceUpDexterTurnsRemaining ??
-                              0) > 0 && (
+                              0) > 0 ? (
                               <span
                                 className="px-1.5 py-0.2 rounded bg-orange-500/20 border border-orange-400/50 text-orange-200 font-bold text-[9px]"
                                 title="Face-up until the end of your next turn (blocks moving Dexter)"
                               >
                                 FACE-UP
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-slate-500 font-mono">
+                                None Up
                               </span>
                             )}
                           </div>
@@ -1747,6 +2136,7 @@ export const SandboxApp: React.FC = () => {
                       </div>
                     </div>
                   )}
+                  </div>
                 </div>
 
                 {/* 3. BOTTOM PANEL — TTR ACTIVE / VIEWED PLAYER DASHBOARD */}
@@ -1821,11 +2211,8 @@ export const SandboxApp: React.FC = () => {
                             {opp.ticketCount}
                             {ttrSanitized.alvinAndDexter?.enabled && (
                               <>
-                                {' '}
-                                🛸{opp.alvinCards ?? 0}
-                                {opp.hasFaceUpAlvin ? '*' : ''} 🦖
-                                {opp.dexterCards ?? 0}
-                                {opp.hasFaceUpDexter ? '*' : ''}
+                                {opp.hasFaceUpAlvin ? ' 🛸FACE-UP' : ''}
+                                {opp.hasFaceUpDexter ? ' 🦖FACE-UP' : ''}
                               </>
                             )}
                           </span>
@@ -2212,6 +2599,95 @@ export const SandboxApp: React.FC = () => {
                   onLeaveRoom={() => mp.leaveRoom()}
                 />
               )}
+            </div>
+          )}
+
+          {/* =================================================================
+              DEV SANDBOX BEGINNING MENU & DRILL-DOWN EXPANSION CONFIGURATOR
+             ================================================================= */}
+          {runnerMode === 'LOCAL' && isLocalSetupOpen && (
+            <div className="absolute inset-0 bg-slate-950/92 backdrop-blur-md flex flex-col items-center justify-center z-40 p-4 overflow-y-auto gap-3">
+              {/* Dev Sandbox Quick Config Header (Player Count, Seed & Resume) */}
+              <div className="w-full max-w-4xl bg-slate-900 border border-amber-500/50 rounded-2xl px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xl">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-black uppercase text-[10px]">
+                    🛠️ Dev Sandbox Setup
+                  </span>
+                  <span className="text-slate-300 font-semibold">
+                    Select a game below to drill down into its{' '}
+                    <strong className="text-purple-300">Expansions</strong>,{' '}
+                    <strong className="text-amber-300">Player Colors</strong>,
+                    and rules before launching.
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-slate-400 font-semibold">
+                      Sandbox Seats:
+                    </label>
+                    <select
+                      value={localClampedPlayerCount}
+                      onChange={(e) =>
+                        setPlayerCountInput(Number(e.target.value))
+                      }
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-amber-300 font-bold focus:outline-none focus:border-amber-400"
+                    >
+                      {[2, 3, 4, 5, 6]
+                        .filter(
+                          (n) =>
+                            n >= localEffectiveBounds.minPlayers &&
+                            n <= localEffectiveBounds.maxPlayers
+                        )
+                        .map((n) => (
+                          <option key={n} value={n}>
+                            {n} Players
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-slate-400 font-semibold">
+                      RNG Seed:
+                    </label>
+                    <input
+                      type="text"
+                      value={seedInput}
+                      onChange={(e) => setSeedInput(e.target.value)}
+                      className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsLocalSetupOpen(false)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold transition"
+                  >
+                    Resume Current Board →
+                  </button>
+                </div>
+              </div>
+
+              <GameLobby
+                roomId="DEV-SANDBOX"
+                playerId="Player_1"
+                hostPlayerId="Player_1"
+                category={localCategory}
+                selectedGameId={localSelectedGameId}
+                configuredGameId={localConfiguredGameId}
+                selectedExpansions={localSelectedExpansions}
+                playerSettings={localLobbyPlayerSettings}
+                players={localLobbyPlayers}
+                errorBanner={localErrorBanner}
+                onSetCategory={(cat) => setLocalCategory(cat)}
+                onSelectGame={(gameId) => handleLocalSelectGame(gameId)}
+                onToggleExpansion={(expId) => handleLocalToggleExpansion(expId)}
+                onChooseColor={(colorId) => handleLocalChooseColor(colorId)}
+                onToggleReady={() => {}}
+                onStartGame={() => handleStartNewLocalGame()}
+                onLeaveRoom={() => setIsLocalSetupOpen(false)}
+              />
             </div>
           )}
 

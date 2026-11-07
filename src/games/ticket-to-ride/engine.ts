@@ -1305,8 +1305,6 @@ export function getPlayerPerspective(
       claimedRoutePoints: opp.claimedRoutePoints,
       ...(state.alvinAndDexter?.enabled
         ? {
-            alvinCards: opp.alvinCards ?? 0,
-            dexterCards: opp.dexterCards ?? 0,
             hasFaceUpAlvin: (opp.faceUpAlvinTurnsRemaining ?? 0) > 0,
             hasFaceUpDexter: (opp.faceUpDexterTurnsRemaining ?? 0) > 0,
           }

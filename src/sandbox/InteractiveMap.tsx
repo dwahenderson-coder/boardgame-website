@@ -188,28 +188,58 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   }, [playerOrder, playerScores]);
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-slate-950 overflow-hidden select-none">
+    <div
+      className="relative w-full h-full flex items-center justify-center overflow-hidden select-none"
+      style={{
+        backgroundColor: '#dcc7a1',
+        backgroundImage: [
+          'radial-gradient(circle at 20% 25%, rgba(255, 248, 231, 0.55) 0%, transparent 55%)',
+          'radial-gradient(circle at 80% 75%, rgba(180, 140, 82, 0.35) 0%, transparent 60%)',
+          'repeating-linear-gradient(45deg, rgba(120, 83, 32, 0.055) 0px, rgba(120, 83, 32, 0.055) 1px, transparent 1px, transparent 5px)',
+          'repeating-linear-gradient(-45deg, rgba(120, 83, 32, 0.045) 0px, rgba(120, 83, 32, 0.045) 1px, transparent 1px, transparent 5px)',
+        ].join(', '),
+      }}
+    >
       <svg
         viewBox="-42 -42 1084 684"
-        className="w-full h-full max-h-full object-contain"
+        className="w-full h-full max-h-full object-contain drop-shadow-2xl"
       >
         <defs>
-          {/* Ocean water gradient */}
-          <radialGradient id="oceanGradient" cx="50%" cy="50%" r="70%">
-            <stop offset="0%" stopColor="#0f2942" />
-            <stop offset="65%" stopColor="#09192b" />
-            <stop offset="100%" stopColor="#050e1a" />
+          {/* Warm sandy parchment sea / surround gradient */}
+          <radialGradient id="oceanGradient" cx="50%" cy="50%" r="72%">
+            <stop offset="0%" stopColor="#e6d5b5" />
+            <stop offset="65%" stopColor="#d9c39b" />
+            <stop offset="100%" stopColor="#c8ad7f" />
           </radialGradient>
 
-          {/* Continent parchment-topographic gradient */}
+          {/* Continent warm beige / sand parchment gradient */}
           <linearGradient id="continentLand" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#2b3628" />
-            <stop offset="35%" stopColor="#353224" />
-            <stop offset="70%" stopColor="#293529" />
-            <stop offset="100%" stopColor="#1f2922" />
+            <stop offset="0%" stopColor="#f6ecd9" />
+            <stop offset="35%" stopColor="#efe0c2" />
+            <stop offset="70%" stopColor="#e7d3ad" />
+            <stop offset="100%" stopColor="#dec496" />
           </linearGradient>
 
-          {/* Subtle cartographic lat/long grid */}
+          {/* Woven sand & parchment linen grain texture pattern */}
+          <pattern
+            id="sandGrainTexture"
+            width="16"
+            height="16"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 0 4 H 16 M 0 12 H 16 M 4 0 V 16 M 12 0 V 16"
+              stroke="rgba(120, 53, 15, 0.055)"
+              strokeWidth="0.6"
+            />
+            <circle cx="2" cy="2" r="0.65" fill="rgba(120, 53, 15, 0.09)" />
+            <circle cx="10" cy="6" r="0.55" fill="rgba(120, 53, 15, 0.08)" />
+            <circle cx="6" cy="13" r="0.7" fill="rgba(120, 53, 15, 0.08)" />
+            <circle cx="14" cy="11" r="0.5" fill="rgba(255, 251, 235, 0.35)" />
+            <circle cx="5" cy="7" r="0.6" fill="rgba(255, 251, 235, 0.35)" />
+          </pattern>
+
+          {/* Subtle vintage cartographic lat/long grid */}
           <pattern
             id="atlasGrid"
             width="80"
@@ -219,7 +249,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <path
               d="M 80 0 L 0 0 0 80"
               fill="none"
-              stroke="rgba(226, 232, 240, 0.05)"
+              stroke="rgba(120, 53, 15, 0.14)"
               strokeWidth="1"
               strokeDasharray="3 3"
             />
@@ -229,9 +259,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <feDropShadow
               dx="0"
               dy="3"
-              stdDeviation="6"
-              floodColor="#020617"
-              floodOpacity="0.85"
+              stdDeviation="5"
+              floodColor="#451a03"
+              floodOpacity="0.42"
             />
           </filter>
         </defs>
@@ -245,7 +275,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           width="1076"
           height="676"
           rx="22"
-          fill="#1c140d"
+          fill="#2b1b10"
           stroke="#b45309"
           strokeWidth="3"
         />
@@ -256,7 +286,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           height="666"
           rx="18"
           fill="none"
-          stroke="#78350f"
+          stroke="#92400e"
           strokeWidth="1.5"
           strokeDasharray="6 4"
         />
@@ -271,17 +301,26 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           height="592"
           rx="14"
           fill="url(#oceanGradient)"
-          stroke="#d97706"
+          stroke="#b45309"
           strokeWidth="2.5"
+        />
+        <rect
+          x="4"
+          y="4"
+          width="992"
+          height="592"
+          rx="14"
+          fill="url(#sandGrainTexture)"
+          className="pointer-events-none"
         />
 
         {/* North America Landmass Silhouette & Geography */}
         <g className="pointer-events-none">
-          {/* Outer coastal shallow water glow */}
+          {/* Outer coastal shallow vintage tint */}
           <path
             d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
             fill="none"
-            stroke="#38bdf8"
+            stroke="#b45309"
             strokeOpacity="0.14"
             strokeWidth="14"
             strokeLinejoin="round"
@@ -291,26 +330,32 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <path
             d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
             fill="url(#continentLand)"
-            stroke="#a16207"
-            strokeWidth="2"
+            stroke="#92400e"
+            strokeWidth="2.2"
             strokeLinejoin="round"
             filter="url(#landShadow)"
+          />
+
+          {/* Tactile sand / parchment weave overlay across the continent */}
+          <path
+            d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
+            fill="url(#sandGrainTexture)"
           />
 
           {/* US / Canada / Regional Border Graticules */}
           <path
             d="M 115,112 Q 310,120 555,125"
             fill="none"
-            stroke="#fde68a"
-            strokeOpacity="0.16"
+            stroke="#92400e"
+            strokeOpacity="0.28"
             strokeWidth="1.5"
             strokeDasharray="6 5"
           />
           <path
             d="M 135,478 Q 255,492 365,522 Q 465,555 545,562"
             fill="none"
-            stroke="#fde68a"
-            strokeOpacity="0.16"
+            stroke="#92400e"
+            strokeOpacity="0.28"
             strokeWidth="1.5"
             strokeDasharray="6 5"
           />
@@ -319,8 +364,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <path
             d="M 175,55 L 200,32 L 225,62 L 250,40 L 280,85 M 245,130 L 270,105 L 295,140 L 320,115 L 345,155 M 290,225 L 320,195 L 345,230 L 370,205 L 395,245 M 325,315 L 350,285 L 375,320"
             fill="none"
-            stroke="#ca8a04"
-            strokeOpacity="0.22"
+            stroke="#92400e"
+            strokeOpacity="0.32"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -330,15 +375,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <path
             d="M 755,345 L 775,322 L 792,345 L 812,320 L 828,340 M 790,285 L 810,262 L 828,285 L 845,260"
             fill="none"
-            stroke="#ca8a04"
-            strokeOpacity="0.2"
+            stroke="#92400e"
+            strokeOpacity="0.28"
             strokeWidth="1.8"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
 
           {/* Great Lakes Hydrology (Superior, Michigan, Huron, Erie, Ontario) */}
-          <g fill="#0c263d" stroke="#38bdf8" strokeOpacity="0.35" strokeWidth="1.2">
+          <g fill="#9ab7c7" stroke="#476b7c" strokeOpacity="0.55" strokeWidth="1.2">
             {/* Lake Superior */}
             <path d="M 575,145 Q 618,122 668,142 Q 645,165 585,162 Z" />
             {/* Lake Michigan */}
@@ -355,8 +400,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           <path
             d="M 585,190 Q 615,265 625,335 Q 630,435 655,535 M 410,210 Q 515,265 625,335 M 765,270 Q 695,315 625,335"
             fill="none"
-            stroke="#38bdf8"
-            strokeOpacity="0.18"
+            stroke="#5b8296"
+            strokeOpacity="0.32"
             strokeWidth="1.8"
             strokeLinecap="round"
           />
@@ -377,29 +422,29 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         <g
           transform="translate(56, 535)"
           className="pointer-events-none"
-          opacity="0.75"
+          opacity="0.85"
         >
           <circle
             r="26"
-            fill="#09192b"
-            stroke="#d97706"
-            strokeWidth="1.5"
+            fill="#f5ebd6"
+            stroke="#92400e"
+            strokeWidth="1.8"
           />
           <circle
             r="21"
             fill="none"
-            stroke="#fbbf24"
-            strokeWidth="0.8"
+            stroke="#b45309"
+            strokeWidth="0.9"
             strokeDasharray="2 2"
           />
-          <polygon points="0,-22 4,-4 0,-8 -4,-4" fill="#fbbf24" />
-          <polygon points="0,22 4,4 0,8 -4,4" fill="#94a3b8" />
-          <polygon points="-22,0 -4,-4 -8,0 -4,4" fill="#94a3b8" />
-          <polygon points="22,0 4,-4 8,0 4,4" fill="#94a3b8" />
+          <polygon points="0,-22 4,-4 0,-8 -4,-4" fill="#b45309" />
+          <polygon points="0,22 4,4 0,8 -4,4" fill="#78350f" />
+          <polygon points="-22,0 -4,-4 -8,0 -4,4" fill="#78350f" />
+          <polygon points="22,0 4,-4 8,0 4,4" fill="#78350f" />
           <text
             y="-25"
             textAnchor="middle"
-            fill="#fbbf24"
+            fill="#78350f"
             fontSize="7"
             fontWeight="800"
           >

@@ -1544,6 +1544,10 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(state.players['p1']!.faceUpAlvinTurnsRemaining).toBe(1);
       const p2Perspective = getPlayerPerspective(state, 'p2');
       expect(p2Perspective.opponents['p1']!.hasFaceUpAlvin).toBe(true);
+      expect(p2Perspective.opponents['p1']!.hasFaceUpDexter).toBe(false);
+      // Specific amount of Alvin and Dexter cards is hidden information
+      expect('alvinCards' in p2Perspective.opponents['p1']!).toBe(false);
+      expect('dexterCards' in p2Perspective.opponents['p1']!).toBe(false);
 
       // p2 uses 2 Locomotives to move Dexter 4-6 cities away from Atlanta (e.g. to Denver or Seattle)
       // Let's complete p2 and p3 turns by drawing from deck so it returns to p1's next turn
