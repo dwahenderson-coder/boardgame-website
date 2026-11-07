@@ -13,7 +13,10 @@ import {
   ServerToClientEvents,
 } from '../network/socketTypes.js';
 import { GAME_CATALOG_BY_ID } from '../registry/catalog.js';
-import { getEffectivePlayerBounds } from '../types/game.js';
+import {
+  getEffectivePlayerBounds,
+  isExpansionCompatibleWithMap,
+} from '../types/game.js';
 import { RoomManager } from './rooms.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -322,9 +325,34 @@ io.on('connection', (socket) => {
 
     const isCurrentlyEnabled =
       ctx.room.selectedExpansions.includes(expansionId);
-    const nextExpansions = isCurrentlyEnabled
+
+    if (activeGameId === 'ttr' && expansionId !== 'europe_map' && !isCurrentlyEnabled) {
+      const currentMapId: 'USA' | 'EUROPE' =
+        ctx.room.selectedExpansions.includes('europe_map') ? 'EUROPE' : 'USA';
+      if (!isExpansionCompatibleWithMap(expansion, currentMapId)) {
+        socket.emit('action_error', {
+          message: `Expansion "${expansion.name}" is not compatible with the ${
+            currentMapId === 'EUROPE' ? 'Europe' : 'North America'
+          } map.`,
+        });
+        return;
+      }
+    }
+
+    let nextExpansions = isCurrentlyEnabled
       ? ctx.room.selectedExpansions.filter((id) => id !== expansionId)
       : [...ctx.room.selectedExpansions, expansionId];
+
+    if (activeGameId === 'ttr' && expansionId === 'europe_map') {
+      const nextMapId: 'USA' | 'EUROPE' = nextExpansions.includes('europe_map')
+        ? 'EUROPE'
+        : 'USA';
+      nextExpansions = nextExpansions.filter((id) => {
+        if (id === 'europe_map') return true;
+        const expDef = catalogEntry.expansions.find((e) => e.id === id);
+        return expDef ? isExpansionCompatibleWithMap(expDef, nextMapId) : false;
+      });
+    }
 
     // Validate player count constraints after toggling
     const nextBounds = getEffectivePlayerBounds(catalogEntry, nextExpansions);

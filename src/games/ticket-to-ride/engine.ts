@@ -4,9 +4,13 @@ import {
   ALL_TRAIN_CARD_COLORS,
   createEmptyHand,
   createStandardTrainDeckCards,
+  EUROPE_BOARD_ROUTES,
+  EUROPE_LONG_TICKETS,
+  EUROPE_REGULAR_TICKETS,
   FACE_UP_SLOTS,
   INITIAL_HAND_SIZE,
   INITIAL_MIN_TICKETS_TO_KEEP,
+  INITIAL_STATIONS_PER_PLAYER,
   INITIAL_TICKETS_DEALT,
   INITIAL_TRAINS_PER_PLAYER,
   ROUTE_SCORE_TABLE,
@@ -14,10 +18,12 @@ import {
   STANDARD_DESTINATION_TICKETS,
   TURN_MIN_TICKETS_TO_KEEP,
   TURN_TICKETS_DEALT,
+  UNUSED_STATION_POINTS,
 } from './constants.js';
 import {
   Action,
   AlvinAndDexterState,
+  BuildStationAction,
   ClaimRouteAction,
   DestinationTicket,
   DrawCardsAction,
@@ -31,6 +37,7 @@ import {
   SanitizedGameState,
   SanitizedOpponentState,
   TrainCardColor,
+  TTRMapId,
   ValidationResult,
 } from './types.js';
 
@@ -322,6 +329,7 @@ export interface InitGameOptions {
    * `tickets` list and begins in the `'PLAYING'` (or `'MONSTER_PLACEMENT'`) phase immediately.
    */
   readonly skipInitialTicketSelection?: boolean;
+  readonly mapId?: TTRMapId;
   readonly customRoutes?: readonly RouteEdge[];
   readonly customTickets?: readonly DestinationTicket[];
   readonly enableAlvinAndDexter?: boolean;
@@ -349,13 +357,23 @@ export function initGame(
     throw new Error('Player IDs must be unique.');
   }
 
+  const mapId: TTRMapId = options.mapId ?? 'USA';
   const trainDeck = new Deck<TrainCardColor>(
     createStandardTrainDeckCards(),
     seed
   );
   const ticketSeed = (seed ^ 0x9e3779b9) >>> 0;
+  const longTicketSeed = (seed ^ 0x517cc1b7) >>> 0;
+  const longTicketDeck =
+    mapId === 'EUROPE' && !options.customTickets
+      ? new Deck<DestinationTicket>(EUROPE_LONG_TICKETS, longTicketSeed)
+      : null;
+
   const ticketDeck = new Deck<DestinationTicket>(
-    options.customTickets ?? STANDARD_DESTINATION_TICKETS,
+    options.customTickets ??
+      (mapId === 'EUROPE'
+        ? EUROPE_REGULAR_TICKETS
+        : STANDARD_DESTINATION_TICKETS),
     ticketSeed
   );
 
@@ -365,7 +383,9 @@ export function initGame(
 
   for (const playerId of playerIds) {
     const initialCards = trainDeck.draw(INITIAL_HAND_SIZE, true);
-    const dealtTickets = ticketDeck.draw(INITIAL_TICKETS_DEALT, true);
+    const dealtTickets = longTicketDeck
+      ? [...longTicketDeck.draw(1, false), ...ticketDeck.draw(3, true)]
+      : ticketDeck.draw(INITIAL_TICKETS_DEALT, true);
 
     players[playerId] = {
       id: playerId,
@@ -376,6 +396,9 @@ export function initGame(
       trainsRemaining: INITIAL_TRAINS_PER_PLAYER,
       claimedRoutePoints: 0,
       recentDrawnCards: {},
+      ...(mapId === 'EUROPE'
+        ? { stationsRemaining: INITIAL_STATIONS_PER_PLAYER }
+        : {}),
       ...(enableMonsters
         ? {
             alvinCards: 0,
@@ -397,7 +420,8 @@ export function initGame(
   const faceUpCards = replenishFaceUpCards(initialFaceUp, trainDeck);
 
   const routes: RouteEdge[] = (
-    options.customRoutes ?? STANDARD_BOARD_ROUTES
+    options.customRoutes ??
+    (mapId === 'EUROPE' ? EUROPE_BOARD_ROUTES : STANDARD_BOARD_ROUTES)
   ).map((route) => ({
     ...route,
   }));
@@ -456,6 +480,8 @@ export function initGame(
     turnsRemainingInFinalRound: 0,
     turnNumber: 1,
     lastActionSummary: initialSummary,
+    mapId,
+    ...(mapId === 'EUROPE' ? { stations: {} } : {}),
     ...(alvinAndDexter !== undefined ? { alvinAndDexter } : {}),
   };
 }
@@ -525,6 +551,8 @@ export function validateAction(
       return validateKeepTickets(player, action);
     case 'MOVE_MONSTER':
       return validateMoveMonster(state, player, action);
+    case 'BUILD_STATION':
+      return validateBuildStation(state, player, action);
     case 'PLACE_MONSTER':
       return {
         valid: false,
@@ -538,6 +566,100 @@ export function validateAction(
       };
     }
   }
+}
+
+function validateBuildStation(
+  state: GameState,
+  player: PlayerState,
+  action: BuildStationAction
+): ValidationResult {
+  if (state.mapId !== 'EUROPE') {
+    return {
+      valid: false,
+      reason: 'Train Stations are only available on the Ticket to Ride: Europe map.',
+    };
+  }
+
+  if (state.turnStep !== 'AWAITING_ACTION') {
+    return {
+      valid: false,
+      reason: `Cannot build a station during turn step ${state.turnStep}.`,
+    };
+  }
+
+  const remaining = player.stationsRemaining ?? 0;
+  if (remaining <= 0) {
+    return {
+      valid: false,
+      reason: 'You have already built all 3 of your Train Stations.',
+    };
+  }
+
+  const allCities = getAllBoardCities(state.routes);
+  if (!allCities.includes(action.cityName)) {
+    return {
+      valid: false,
+      reason: `City "${action.cityName}" does not exist on the board.`,
+    };
+  }
+
+  const existingOwner = state.stations?.[action.cityName];
+  if (existingOwner) {
+    return {
+      valid: false,
+      reason: `${action.cityName} already has a Train Station built by ${existingOwner}.`,
+    };
+  }
+
+  if (isCityInChaos(state, action.cityName)) {
+    return {
+      valid: false,
+      reason: `Cannot build a Train Station in ${action.cityName} while it is a City in Chaos!`,
+    };
+  }
+
+  // 1st station costs 1 card, 2nd station costs 2 cards, 3rd station costs 3 cards (all of a single color; Locomotives are wild)
+  const requiredCards = INITIAL_STATIONS_PER_PLAYER - remaining + 1;
+  let totalPaid = 0;
+  const nonLocoColorsUsed: TrainCardColor[] = [];
+
+  for (const color of ALL_TRAIN_CARD_COLORS) {
+    const count = action.payment[color] ?? 0;
+    if (!Number.isInteger(count) || count < 0) {
+      return {
+        valid: false,
+        reason: `Invalid card count (${count}) for color ${color}.`,
+      };
+    }
+    if (count > 0) {
+      if (player.hand[color] < count) {
+        return {
+          valid: false,
+          reason: `Insufficient ${color} cards in hand: payment specifies ${count}, player has ${player.hand[color]}.`,
+        };
+      }
+      totalPaid += count;
+      if (color !== 'LOCOMOTIVE') {
+        nonLocoColorsUsed.push(color);
+      }
+    }
+  }
+
+  if (totalPaid !== requiredCards) {
+    return {
+      valid: false,
+      reason: `Building this station requires ${requiredCards} card(s) of a single color, but payment included ${totalPaid}.`,
+    };
+  }
+
+  if (nonLocoColorsUsed.length > 1) {
+    return {
+      valid: false,
+      reason: `Station payment must use a single color (plus optional Locomotives), but received multiple colors: ${nonLocoColorsUsed.join(', ')}.`,
+    };
+  }
+
+  return { valid: true };
 }
 
 function validatePlaceMonster(
@@ -883,6 +1005,17 @@ function validateClaimRoute(
     }
   }
 
+  // Ferry rule (Europe): route requires a minimum number of Locomotives
+  if ((route.ferryLocomotives ?? 0) > 0) {
+    const locosPaid = action.payment.LOCOMOTIVE ?? 0;
+    if (locosPaid < route.ferryLocomotives!) {
+      return {
+        valid: false,
+        reason: `Ferry route ${route.from} ↔ ${route.to} requires at least ${route.ferryLocomotives} Locomotive(s), but payment only included ${locosPaid}.`,
+      };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -1129,14 +1262,77 @@ export function applyAction(
 
       const nextHand = { ...player.hand };
       const discardedCards: TrainCardColor[] = [];
+      let claimColor: TrainCardColor = 'LOCOMOTIVE';
 
       for (const color of ALL_TRAIN_CARD_COLORS) {
         const count = action.payment[color] ?? 0;
         if (count > 0) {
           nextHand[color] -= count;
+          if (color !== 'LOCOMOTIVE') {
+            claimColor = color;
+          }
           for (let i = 0; i < count; i++) {
             discardedCards.push(color);
           }
+        }
+      }
+
+      let tunnelSummaryNote = '';
+      if (route.isTunnel) {
+        const tunnelCards = trainDeck.draw(3, true);
+        trainDeck.discard(tunnelCards);
+
+        const extraRequired = tunnelCards.filter(
+          (c) => c === 'LOCOMOTIVE' || c === claimColor
+        ).length;
+
+        if (extraRequired > 0) {
+          const availableColor =
+            claimColor === 'LOCOMOTIVE' ? 0 : nextHand[claimColor];
+          const availableLoco = nextHand.LOCOMOTIVE;
+
+          if (availableColor + availableLoco < extraRequired) {
+            // Player cannot afford the tunnel tax: keep original hand, discard only the 3 flipped tunnel cards, and end turn
+            const nextFaceUpAfterFail = replenishFaceUpCards(
+              state.faceUpCards,
+              trainDeck
+            );
+            const failedState: GameState = {
+              ...state,
+              players: {
+                ...state.players,
+                [playerId]: {
+                  ...player,
+                  recentDrawnCards: {},
+                },
+              },
+              faceUpCards: nextFaceUpAfterFail,
+              trainDeck: trainDeck.toState(),
+              lastActionSummary: `${playerId} attempted tunnel ${route.from} ↔ ${route.to}, flipped [${tunnelCards.join(', ')}] (+${extraRequired} extra card(s) required), and could not pay the tunnel tax!`,
+            };
+            return advanceTurn(failedState);
+          }
+
+          let remainingExtra = extraRequired;
+          if (claimColor !== 'LOCOMOTIVE' && nextHand[claimColor] > 0) {
+            const useColor = Math.min(nextHand[claimColor], remainingExtra);
+            nextHand[claimColor] -= useColor;
+            remainingExtra -= useColor;
+            for (let i = 0; i < useColor; i++) {
+              discardedCards.push(claimColor);
+            }
+          }
+          if (remainingExtra > 0) {
+            nextHand.LOCOMOTIVE -= remainingExtra;
+            for (let i = 0; i < remainingExtra; i++) {
+              discardedCards.push('LOCOMOTIVE');
+            }
+          }
+          tunnelSummaryNote = ` [Tunnel flipped: ${tunnelCards.join(', ')} -> paid +${extraRequired} extra]`;
+        } else {
+          tunnelSummaryNote = ` [Tunnel flipped: ${
+            tunnelCards.length > 0 ? tunnelCards.join(', ') : 'none'
+          } -> +0 extra]`;
         }
       }
 
@@ -1165,7 +1361,54 @@ export function applyAction(
         routes: updatedRoutes,
         faceUpCards: nextFaceUp,
         trainDeck: trainDeck.toState(),
-        lastActionSummary: `${playerId} claimed route ${route.from} ↔ ${route.to} (${route.length} cars, +${routePoints} pts).`,
+        lastActionSummary: `${playerId} claimed route ${route.from} ↔ ${route.to} (${route.length} cars, +${routePoints} pts)${tunnelSummaryNote}.`,
+      };
+
+      return advanceTurn(nextState);
+    }
+
+    case 'BUILD_STATION': {
+      const trainDeck = Deck.fromState(state.trainDeck);
+      const nextHand = { ...player.hand };
+      const discardedCards: TrainCardColor[] = [];
+
+      for (const color of ALL_TRAIN_CARD_COLORS) {
+        const count = action.payment[color] ?? 0;
+        if (count > 0) {
+          nextHand[color] -= count;
+          for (let i = 0; i < count; i++) {
+            discardedCards.push(color);
+          }
+        }
+      }
+
+      trainDeck.discard(discardedCards);
+      const nextFaceUp = replenishFaceUpCards(state.faceUpCards, trainDeck);
+
+      const currentStations =
+        player.stationsRemaining ?? INITIAL_STATIONS_PER_PLAYER;
+      const updatedPlayer: PlayerState = {
+        ...player,
+        hand: nextHand,
+        stationsRemaining: currentStations - 1,
+        recentDrawnCards: {},
+      };
+
+      const nextStations: Record<string, string> = {
+        ...(state.stations ?? {}),
+        [action.cityName]: playerId,
+      };
+
+      const nextState: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: updatedPlayer,
+        },
+        stations: nextStations,
+        faceUpCards: nextFaceUp,
+        trainDeck: trainDeck.toState(),
+        lastActionSummary: `${playerId} built a Train Station in ${action.cityName} (${discardedCards.length} card(s) paid)!`,
       };
 
       return advanceTurn(nextState);
@@ -1303,6 +1546,9 @@ export function getPlayerPerspective(
       pendingTicketCount: opp.pendingTickets.length,
       trainsRemaining: opp.trainsRemaining,
       claimedRoutePoints: opp.claimedRoutePoints,
+      ...(opp.stationsRemaining !== undefined
+        ? { stationsRemaining: opp.stationsRemaining }
+        : {}),
       ...(state.alvinAndDexter?.enabled
         ? {
             hasFaceUpAlvin: (opp.faceUpAlvinTurnsRemaining ?? 0) > 0,
@@ -1334,6 +1580,10 @@ export function getPlayerPerspective(
     turnsRemainingInFinalRound: state.turnsRemainingInFinalRound,
     turnNumber: state.turnNumber,
     lastActionSummary: state.lastActionSummary,
+    ...(state.mapId !== undefined ? { mapId: state.mapId } : {}),
+    ...(state.stations !== undefined
+      ? { stations: { ...state.stations } }
+      : {}),
     ...(state.alvinAndDexter !== undefined
       ? { alvinAndDexter: { ...state.alvinAndDexter } }
       : {}),
@@ -1492,10 +1742,117 @@ export function getMonsterBonusRecipients(state: GameState): {
 }
 
 /**
+ * Evaluates a player's Destination Tickets at the end of the game.
+ * On the Europe map, each Train Station built by `playerId` allows that player to borrow
+ * up to 1 rival-owned route into or out of that station's city to help complete tickets
+ * (automatically selecting the combination of borrowed routes that maximizes ticket score).
+ */
+export function evaluatePlayerTickets(
+  state: GameState,
+  playerId: string
+): {
+  readonly ticketDelta: number;
+  readonly completedTicketIds: ReadonlySet<string>;
+} {
+  const player = state.players[playerId];
+  if (!player || player.tickets.length === 0) {
+    return { ticketDelta: 0, completedTicketIds: new Set<string>() };
+  }
+
+  const ownedRoutes = state.routes.filter((r) => r.ownerId === playerId);
+
+  const scoreWithBorrowedRoutes = (
+    borrowed: readonly RouteEdge[]
+  ): { delta: number; completedIds: Set<string> } => {
+    const g = new Graph<RouteEdge>();
+    for (const r of ownedRoutes) {
+      g.addEdge(r.from, r.to, r.length, r);
+    }
+    for (const r of borrowed) {
+      g.addEdge(r.from, r.to, r.length, r);
+    }
+
+    let delta = 0;
+    const completedIds = new Set<string>();
+    for (const ticket of player.tickets) {
+      const { points: effectivePts } = getEffectiveTicketPoints(ticket, state);
+      if (g.isConnected(ticket.from, ticket.to)) {
+        delta += effectivePts;
+        completedIds.add(ticket.id);
+      } else {
+        delta -= effectivePts;
+      }
+    }
+    return { delta, completedIds };
+  };
+
+  // Find cities where `playerId` built a Train Station
+  const playerStationCities: string[] = [];
+  if (state.mapId === 'EUROPE' && state.stations) {
+    for (const [city, owner] of Object.entries(state.stations)) {
+      if (owner === playerId) {
+        playerStationCities.push(city);
+      }
+    }
+  }
+
+  if (playerStationCities.length === 0) {
+    const res = scoreWithBorrowedRoutes([]);
+    return { ticketDelta: res.delta, completedTicketIds: res.completedIds };
+  }
+
+  // For each station city owned by `playerId`, gather all candidate rival-owned routes incident to that city
+  const optionsPerStation: (RouteEdge | null)[][] = playerStationCities.map(
+    (city) => {
+      const rivalRoutes = state.routes.filter(
+        (r) =>
+          r.ownerId !== null &&
+          r.ownerId !== playerId &&
+          (r.from === city || r.to === city)
+      );
+      return [null, ...rivalRoutes];
+    }
+  );
+
+  let bestResult: { delta: number; completedIds: Set<string> } | null = null;
+  const currentChoice: RouteEdge[] = [];
+
+  const searchCombinations = (stationIdx: number): void => {
+    if (stationIdx >= optionsPerStation.length) {
+      const candidate = scoreWithBorrowedRoutes(currentChoice);
+      if (!bestResult || candidate.delta > bestResult.delta) {
+        bestResult = candidate;
+      }
+      return;
+    }
+
+    for (const opt of optionsPerStation[stationIdx]!) {
+      if (opt !== null) {
+        currentChoice.push(opt);
+        searchCombinations(stationIdx + 1);
+        currentChoice.pop();
+      } else {
+        searchCombinations(stationIdx + 1);
+      }
+    }
+  };
+
+  searchCombinations(0);
+
+  const finalRes = bestResult ?? scoreWithBorrowedRoutes([]);
+  return {
+    ticketDelta: finalRes.delta,
+    completedTicketIds: finalRes.completedIds,
+  };
+}
+
+/**
  * Calculates final scores for all players:
  * - Sum of claimed route points
- * - Plus/minus Destination Ticket points (any ticket containing a City in Chaos is worth half its normal value rounded down)
- * - Plus 10 points (Trans America Express) for the player(s) with the longest continuous path
+ * - Plus/minus Destination Ticket points (any ticket containing a City in Chaos is worth half its normal value rounded down;
+ *   Europe Stations allow borrowing 1 rival route per built station to complete tickets)
+ * - Plus +4 points per unused Train Station on the Europe map
+ * - Plus 10 points (Trans America Express / European Express) for the player(s) with the longest continuous path
  * - Plus 15 points for the player(s) with the most Alvin cards, and +15 points for the player(s) with the most Dexter cards
  */
 export function calculateFinalScores(
@@ -1511,24 +1868,13 @@ export function calculateFinalScores(
 
   for (const playerId of state.playerOrder) {
     const player = state.players[playerId]!;
+    const { ticketDelta } = evaluatePlayerTickets(state, playerId);
 
-    const playerGraph = new Graph<RouteEdge>();
-    for (const route of state.routes) {
-      if (route.ownerId === playerId) {
-        playerGraph.addEdge(route.from, route.to, route.length, route);
-      }
-    }
+    let totalScore = player.claimedRoutePoints + ticketDelta;
 
-    let totalScore = player.claimedRoutePoints;
-
-    for (const ticket of player.tickets) {
-      const completed = playerGraph.isConnected(ticket.from, ticket.to);
-      const { points: effectivePts } = getEffectiveTicketPoints(ticket, state);
-      if (completed) {
-        totalScore += effectivePts;
-      } else {
-        totalScore -= effectivePts;
-      }
+    if (state.mapId === 'EUROPE') {
+      totalScore +=
+        (player.stationsRemaining ?? 0) * UNUSED_STATION_POINTS;
     }
 
     if (recipientSet.has(playerId)) {

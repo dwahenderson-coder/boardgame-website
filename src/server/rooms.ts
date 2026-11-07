@@ -1,5 +1,4 @@
 import { customAlphabet } from 'nanoid';
-import { Graph } from '../common/graph.js';
 import { CatanGameState } from '../games/catan/index.js';
 import { CribbageGameState } from '../games/cribbage/index.js';
 import { EuchreGameState } from '../games/euchre/index.js';
@@ -17,14 +16,15 @@ import { GameId } from '../games/registry.js';
 import {
   ALVIN_BONUS_POINTS,
   DEXTER_BONUS_POINTS,
+  evaluatePlayerTickets,
   getEffectiveTicketPoints,
   getMonsterBonusRecipients,
   getTransAmericaExpressRecipients,
   TRANS_AMERICA_EXPRESS_BONUS,
 } from '../games/ticket-to-ride/engine.js';
+import { UNUSED_STATION_POINTS } from '../games/ticket-to-ride/constants.js';
 import {
   GameState as TTRGameState,
-  RouteEdge,
 } from '../games/ticket-to-ride/types.js';
 import {
   GameRoom,
@@ -488,19 +488,13 @@ export class RoomManager {
     const standings: PlayerFinalStanding[] = state.playerOrder.map(
       (playerId) => {
         const player = state.players[playerId]!;
-        const graph = new Graph<RouteEdge>();
-        for (const r of state.routes) {
-          if (r.ownerId === playerId) {
-            graph.addEdge(r.from, r.to, r.length, r);
-          }
-        }
+        const { ticketDelta: ticketPoints, completedTicketIds } =
+          evaluatePlayerTickets(state, playerId);
 
-        let ticketPoints = 0;
         const tickets = player.tickets.map((ticket) => {
-          const completed = graph.isConnected(ticket.from, ticket.to);
+          const completed = completedTicketIds.has(ticket.id);
           const { points: effectivePoints, isChaosHalved } =
             getEffectiveTicketPoints(ticket, state);
-          ticketPoints += completed ? effectivePoints : -effectivePoints;
           return {
             ticket,
             completed,
@@ -509,6 +503,10 @@ export class RoomManager {
           };
         });
 
+        const stationPoints =
+          state.mapId === 'EUROPE'
+            ? (player.stationsRemaining ?? 0) * UNUSED_STATION_POINTS
+            : 0;
         const hasTransAmericaExpress = recipientSet.has(playerId);
         const transAmericaExpressBonus = hasTransAmericaExpress
           ? TRANS_AMERICA_EXPRESS_BONUS
@@ -520,6 +518,7 @@ export class RoomManager {
         const totalScore =
           player.claimedRoutePoints +
           ticketPoints +
+          stationPoints +
           transAmericaExpressBonus +
           alvinBonus +
           dexterBonus;
@@ -535,6 +534,12 @@ export class RoomManager {
           longestPathLength: longestPathByPlayer[playerId] ?? 0,
           hasTransAmericaExpress,
           transAmericaExpressBonus,
+          ...(state.mapId === 'EUROPE'
+            ? {
+                stationsRemaining: player.stationsRemaining ?? 0,
+                stationPoints,
+              }
+            : {}),
           ...(state.alvinAndDexter?.enabled
             ? {
                 alvinCards: player.alvinCards ?? 0,

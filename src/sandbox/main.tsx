@@ -46,14 +46,17 @@ import {
   ALL_TRAIN_CARD_COLORS,
   ALVIN_BONUS_POINTS,
   DEXTER_BONUS_POINTS,
+  evaluatePlayerTickets,
   getAllBoardCities,
   getEffectiveTicketPoints,
   getMonsterBonusRecipients,
   getReachableMonsterCities,
   getTransAmericaExpressRecipients,
+  INITIAL_STATIONS_PER_PLAYER,
   isCityInChaos,
   MonsterType,
   TRANS_AMERICA_EXPRESS_BONUS,
+  UNUSED_STATION_POINTS,
 } from '../games/ticket-to-ride/index.js';
 import {
   DestinationTicket,
@@ -70,6 +73,7 @@ import { GAME_CATALOG_BY_ID } from '../registry/catalog.js';
 import {
   GameCategorySlug,
   getEffectivePlayerBounds,
+  isExpansionCompatibleWithMap,
 } from '../types/game.js';
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
@@ -86,7 +90,11 @@ import {
   TrainCardDeckVisual,
   TrainCardVisual,
 } from './TrainCardVisual.js';
-import { getPlayerPalette, ROUTE_COLOR_THEMES } from './mapData.js';
+import {
+  getPlayerPalette,
+  getValidPaymentsForRoute,
+  ROUTE_COLOR_THEMES,
+} from './mapData.js';
 import { playTurnNotificationChime } from './sound.js';
 import { useGameSocket } from './useGameSocket.js';
 import './styles.css';
@@ -200,10 +208,13 @@ export const SandboxApp: React.FC = () => {
     Record<string, string>
   >({});
 
-  // --- Alvin & Dexter Move Monster UI State ---
+  // --- Alvin & Dexter Move Monster + Europe Build Station UI State ---
   const [moveMonsterOpen, setMoveMonsterOpen] = useState<boolean>(false);
   const [selectedMonster, setSelectedMonster] = useState<MonsterType>('ALVIN');
   const [selectedLocoCost, setSelectedLocoCost] = useState<1 | 2>(1);
+  const [buildStationOpen, setBuildStationOpen] = useState<boolean>(false);
+  const [selectedStationPaymentIdx, setSelectedStationPaymentIdx] =
+    useState<number>(0);
 
   // --- Local Core Engine State ---
   const [localGameState, setLocalGameState] = useState<AnyGameState>(() =>
@@ -506,20 +517,18 @@ export const SandboxApp: React.FC = () => {
     return ts.playerOrder
       .map((pid) => {
         const p = ts.players[pid]!;
-        const g = new Graph<RouteEdge>();
-        for (const r of ts.routes) {
-          if (r.ownerId === pid) {
-            g.addEdge(r.from, r.to, r.length, r);
-          }
-        }
-        let ticketPoints = 0;
+        const { ticketDelta: ticketPoints, completedTicketIds } =
+          evaluatePlayerTickets(ts, pid);
         const tickets = p.tickets.map((ticket) => {
-          const completed = g.isConnected(ticket.from, ticket.to);
+          const completed = completedTicketIds.has(ticket.id);
           const { points: effectivePoints, isChaosHalved } =
             getEffectiveTicketPoints(ticket, ts);
-          ticketPoints += completed ? effectivePoints : -effectivePoints;
           return { ticket, completed, effectivePoints, isChaosHalved };
         });
+        const stationPoints =
+          ts.mapId === 'EUROPE'
+            ? (p.stationsRemaining ?? 0) * UNUSED_STATION_POINTS
+            : 0;
         const hasTransAmericaExpress = recipientSet.has(pid);
         const transAmericaExpressBonus = hasTransAmericaExpress
           ? TRANS_AMERICA_EXPRESS_BONUS
@@ -534,6 +543,7 @@ export const SandboxApp: React.FC = () => {
           totalScore:
             p.claimedRoutePoints +
             ticketPoints +
+            stationPoints +
             transAmericaExpressBonus +
             alvinBonus +
             dexterBonus,
@@ -542,6 +552,12 @@ export const SandboxApp: React.FC = () => {
           longestPathLength: longestPathByPlayer[pid] ?? 0,
           hasTransAmericaExpress,
           transAmericaExpressBonus,
+          ...(ts.mapId === 'EUROPE'
+            ? {
+                stationsRemaining: p.stationsRemaining ?? 0,
+                stationPoints,
+              }
+            : {}),
           alvinCards: p.alvinCards ?? 0,
           dexterCards: p.dexterCards ?? 0,
           alvinBonus,
@@ -742,12 +758,20 @@ export const SandboxApp: React.FC = () => {
   const handleLocalToggleExpansion = (expansionId: string) => {
     setLocalSelectedExpansions((prev) => {
       const exists = prev.includes(expansionId);
-      const next = exists
+      let next = exists
         ? prev.filter((id) => id !== expansionId)
         : [...prev, expansionId];
-      if (expansionId === 'alvin_and_dexter') {
-        setLocalEnableAlvinAndDexter(!exists);
+      if (localStagedGameDef.id === 'ttr') {
+        const activeMapId: 'USA' | 'EUROPE' = next.includes('europe_map')
+          ? 'EUROPE'
+          : 'USA';
+        next = next.filter((id) => {
+          if (id === 'europe_map') return true;
+          const expDef = localStagedGameDef.expansions.find((e) => e.id === id);
+          return expDef ? isExpansionCompatibleWithMap(expDef, activeMapId) : false;
+        });
       }
+      setLocalEnableAlvinAndDexter(next.includes('alvin_and_dexter'));
       const bounds = getEffectivePlayerBounds(localStagedGameDef, next);
       setPlayerCountInput((cnt) =>
         Math.min(bounds.maxPlayers, Math.max(bounds.minPlayers, cnt))
@@ -994,6 +1018,50 @@ export const SandboxApp: React.FC = () => {
     moveMonsterOpen,
     selectedMonster,
     selectedLocoCost,
+  ]);
+
+  const stationCostCards = useMemo(() => {
+    if (!ttrSanitized || ttrSanitized.mapId !== 'EUROPE') return 1;
+    const rem =
+      ttrSanitized.self.stationsRemaining ?? INITIAL_STATIONS_PER_PLAYER;
+    return Math.max(1, INITIAL_STATIONS_PER_PLAYER - rem + 1);
+  }, [ttrSanitized]);
+
+  const stationPaymentOptions = useMemo(() => {
+    if (!ttrSanitized || ttrSanitized.mapId !== 'EUROPE') return [];
+    return getValidPaymentsForRoute(
+      'GRAY',
+      stationCostCards,
+      ttrSanitized.self.hand
+    );
+  }, [ttrSanitized, stationCostCards]);
+
+  const selectableStationCities = useMemo<ReadonlySet<string>>(() => {
+    const empty = new Set<string>();
+    if (
+      !ttrSanitized ||
+      ttrSanitized.mapId !== 'EUROPE' ||
+      !buildStationOpen ||
+      isControlsLocked ||
+      ttrSanitized.turnStep !== 'AWAITING_ACTION' ||
+      (ttrSanitized.self.stationsRemaining ?? 0) <= 0 ||
+      stationPaymentOptions.length === 0
+    ) {
+      return empty;
+    }
+    const allCities = getAllBoardCities(ttrSanitized.routes);
+    const available = new Set<string>();
+    for (const c of allCities) {
+      if (!ttrSanitized.stations?.[c] && !isCityInChaos(ttrSanitized, c)) {
+        available.add(c);
+      }
+    }
+    return available;
+  }, [
+    ttrSanitized,
+    buildStationOpen,
+    isControlsLocked,
+    stationPaymentOptions.length,
   ]);
 
   const togglePendingTicketSelection = (ticketId: string) => {
@@ -1615,6 +1683,27 @@ export const SandboxApp: React.FC = () => {
                                   )}
                                 </span>
                               </div>
+
+                              {ttrSanitized.mapId === 'EUROPE' && (
+                                <div className="col-span-2 bg-slate-900/90 border border-sky-500/30 rounded-lg px-2 py-1.5 flex items-center justify-between">
+                                  <span className="text-sky-300 font-semibold">
+                                    🏛️ Stations Left
+                                  </span>
+                                  <span className="font-mono font-bold text-sky-200">
+                                    {isSelf
+                                      ? ttrSanitized.self.stationsRemaining ?? 3
+                                      : opp?.stationsRemaining ?? 3}{' '}
+                                    / 3{' '}
+                                    <span className="text-[10px] text-amber-300">
+                                      (+
+                                      {((isSelf
+                                        ? ttrSanitized.self.stationsRemaining
+                                        : opp?.stationsRemaining) ?? 3) * 4}
+                                      p)
+                                    </span>
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
                             {/* Alvin & Dexter Monster Cards Section (Total counts hidden; Face-Up status visible) */}
@@ -1664,10 +1753,93 @@ export const SandboxApp: React.FC = () => {
                         );
                       })}
                     </div>
+
+                    {/* Europe Map: Train Station Builder Action Panel */}
+                    {ttrSanitized.mapId === 'EUROPE' && (
+                      <div className="mt-1 p-2.5 rounded-xl bg-slate-950 border border-sky-500/40 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-sky-300 uppercase tracking-wider text-[10px]">
+                            🏛️ Europe Train Stations
+                          </span>
+                          <span className="font-mono text-[10px] text-amber-300 font-bold">
+                            {ttrSanitized.self.stationsRemaining ?? 3} / 3 Left
+                          </span>
+                        </div>
+
+                        {(ttrSanitized.phase === 'PLAYING' ||
+                          ttrSanitized.phase === 'FINAL_ROUND') && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                isControlsLocked ||
+                                ttrSanitized.turnStep !== 'AWAITING_ACTION' ||
+                                (ttrSanitized.self.stationsRemaining ?? 0) <= 0
+                              }
+                              onClick={() => {
+                                setBuildStationOpen((o) => !o);
+                                setSelectedStationPaymentIdx(0);
+                              }}
+                              className={`w-full py-1.5 rounded-lg font-bold text-[11px] border transition ${
+                                buildStationOpen
+                                  ? 'bg-sky-400 text-slate-950 border-sky-200'
+                                  : 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border-sky-400/50 disabled:opacity-40'
+                              }`}
+                            >
+                              {(ttrSanitized.self.stationsRemaining ?? 0) <= 0
+                                ? 'All 3 Stations Built'
+                                : buildStationOpen
+                                ? '✕ Cancel Station Placement'
+                                : `🏛️ Build Station (Cost: ${stationCostCards} Card${
+                                    stationCostCards === 1 ? '' : 's'
+                                  })`}
+                            </button>
+
+                            {buildStationOpen && (
+                              <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                                {stationPaymentOptions.length === 0 ? (
+                                  <div className="text-[10px] text-rose-300">
+                                    Requires {stationCostCards} matching color
+                                    card(s) in hand.
+                                  </div>
+                                ) : (
+                                  <>
+                                    <label className="block text-[10px] text-slate-400 font-semibold">
+                                      Payment ({stationCostCards} card
+                                      {stationCostCards === 1 ? '' : 's'}):
+                                    </label>
+                                    <select
+                                      value={selectedStationPaymentIdx}
+                                      onChange={(e) =>
+                                        setSelectedStationPaymentIdx(
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-amber-300 font-semibold"
+                                    >
+                                      {stationPaymentOptions.map((opt, idx) => (
+                                        <option key={idx} value={idx}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <div className="text-[10px] text-sky-200">
+                                      Click any pulsing blue city on the map to
+                                      build your station!
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </aside>
 
                   <div className="flex-1 relative min-h-0">
                     <InteractiveMap
+                      mapId={ttrSanitized.mapId ?? 'USA'}
                       routes={ttrSanitized.routes}
                       playerOrder={ttrSanitized.playerOrder}
                       playerScores={Object.fromEntries(
@@ -1687,36 +1859,54 @@ export const SandboxApp: React.FC = () => {
                           ? mp.playerColors
                           : localEffectivePlayerColors
                       }
-                    selectedRouteId={selectedRouteId}
-                    highlightedCities={highlightedCities}
-                    alvinCity={ttrSanitized.alvinAndDexter?.alvinCity ?? null}
-                    dexterCity={ttrSanitized.alvinAndDexter?.dexterCity ?? null}
-                    selectableMonsterCities={selectableMonsterCities}
-                    onSelectCity={(cityName) => {
-                      if (isControlsLocked) {
-                        return;
+                      stations={ttrSanitized.stations ?? {}}
+                      selectedRouteId={selectedRouteId}
+                      highlightedCities={highlightedCities}
+                      alvinCity={ttrSanitized.alvinAndDexter?.alvinCity ?? null}
+                      dexterCity={
+                        ttrSanitized.alvinAndDexter?.dexterCity ?? null
                       }
-                      if (
-                        ttrSanitized.phase === 'MONSTER_PLACEMENT' &&
-                        ttrSanitized.alvinAndDexter?.monsterToPlace
-                      ) {
-                        dispatchEngineAction(viewedPlayerId, {
-                          type: 'PLACE_MONSTER',
-                          monster: ttrSanitized.alvinAndDexter.monsterToPlace,
-                          cityName,
-                        });
-                        return;
-                      }
-                      if (moveMonsterOpen) {
-                        dispatchEngineAction(viewedPlayerId, {
-                          type: 'MOVE_MONSTER',
-                          monster: selectedMonster,
-                          locomotivesSpent: selectedLocoCost,
-                          targetCity: cityName,
-                        });
-                        setMoveMonsterOpen(false);
-                      }
-                    }}
+                      selectableMonsterCities={selectableMonsterCities}
+                      selectableStationCities={selectableStationCities}
+                      onSelectCity={(cityName) => {
+                        if (isControlsLocked) {
+                          return;
+                        }
+                        if (
+                          ttrSanitized.phase === 'MONSTER_PLACEMENT' &&
+                          ttrSanitized.alvinAndDexter?.monsterToPlace
+                        ) {
+                          dispatchEngineAction(viewedPlayerId, {
+                            type: 'PLACE_MONSTER',
+                            monster: ttrSanitized.alvinAndDexter.monsterToPlace,
+                            cityName,
+                          });
+                          return;
+                        }
+                        if (moveMonsterOpen) {
+                          dispatchEngineAction(viewedPlayerId, {
+                            type: 'MOVE_MONSTER',
+                            monster: selectedMonster,
+                            locomotivesSpent: selectedLocoCost,
+                            targetCity: cityName,
+                          });
+                          setMoveMonsterOpen(false);
+                          return;
+                        }
+                        if (buildStationOpen) {
+                          const chosenOpt =
+                            stationPaymentOptions[selectedStationPaymentIdx] ??
+                            stationPaymentOptions[0];
+                          if (chosenOpt) {
+                            dispatchEngineAction(viewedPlayerId, {
+                              type: 'BUILD_STATION',
+                              cityName,
+                              payment: chosenOpt.payment,
+                            });
+                            setBuildStationOpen(false);
+                          }
+                        }
+                      }}
                     onSelectRoute={(route) => {
                       if (isControlsLocked) {
                         return;
@@ -2784,6 +2974,16 @@ export const SandboxApp: React.FC = () => {
                                   trains
                                 </span>
                               )}
+                            {standing.stationPoints !== undefined && (
+                              <span
+                                className="px-2.5 py-1 rounded-lg bg-sky-500/20 border border-sky-400/60 text-sky-200 text-xs font-extrabold"
+                                title="Awarded +4 points for each unused Train Station at the end of the game"
+                              >
+                                🏛️ Unused Stations (
+                                {standing.stationsRemaining ?? 0} left: +
+                                {standing.stationPoints} pts)
+                              </span>
+                            )}
                             {standing.hasTransAmericaExpress && (
                               <span
                                 className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/60 text-amber-300 text-xs font-extrabold"

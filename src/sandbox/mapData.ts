@@ -49,6 +49,60 @@ export const CITY_COORDINATES: Readonly<Record<string, CityCoordinates>> = {
   Miami: { x: 845, y: 555, labelOffset: { dx: 26, dy: 5 } },
 };
 
+/**
+ * Relative coordinates in a 1000x600 SVG viewBox for all 47 European cities
+ * defined in EUROPE_BOARD_ROUTES, EUROPE_LONG_TICKETS, and EUROPE_REGULAR_TICKETS.
+ */
+export const EUROPE_CITY_COORDINATES: Readonly<Record<string, CityCoordinates>> = {
+  Edinburgh: { x: 205, y: 80, labelOffset: { dx: -40, dy: -6 } },
+  London: { x: 235, y: 185, labelOffset: { dx: -34, dy: -8 } },
+  Brest: { x: 145, y: 270, labelOffset: { dx: -28, dy: -6 } },
+  Dieppe: { x: 230, y: 245, labelOffset: { dx: -30, dy: 4 } },
+  Paris: { x: 265, y: 285, labelOffset: { dx: -26, dy: 4 } },
+  Bruxelles: { x: 295, y: 220, labelOffset: { dx: -36, dy: -6 } },
+  Amsterdam: { x: 315, y: 175, labelOffset: { dx: -38, dy: -8 } },
+  Pamplona: { x: 185, y: 400, labelOffset: { dx: 0, dy: -13 } },
+  Madrid: { x: 125, y: 470, labelOffset: { dx: -28, dy: -4 } },
+  Lisboa: { x: 60, y: 495, labelOffset: { dx: 0, dy: -14 } },
+  Cadiz: { x: 110, y: 550, labelOffset: { dx: 0, dy: 18 } },
+  Barcelona: { x: 225, y: 475, labelOffset: { dx: 0, dy: 18 } },
+  Marseille: { x: 310, y: 410, labelOffset: { dx: 0, dy: 17 } },
+  Zürich: { x: 365, y: 335, labelOffset: { dx: -28, dy: 4 } },
+  Frankfurt: { x: 365, y: 245, labelOffset: { dx: -36, dy: -6 } },
+  Essen: { x: 375, y: 195, labelOffset: { dx: 0, dy: -12 } },
+  München: { x: 425, y: 295, labelOffset: { dx: 0, dy: -12 } },
+  Berlin: { x: 455, y: 195, labelOffset: { dx: 0, dy: -12 } },
+  København: { x: 435, y: 115, labelOffset: { dx: -38, dy: -4 } },
+  Stockholm: { x: 505, y: 55, labelOffset: { dx: 0, dy: -13 } },
+  Venezia: { x: 425, y: 370, labelOffset: { dx: -32, dy: 4 } },
+  Roma: { x: 430, y: 455, labelOffset: { dx: -26, dy: 6 } },
+  Brindisi: { x: 505, y: 480, labelOffset: { dx: 30, dy: 4 } },
+  Palermo: { x: 450, y: 555, labelOffset: { dx: 0, dy: 17 } },
+  Danzig: { x: 545, y: 165, labelOffset: { dx: 0, dy: -12 } },
+  Warszawa: { x: 585, y: 215, labelOffset: { dx: 0, dy: -12 } },
+  Wien: { x: 515, y: 300, labelOffset: { dx: 0, dy: -12 } },
+  Zagreb: { x: 495, y: 370, labelOffset: { dx: 0, dy: 16 } },
+  Budapest: { x: 570, y: 320, labelOffset: { dx: 0, dy: -12 } },
+  Sarajevo: { x: 565, y: 420, labelOffset: { dx: -32, dy: 12 } },
+  Athina: { x: 615, y: 525, labelOffset: { dx: 0, dy: 17 } },
+  Sofia: { x: 645, y: 440, labelOffset: { dx: 0, dy: 16 } },
+  Bucuresti: { x: 685, y: 375, labelOffset: { dx: 0, dy: -12 } },
+  Constantinople: { x: 725, y: 475, labelOffset: { dx: 0, dy: -13 } },
+  Smyrna: { x: 705, y: 540, labelOffset: { dx: 0, dy: 17 } },
+  Angora: { x: 805, y: 515, labelOffset: { dx: 0, dy: 17 } },
+  Erzurum: { x: 910, y: 505, labelOffset: { dx: 0, dy: 17 } },
+  Sochi: { x: 895, y: 415, labelOffset: { dx: 26, dy: 4 } },
+  Sevastopol: { x: 790, y: 390, labelOffset: { dx: 0, dy: 16 } },
+  Rostov: { x: 885, y: 330, labelOffset: { dx: 28, dy: 4 } },
+  Kharkov: { x: 815, y: 265, labelOffset: { dx: 0, dy: -12 } },
+  Kyiv: { x: 715, y: 255, labelOffset: { dx: 0, dy: -12 } },
+  Wilno: { x: 675, y: 185, labelOffset: { dx: 0, dy: -12 } },
+  Riga: { x: 635, y: 115, labelOffset: { dx: -24, dy: -10 } },
+  Petrograd: { x: 735, y: 65, labelOffset: { dx: 0, dy: -13 } },
+  Moskva: { x: 855, y: 145, labelOffset: { dx: 28, dy: 4 } },
+  Smolensk: { x: 770, y: 175, labelOffset: { dx: 0, dy: -12 } },
+};
+
 export interface ColorTheme {
   readonly label: string;
   readonly hex: string;
@@ -274,7 +328,8 @@ export function getPlayerPalette(
 export function getValidPaymentsForRoute(
   routeColor: RouteColor,
   routeLength: number,
-  hand: Readonly<Record<TrainCardColor, number>>
+  hand: Readonly<Record<TrainCardColor, number>>,
+  minLocomotives = 0
 ): Array<{
   readonly label: string;
   readonly payment: Partial<Record<TrainCardColor, number>>;
@@ -301,6 +356,9 @@ export function getValidPaymentsForRoute(
   }> = [];
 
   const locoAvailable = hand.LOCOMOTIVE;
+  if (locoAvailable < minLocomotives) {
+    return options;
+  }
 
   for (const color of candidateColors) {
     const colorAvailable = hand[color];
@@ -309,7 +367,7 @@ export function getValidPaymentsForRoute(
     }
 
     // Minimum locomotives needed up to maximum locomotives player holds
-    const minLoco = Math.max(0, routeLength - colorAvailable);
+    const minLoco = Math.max(minLocomotives, routeLength - colorAvailable);
     const maxLoco = Math.min(routeLength, locoAvailable);
 
     for (let locoUsed = minLoco; locoUsed <= maxLoco; locoUsed++) {

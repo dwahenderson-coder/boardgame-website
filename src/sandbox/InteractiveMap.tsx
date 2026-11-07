@@ -1,22 +1,26 @@
 import React, { useMemo, useState } from 'react';
-import { RouteEdge } from '../games/ticket-to-ride/types.js';
+import { RouteEdge, TTRMapId } from '../games/ticket-to-ride/types.js';
 import {
   CITY_COORDINATES,
+  EUROPE_CITY_COORDINATES,
   getPlayerPalette,
   ROUTE_COLOR_THEMES,
 } from './mapData.js';
 
 interface InteractiveMapProps {
+  readonly mapId?: TTRMapId;
   readonly routes: readonly RouteEdge[];
   readonly playerOrder: readonly string[];
   readonly playerScores?: Readonly<Record<string, number>>;
   readonly playerNames?: Readonly<Record<string, string>>;
   readonly playerColors?: Readonly<Record<string, string>>;
+  readonly stations?: Readonly<Record<string, string>>;
   readonly selectedRouteId: string | null;
   readonly highlightedCities: ReadonlySet<string>;
   readonly alvinCity?: string | null;
   readonly dexterCity?: string | null;
   readonly selectableMonsterCities?: ReadonlySet<string>;
+  readonly selectableStationCities?: ReadonlySet<string>;
   readonly onSelectRoute: (route: RouteEdge) => void;
   readonly onSelectCity?: (cityName: string) => void;
 }
@@ -96,20 +100,26 @@ const PERIMETER_SCORE_SPACES: readonly ScoreTrackSpace[] = (() => {
 })();
 
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
+  mapId = 'USA',
   routes,
   playerOrder,
   playerScores = {},
   playerNames = {},
   playerColors = {},
+  stations = {},
   selectedRouteId,
   highlightedCities,
   alvinCity = null,
   dexterCity = null,
   selectableMonsterCities,
+  selectableStationCities,
   onSelectRoute,
   onSelectCity,
 }) => {
   const [hoveredRouteId, setHoveredRouteId] = useState<string | null>(null);
+
+  const activeCoordinates =
+    mapId === 'EUROPE' ? EUROPE_CITY_COORDINATES : CITY_COORDINATES;
 
   // Compute parallel offset geometry for all routes
   const geometries = useMemo<ComputedRouteGeometry[]>(() => {
@@ -120,8 +130,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     }
 
     return routes.map((route) => {
-      const fromCoord = CITY_COORDINATES[route.from] ?? { x: 500, y: 300 };
-      const toCoord = CITY_COORDINATES[route.to] ?? { x: 500, y: 300 };
+      const fromCoord = activeCoordinates[route.from] ?? { x: 500, y: 300 };
+      const toCoord = activeCoordinates[route.to] ?? { x: 500, y: 300 };
 
       const key = [route.from, route.to].sort().join('::');
       const isDoubleSibling = (pairCounts.get(key) ?? 1) > 1;
@@ -163,7 +173,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         isDoubleSibling,
       };
     });
-  }, [routes]);
+  }, [routes, activeCoordinates]);
 
   const hoveredGeometry = useMemo(
     () => geometries.find((g) => g.route.id === hoveredRouteId) ?? null,
@@ -314,98 +324,197 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           className="pointer-events-none"
         />
 
-        {/* North America Landmass Silhouette & Geography */}
-        <g className="pointer-events-none">
-          {/* Outer coastal shallow vintage tint */}
-          <path
-            d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
-            fill="none"
-            stroke="#b45309"
-            strokeOpacity="0.14"
-            strokeWidth="14"
-            strokeLinejoin="round"
-          />
+        {/* North America OR Europe Landmass Silhouette & Geography (Same Beige/Sand Parchment Texturing) */}
+        {mapId === 'EUROPE' ? (
+          <g className="pointer-events-none">
+            {/* Continental Europe + British Isles + Scandinavia + Anatolia Outer Coastal Halo */}
+            <path
+              d="M 42,485 L 75,405 L 155,395 L 135,260 L 228,235 L 295,205 L 320,165 L 415,175 L 430,105 L 475,135 L 555,155 L 630,105 L 725,52 L 960,45 L 965,545 L 690,558 L 695,485 L 645,480 L 615,545 L 580,505 L 550,435 L 495,380 L 455,385 L 515,480 L 485,515 L 420,465 L 395,395 L 310,420 L 225,495 L 105,565 L 45,515 Z"
+              fill="none"
+              stroke="#b45309"
+              strokeOpacity="0.14"
+              strokeWidth="14"
+              strokeLinejoin="round"
+            />
 
-          {/* Main North America Continent Polygon */}
-          <path
-            d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
-            fill="url(#continentLand)"
-            stroke="#92400e"
-            strokeWidth="2.2"
-            strokeLinejoin="round"
-            filter="url(#landShadow)"
-          />
+            {/* Main Continental Europe Polygon */}
+            <path
+              d="M 42,485 L 75,405 L 155,395 L 135,260 L 228,235 L 295,205 L 320,165 L 415,175 L 430,105 L 475,135 L 555,155 L 630,105 L 725,52 L 960,45 L 965,545 L 690,558 L 695,485 L 645,480 L 615,545 L 580,505 L 550,435 L 495,380 L 455,385 L 515,480 L 485,515 L 420,465 L 395,395 L 310,420 L 225,495 L 105,565 L 45,515 Z"
+              fill="url(#continentLand)"
+              stroke="#92400e"
+              strokeWidth="2.2"
+              strokeLinejoin="round"
+              filter="url(#landShadow)"
+            />
+            <path
+              d="M 42,485 L 75,405 L 155,395 L 135,260 L 228,235 L 295,205 L 320,165 L 415,175 L 430,105 L 475,135 L 555,155 L 630,105 L 725,52 L 960,45 L 965,545 L 690,558 L 695,485 L 645,480 L 615,545 L 580,505 L 550,435 L 495,380 L 455,385 L 515,480 L 485,515 L 420,465 L 395,395 L 310,420 L 225,495 L 105,565 L 45,515 Z"
+              fill="url(#sandGrainTexture)"
+            />
 
-          {/* Tactile sand / parchment weave overlay across the continent */}
-          <path
-            d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
-            fill="url(#sandGrainTexture)"
-          />
+            {/* Great Britain & Ireland Island Polygon */}
+            <path
+              d="M 175,55 L 225,55 L 258,165 L 245,202 L 185,195 L 178,125 Z"
+              fill="url(#continentLand)"
+              stroke="#92400e"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              filter="url(#landShadow)"
+            />
+            <path
+              d="M 175,55 L 225,55 L 258,165 L 245,202 L 185,195 L 178,125 Z"
+              fill="url(#sandGrainTexture)"
+            />
 
-          {/* US / Canada / Regional Border Graticules */}
-          <path
-            d="M 115,112 Q 310,120 555,125"
-            fill="none"
-            stroke="#92400e"
-            strokeOpacity="0.28"
-            strokeWidth="1.5"
-            strokeDasharray="6 5"
-          />
-          <path
-            d="M 135,478 Q 255,492 365,522 Q 465,555 545,562"
-            fill="none"
-            stroke="#92400e"
-            strokeOpacity="0.28"
-            strokeWidth="1.5"
-            strokeDasharray="6 5"
-          />
+            {/* Scandinavian Peninsula Polygon */}
+            <path
+              d="M 435,28 L 585,25 L 560,92 L 485,105 L 445,75 Z"
+              fill="url(#continentLand)"
+              stroke="#92400e"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              filter="url(#landShadow)"
+            />
+            <path
+              d="M 435,28 L 585,25 L 560,92 L 485,105 L 445,75 Z"
+              fill="url(#sandGrainTexture)"
+            />
 
-          {/* Western Rocky Mountains Topographic Shading */}
-          <path
-            d="M 175,55 L 200,32 L 225,62 L 250,40 L 280,85 M 245,130 L 270,105 L 295,140 L 320,115 L 345,155 M 290,225 L 320,195 L 345,230 L 370,205 L 395,245 M 325,315 L 350,285 L 375,320"
-            fill="none"
-            stroke="#92400e"
-            strokeOpacity="0.32"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+            {/* Sicily Island Polygon (Palermo) */}
+            <path
+              d="M 422,542 L 478,538 L 468,572 L 428,568 Z"
+              fill="url(#continentLand)"
+              stroke="#92400e"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M 422,542 L 478,538 L 468,572 L 428,568 Z"
+              fill="url(#sandGrainTexture)"
+            />
 
-          {/* Eastern Appalachian Mountains Topographic Shading */}
-          <path
-            d="M 755,345 L 775,322 L 792,345 L 812,320 L 828,340 M 790,285 L 810,262 L 828,285 L 845,260"
-            fill="none"
-            stroke="#92400e"
-            strokeOpacity="0.28"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+            {/* Black Sea Inland Basin */}
+            <path
+              d="M 715,388 Q 795,368 878,395 Q 890,455 815,468 Q 735,465 715,425 Z"
+              fill="#9ab7c7"
+              stroke="#476b7c"
+              strokeOpacity="0.6"
+              strokeWidth="1.4"
+            />
 
-          {/* Great Lakes Hydrology (Superior, Michigan, Huron, Erie, Ontario) */}
-          <g fill="#9ab7c7" stroke="#476b7c" strokeOpacity="0.55" strokeWidth="1.2">
-            {/* Lake Superior */}
-            <path d="M 575,145 Q 618,122 668,142 Q 645,165 585,162 Z" />
-            {/* Lake Michigan */}
-            <path d="M 658,168 Q 675,198 668,236 Q 648,232 648,175 Z" />
-            {/* Lake Huron */}
-            <path d="M 685,152 Q 725,158 722,198 Q 695,195 685,165 Z" />
-            {/* Lake Erie */}
-            <path d="M 718,218 Q 758,208 776,222 Q 748,235 718,228 Z" />
-            {/* Lake Ontario */}
-            <path d="M 776,184 Q 815,175 828,188 Q 798,198 776,192 Z" />
+            {/* Alps, Pyrenees, Carpathians & Caucasus Mountain Ranges */}
+            <path
+              d="M 165,412 L 185,392 L 205,415 L 225,395 L 242,415 M 335,345 L 358,318 L 382,348 L 405,318 L 428,348 L 452,322 L 475,348 M 565,305 L 590,280 L 615,310 L 640,285 L 665,318 M 745,495 L 772,472 L 798,498 L 825,472 L 855,498 L 882,475 L 910,498"
+              fill="none"
+              stroke="#92400e"
+              strokeOpacity="0.34"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Major European Rivers (Danube, Rhine, Dnieper, Volga) */}
+            <path
+              d="M 355,210 Q 368,265 365,325 M 430,295 Q 520,305 575,325 Q 635,365 695,385 M 715,195 Q 725,265 775,375"
+              fill="none"
+              stroke="#5b8296"
+              strokeOpacity="0.32"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
           </g>
+        ) : (
+          <g className="pointer-events-none">
+            {/* Outer coastal shallow vintage tint */}
+            <path
+              d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
+              fill="none"
+              stroke="#b45309"
+              strokeOpacity="0.14"
+              strokeWidth="14"
+              strokeLinejoin="round"
+            />
 
-          {/* Major River Networks (Mississippi / Missouri / Ohio) */}
-          <path
-            d="M 585,190 Q 615,265 625,335 Q 630,435 655,535 M 410,210 Q 515,265 625,335 M 765,270 Q 695,315 625,335"
-            fill="none"
-            stroke="#5b8296"
-            strokeOpacity="0.32"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </g>
+            {/* Main North America Continent Polygon */}
+            <path
+              d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
+              fill="url(#continentLand)"
+              stroke="#92400e"
+              strokeWidth="2.2"
+              strokeLinejoin="round"
+              filter="url(#landShadow)"
+            />
+
+            {/* Tactile sand / parchment weave overlay across the continent */}
+            <path
+              d="M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z"
+              fill="url(#sandGrainTexture)"
+            />
+
+            {/* US / Canada / Regional Border Graticules */}
+            <path
+              d="M 115,112 Q 310,120 555,125"
+              fill="none"
+              stroke="#92400e"
+              strokeOpacity="0.28"
+              strokeWidth="1.5"
+              strokeDasharray="6 5"
+            />
+            <path
+              d="M 135,478 Q 255,492 365,522 Q 465,555 545,562"
+              fill="none"
+              stroke="#92400e"
+              strokeOpacity="0.28"
+              strokeWidth="1.5"
+              strokeDasharray="6 5"
+            />
+
+            {/* Western Rocky Mountains Topographic Shading */}
+            <path
+              d="M 175,55 L 200,32 L 225,62 L 250,40 L 280,85 M 245,130 L 270,105 L 295,140 L 320,115 L 345,155 M 290,225 L 320,195 L 345,230 L 370,205 L 395,245 M 325,315 L 350,285 L 375,320"
+              fill="none"
+              stroke="#92400e"
+              strokeOpacity="0.32"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Eastern Appalachian Mountains Topographic Shading */}
+            <path
+              d="M 755,345 L 775,322 L 792,345 L 812,320 L 828,340 M 790,285 L 810,262 L 828,285 L 845,260"
+              fill="none"
+              stroke="#92400e"
+              strokeOpacity="0.28"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Great Lakes Hydrology (Superior, Michigan, Huron, Erie, Ontario) */}
+            <g fill="#9ab7c7" stroke="#476b7c" strokeOpacity="0.55" strokeWidth="1.2">
+              {/* Lake Superior */}
+              <path d="M 575,145 Q 618,122 668,142 Q 645,165 585,162 Z" />
+              {/* Lake Michigan */}
+              <path d="M 658,168 Q 675,198 668,236 Q 648,232 648,175 Z" />
+              {/* Lake Huron */}
+              <path d="M 685,152 Q 725,158 722,198 Q 695,195 685,165 Z" />
+              {/* Lake Erie */}
+              <path d="M 718,218 Q 758,208 776,222 Q 748,235 718,228 Z" />
+              {/* Lake Ontario */}
+              <path d="M 776,184 Q 815,175 828,188 Q 798,198 776,192 Z" />
+            </g>
+
+            {/* Major River Networks (Mississippi / Missouri / Ohio) */}
+            <path
+              d="M 585,190 Q 615,265 625,335 Q 630,435 655,535 M 410,210 Q 515,265 625,335 M 765,270 Q 695,315 625,335"
+              fill="none"
+              stroke="#5b8296"
+              strokeOpacity="0.32"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </g>
+        )}
 
         {/* Cartographic Grid Overlay */}
         <rect
@@ -653,6 +762,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 )}
 
                 {/* Underlying rail bed & wooden railroad ties */}
+                {route.isTunnel && (
+                  <line
+                    x1={sx1}
+                    y1={sy1}
+                    x2={sx2}
+                    y2={sy2}
+                    stroke="#f59e0b"
+                    strokeWidth="12.5"
+                    strokeDasharray="3 3"
+                    strokeOpacity="0.85"
+                  />
+                )}
                 <line
                   x1={sx1}
                   y1={sy1}
@@ -674,46 +795,73 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 />
 
                 {/* Individual Train Car Slots / Claimed Plastic Train Cars */}
-                {segments.map((seg, idx) => (
-                  <g key={idx}>
-                    {/* Outer border of car slot */}
-                    <line
-                      x1={seg.x1}
-                      y1={seg.y1}
-                      x2={seg.x2}
-                      y2={seg.y2}
-                      stroke={
-                        isClaimed ? ownerPalette!.strokeHex : theme.strokeHex
-                      }
-                      strokeWidth={isClaimed ? '9' : '7.5'}
-                      strokeLinecap="butt"
-                    />
-                    {/* Inner fill of car slot */}
-                    <line
-                      x1={seg.x1}
-                      y1={seg.y1}
-                      x2={seg.x2}
-                      y2={seg.y2}
-                      stroke={isClaimed ? ownerPalette!.fillHex : theme.hex}
-                      strokeWidth={isClaimed ? '6.5' : '5.2'}
-                      strokeOpacity={isClaimed ? 1 : 0.88}
-                      strokeLinecap="butt"
-                    />
-                    {/* 3D roof highlight on claimed plastic train cars */}
-                    {isClaimed && (
+                {segments.map((seg, idx) => {
+                  const isFerryLocoSlot =
+                    !isClaimed && idx < (route.ferryLocomotives ?? 0);
+                  const segMidX = (seg.x1 + seg.x2) / 2;
+                  const segMidY = (seg.y1 + seg.y2) / 2;
+                  return (
+                    <g key={idx}>
+                      {/* Outer border of car slot */}
                       <line
                         x1={seg.x1}
                         y1={seg.y1}
                         x2={seg.x2}
                         y2={seg.y2}
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                        strokeOpacity="0.55"
-                        strokeLinecap="round"
+                        stroke={
+                          isClaimed
+                            ? ownerPalette!.strokeHex
+                            : isFerryLocoSlot
+                            ? '#fde047'
+                            : theme.strokeHex
+                        }
+                        strokeWidth={isClaimed ? '9' : '7.5'}
+                        strokeLinecap="butt"
                       />
-                    )}
-                  </g>
-                ))}
+                      {/* Inner fill of car slot */}
+                      <line
+                        x1={seg.x1}
+                        y1={seg.y1}
+                        x2={seg.x2}
+                        y2={seg.y2}
+                        stroke={
+                          isClaimed
+                            ? ownerPalette!.fillHex
+                            : isFerryLocoSlot
+                            ? '#a855f7'
+                            : theme.hex
+                        }
+                        strokeWidth={isClaimed ? '6.5' : '5.2'}
+                        strokeOpacity={isClaimed ? 1 : 0.9}
+                        strokeLinecap="butt"
+                      />
+                      {/* Ferry Locomotive Emblem */}
+                      {isFerryLocoSlot && (
+                        <circle
+                          cx={segMidX}
+                          cy={segMidY}
+                          r="2.4"
+                          fill="#fde047"
+                          stroke="#020617"
+                          strokeWidth="0.8"
+                        />
+                      )}
+                      {/* 3D roof highlight on claimed plastic train cars */}
+                      {isClaimed && (
+                        <line
+                          x1={seg.x1}
+                          y1={seg.y1}
+                          x2={seg.x2}
+                          y2={seg.y2}
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                          strokeOpacity="0.55"
+                          strokeLinecap="round"
+                        />
+                      )}
+                    </g>
+                  );
+                })}
 
                 {/* Route Length & Owner Badge at Midpoint */}
                 <g transform={`translate(${midX}, ${midY})`}>
@@ -749,16 +897,24 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </g>
 
         {/* =================================================================
-            4. RENDER CITIES (NODES) & ALVIN / DEXTER MONSTERS
+            4. RENDER CITIES (NODES), STATIONS & ALVIN / DEXTER MONSTERS
            ================================================================= */}
         <g>
-          {Object.entries(CITY_COORDINATES).map(([cityName, coord]) => {
+          {Object.entries(activeCoordinates).map(([cityName, coord]) => {
             const isHighlighted = highlightedCities.has(cityName);
             const isAlvinHere = alvinCity === cityName;
             const isDexterHere = dexterCity === cityName;
             const isChaosCity = isAlvinHere || isDexterHere;
             const isSelectableMonsterTarget =
               selectableMonsterCities?.has(cityName) ?? false;
+            const isSelectableStationTarget =
+              selectableStationCities?.has(cityName) ?? false;
+            const isSelectableCity =
+              isSelectableMonsterTarget || isSelectableStationTarget;
+            const stationOwnerId = stations[cityName] ?? null;
+            const stationPalette = stationOwnerId
+              ? getPlayerPalette(stationOwnerId, playerOrder, playerColors)
+              : null;
             const dx = coord.labelOffset?.dx ?? 0;
             const dy = coord.labelOffset?.dy ?? -14;
 
@@ -767,28 +923,61 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 key={cityName}
                 transform={`translate(${coord.x}, ${coord.y})`}
                 onClick={() => {
-                  if (isSelectableMonsterTarget && onSelectCity) {
+                  if (isSelectableCity && onSelectCity) {
                     onSelectCity(cityName);
                   }
                 }}
                 className={
-                  isSelectableMonsterTarget
-                    ? 'cursor-pointer'
-                    : 'pointer-events-none'
+                  isSelectableCity ? 'cursor-pointer' : 'pointer-events-none'
                 }
               >
-                {/* Clickable target halo when placing or moving Alvin / Dexter */}
-                {isSelectableMonsterTarget && (
+                {/* Clickable target halo when placing/moving Alvin/Dexter or building a Train Station */}
+                {isSelectableCity && (
                   <>
                     <circle
                       r="20"
-                      fill="rgba(250, 204, 21, 0.22)"
-                      stroke="#facc15"
+                      fill={
+                        isSelectableStationTarget
+                          ? 'rgba(56, 189, 248, 0.24)'
+                          : 'rgba(250, 204, 21, 0.22)'
+                      }
+                      stroke={isSelectableStationTarget ? '#38bdf8' : '#facc15'}
                       strokeWidth="2.5"
                       strokeDasharray="4 2"
                     />
-                    <circle r="13" fill="rgba(250, 204, 21, 0.35)" />
+                    <circle
+                      r="13"
+                      fill={
+                        isSelectableStationTarget
+                          ? 'rgba(56, 189, 248, 0.35)'
+                          : 'rgba(250, 204, 21, 0.35)'
+                      }
+                    />
                   </>
+                )}
+
+                {/* Built Train Station Icon (Europe Map) */}
+                {stationOwnerId && stationPalette && (
+                  <g transform="translate(0, 14)">
+                    <path
+                      d="M -8,4 L -8,-3 L 0,-9 L 8,-3 L 8,4 Z"
+                      fill={stationPalette.fillHex}
+                      stroke="#020617"
+                      strokeWidth="1.6"
+                      strokeLinejoin="round"
+                    />
+                    <rect
+                      x="-2.5"
+                      y="-2"
+                      width="5"
+                      height="6"
+                      rx="1"
+                      fill="#020617"
+                    />
+                    <title>{`Train Station built by ${
+                      playerNames[stationOwnerId] ?? stationOwnerId
+                    }`}</title>
+                  </g>
                 )}
 
                 {/* City in Chaos Hazard Aura */}
@@ -1021,7 +1210,22 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               • Color:{' '}
               <span className="text-slate-200 font-semibold">
                 {hoveredGeometry.route.color}
-              </span>{' '}
+              </span>
+              {(hoveredGeometry.route.ferryLocomotives ?? 0) > 0 && (
+                <>
+                  {' '}
+                  •{' '}
+                  <span className="text-cyan-300 font-bold">
+                    ⛴️ Ferry ({hoveredGeometry.route.ferryLocomotives} Loco)
+                  </span>
+                </>
+              )}
+              {hoveredGeometry.route.isTunnel && (
+                <>
+                  {' '}
+                  • <span className="text-amber-300 font-bold">⛰️ Tunnel</span>
+                </>
+              )}{' '}
               • Status:{' '}
               {hoveredGeometry.route.ownerId ? (
                 <span className="text-amber-300 font-semibold">

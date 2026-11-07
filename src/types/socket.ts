@@ -80,6 +80,8 @@ export interface PlayerFinalStanding {
   readonly longestPathLength?: number;
   readonly hasTransAmericaExpress?: boolean;
   readonly transAmericaExpressBonus?: number;
+  readonly stationsRemaining?: number;
+  readonly stationPoints?: number;
   readonly alvinCards?: number;
   readonly dexterCards?: number;
   readonly alvinBonus?: number;

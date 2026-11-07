@@ -32,6 +32,8 @@ export const NON_LOCOMOTIVE_COLORS: readonly Exclude<
 ] as const;
 
 export const INITIAL_TRAINS_PER_PLAYER = 45;
+export const INITIAL_STATIONS_PER_PLAYER = 3;
+export const UNUSED_STATION_POINTS = 4;
 export const INITIAL_HAND_SIZE = 4;
 export const INITIAL_TICKETS_DEALT = 3;
 export const INITIAL_MIN_TICKETS_TO_KEEP = 2;
@@ -46,6 +48,7 @@ export const ROUTE_SCORE_TABLE: Readonly<Record<number, number>> = {
   4: 7,
   5: 10,
   6: 15,
+  8: 21,
 };
 
 export function createEmptyHand(): HandCounts {
@@ -221,4 +224,185 @@ export const STANDARD_BOARD_ROUTES: readonly RouteEdge[] = [
   { id: 'R_RAL_PIT', from: 'Raleigh', to: 'Pittsburgh', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
   { id: 'R_RAL_NSH', from: 'Raleigh', to: 'Nashville', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
 ];
+
+/**
+ * Ticket to Ride: Europe — 6 Long Destination Tickets (20–21 points).
+ * 1 Long Ticket is dealt to each player at the start of a Europe match alongside 3 Regular Tickets.
+ */
+export const EUROPE_LONG_TICKETS: readonly DestinationTicket[] = [
+  { id: 'EU_LONG_LIS_DAN', from: 'Lisboa', to: 'Danzig', points: 20, isLongRoute: true },
+  { id: 'EU_LONG_BRE_PET', from: 'Brest', to: 'Petrograd', points: 20, isLongRoute: true },
+  { id: 'EU_LONG_PAL_MOS', from: 'Palermo', to: 'Moskva', points: 20, isLongRoute: true },
+  { id: 'EU_LONG_KOB_ERZ', from: 'København', to: 'Erzurum', points: 21, isLongRoute: true },
+  { id: 'EU_LONG_EDI_ATH', from: 'Edinburgh', to: 'Athina', points: 21, isLongRoute: true },
+  { id: 'EU_LONG_CAD_STO', from: 'Cadiz', to: 'Stockholm', points: 21, isLongRoute: true },
+];
+
+/**
+ * Ticket to Ride: Europe — 40 Regular Destination Tickets (5–13 points).
+ */
+export const EUROPE_REGULAR_TICKETS: readonly DestinationTicket[] = [
+  { id: 'EU_TKT_ATH_ANG', from: 'Athina', to: 'Angora', points: 5 },
+  { id: 'EU_TKT_BUD_SOF', from: 'Budapest', to: 'Sofia', points: 5 },
+  { id: 'EU_TKT_FRA_KOB', from: 'Frankfurt', to: 'København', points: 5 },
+  { id: 'EU_TKT_ROS_ERZ', from: 'Rostov', to: 'Erzurum', points: 5 },
+  { id: 'EU_TKT_SOF_SMY', from: 'Sofia', to: 'Smyrna', points: 5 },
+  { id: 'EU_TKT_KYI_PET', from: 'Kyiv', to: 'Petrograd', points: 6 },
+  { id: 'EU_TKT_ZUR_BRI', from: 'Zürich', to: 'Brindisi', points: 6 },
+  { id: 'EU_TKT_ZUR_BUD', from: 'Zürich', to: 'Budapest', points: 6 },
+  { id: 'EU_TKT_WAR_SMO', from: 'Warszawa', to: 'Smolensk', points: 6 },
+  { id: 'EU_TKT_ZAG_BRI', from: 'Zagreb', to: 'Brindisi', points: 6 },
+  { id: 'EU_TKT_PAR_ZAG', from: 'Paris', to: 'Zagreb', points: 7 },
+  { id: 'EU_TKT_BRE_MAR', from: 'Brest', to: 'Marseille', points: 7 },
+  { id: 'EU_TKT_LON_BER', from: 'London', to: 'Berlin', points: 7 },
+  { id: 'EU_TKT_EDI_PAR', from: 'Edinburgh', to: 'Paris', points: 7 },
+  { id: 'EU_TKT_AMS_PAM', from: 'Amsterdam', to: 'Pamplona', points: 7 },
+  { id: 'EU_TKT_ROM_SMY', from: 'Roma', to: 'Smyrna', points: 8 },
+  { id: 'EU_TKT_PAL_CON', from: 'Palermo', to: 'Constantinople', points: 8 },
+  { id: 'EU_TKT_SAR_SEV', from: 'Sarajevo', to: 'Sevastopol', points: 8 },
+  { id: 'EU_TKT_MAD_DIE', from: 'Madrid', to: 'Dieppe', points: 8 },
+  { id: 'EU_TKT_BAR_BRU', from: 'Barcelona', to: 'Bruxelles', points: 8 },
+  { id: 'EU_TKT_PAR_WIE', from: 'Paris', to: 'Wien', points: 8 },
+  { id: 'EU_TKT_BAR_MUN', from: 'Barcelona', to: 'München', points: 8 },
+  { id: 'EU_TKT_BRE_VEN', from: 'Brest', to: 'Venezia', points: 8 },
+  { id: 'EU_TKT_SMO_ROS', from: 'Smolensk', to: 'Rostov', points: 8 },
+  { id: 'EU_TKT_MAR_ESS', from: 'Marseille', to: 'Essen', points: 8 },
+  { id: 'EU_TKT_KYI_SOC', from: 'Kyiv', to: 'Sochi', points: 8 },
+  { id: 'EU_TKT_MAD_ZUR', from: 'Madrid', to: 'Zürich', points: 8 },
+  { id: 'EU_TKT_BER_BUC', from: 'Berlin', to: 'Bucuresti', points: 8 },
+  { id: 'EU_TKT_BRU_DAN', from: 'Bruxelles', to: 'Danzig', points: 9 },
+  { id: 'EU_TKT_BER_ROM', from: 'Berlin', to: 'Roma', points: 9 },
+  { id: 'EU_TKT_ANG_KHA', from: 'Angora', to: 'Kharkov', points: 10 },
+  { id: 'EU_TKT_RIG_BUC', from: 'Riga', to: 'Bucuresti', points: 10 },
+  { id: 'EU_TKT_ESS_KYI', from: 'Essen', to: 'Kyiv', points: 10 },
+  { id: 'EU_TKT_VEN_CON', from: 'Venezia', to: 'Constantinople', points: 10 },
+  { id: 'EU_TKT_LON_WIE', from: 'London', to: 'Wien', points: 10 },
+  { id: 'EU_TKT_ATH_WIL', from: 'Athina', to: 'Wilno', points: 11 },
+  { id: 'EU_TKT_STO_WIE', from: 'Stockholm', to: 'Wien', points: 11 },
+  { id: 'EU_TKT_BER_MOS', from: 'Berlin', to: 'Moskva', points: 12 },
+  { id: 'EU_TKT_AMS_WIL', from: 'Amsterdam', to: 'Wilno', points: 12 },
+  { id: 'EU_TKT_FRA_SMO', from: 'Frankfurt', to: 'Smolensk', points: 13 },
+];
+
+/**
+ * Ticket to Ride: Europe — Official Board Routes across all 47 European cities
+ * (including Ferries with `ferryLocomotives` and Mountain Tunnels with `isTunnel`).
+ */
+export const EUROPE_BOARD_ROUTES: readonly RouteEdge[] = [
+  // British Isles & Channel Ferries
+  { id: 'EU_EDI_LON_1', from: 'Edinburgh', to: 'London', length: 4, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_EDI_LON_2', from: 'Edinburgh', to: 'London', length: 4, color: 'ORANGE', ownerId: null, routeIndex: 1 },
+  { id: 'EU_LON_AMS', from: 'London', to: 'Amsterdam', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 2 },
+  { id: 'EU_LON_DIE_1', from: 'London', to: 'Dieppe', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_LON_DIE_2', from: 'London', to: 'Dieppe', length: 2, color: 'GRAY', ownerId: null, routeIndex: 1, ferryLocomotives: 1 },
+
+  // Iberia & France
+  { id: 'EU_LIS_MAD', from: 'Lisboa', to: 'Madrid', length: 3, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_LIS_CAD', from: 'Lisboa', to: 'Cadiz', length: 2, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_CAD_MAD', from: 'Cadiz', to: 'Madrid', length: 3, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_MAD_BAR', from: 'Madrid', to: 'Barcelona', length: 2, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_MAD_PAM_1', from: 'Madrid', to: 'Pamplona', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_MAD_PAM_2', from: 'Madrid', to: 'Pamplona', length: 3, color: 'WHITE', ownerId: null, routeIndex: 1, isTunnel: true },
+  { id: 'EU_BAR_PAM', from: 'Barcelona', to: 'Pamplona', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_BAR_MAR', from: 'Barcelona', to: 'Marseille', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAM_MAR', from: 'Pamplona', to: 'Marseille', length: 4, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAM_PAR_1', from: 'Pamplona', to: 'Paris', length: 4, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAM_PAR_2', from: 'Pamplona', to: 'Paris', length: 4, color: 'GREEN', ownerId: null, routeIndex: 1 },
+  { id: 'EU_PAM_BRE', from: 'Pamplona', to: 'Brest', length: 4, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BRE_DIE', from: 'Brest', to: 'Dieppe', length: 2, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BRE_PAR', from: 'Brest', to: 'Paris', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_DIE_PAR', from: 'Dieppe', to: 'Paris', length: 1, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_DIE_BRU', from: 'Dieppe', to: 'Bruxelles', length: 2, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAR_BRU_1', from: 'Paris', to: 'Bruxelles', length: 2, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAR_BRU_2', from: 'Paris', to: 'Bruxelles', length: 2, color: 'RED', ownerId: null, routeIndex: 1 },
+  { id: 'EU_PAR_MAR', from: 'Paris', to: 'Marseille', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAR_ZUR', from: 'Paris', to: 'Zürich', length: 3, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_PAR_FRA_1', from: 'Paris', to: 'Frankfurt', length: 3, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PAR_FRA_2', from: 'Paris', to: 'Frankfurt', length: 3, color: 'ORANGE', ownerId: null, routeIndex: 1 },
+
+  // Benelux, Germany & Alps
+  { id: 'EU_BRU_AMS', from: 'Bruxelles', to: 'Amsterdam', length: 1, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BRU_FRA', from: 'Bruxelles', to: 'Frankfurt', length: 2, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_AMS_ESS', from: 'Amsterdam', to: 'Essen', length: 3, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_AMS_FRA', from: 'Amsterdam', to: 'Frankfurt', length: 2, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ESS_FRA', from: 'Essen', to: 'Frankfurt', length: 2, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ESS_BER', from: 'Essen', to: 'Berlin', length: 2, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ESS_KOB_1', from: 'Essen', to: 'København', length: 3, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_ESS_KOB_2', from: 'Essen', to: 'København', length: 3, color: 'GRAY', ownerId: null, routeIndex: 1, ferryLocomotives: 1 },
+  { id: 'EU_KOB_STO_1', from: 'København', to: 'Stockholm', length: 3, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_KOB_STO_2', from: 'København', to: 'Stockholm', length: 3, color: 'WHITE', ownerId: null, routeIndex: 1 },
+  { id: 'EU_STO_PET', from: 'Stockholm', to: 'Petrograd', length: 8, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_FRA_BER_1', from: 'Frankfurt', to: 'Berlin', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_FRA_BER_2', from: 'Frankfurt', to: 'Berlin', length: 3, color: 'RED', ownerId: null, routeIndex: 1 },
+  { id: 'EU_FRA_MUN', from: 'Frankfurt', to: 'München', length: 2, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_MUN_ZUR', from: 'München', to: 'Zürich', length: 2, color: 'YELLOW', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_MUN_VEN', from: 'München', to: 'Venezia', length: 2, color: 'BLUE', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_MUN_WIE', from: 'München', to: 'Wien', length: 3, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ZUR_MAR', from: 'Zürich', to: 'Marseille', length: 2, color: 'PINK', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_ZUR_VEN', from: 'Zürich', to: 'Venezia', length: 2, color: 'GREEN', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_MAR_ROM', from: 'Marseille', to: 'Roma', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+
+  // Italy & Mediterranean Ferries
+  { id: 'EU_VEN_ROM', from: 'Venezia', to: 'Roma', length: 2, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_VEN_ZAG', from: 'Venezia', to: 'Zagreb', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ROM_BRI', from: 'Roma', to: 'Brindisi', length: 2, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ROM_PAL', from: 'Roma', to: 'Palermo', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_BRI_PAL', from: 'Brindisi', to: 'Palermo', length: 3, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_BRI_ATH', from: 'Brindisi', to: 'Athina', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_PAL_SMY', from: 'Palermo', to: 'Smyrna', length: 6, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 2 },
+
+  // Central Europe, Poland & Baltic
+  { id: 'EU_BER_DAN', from: 'Berlin', to: 'Danzig', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BER_WAR_1', from: 'Berlin', to: 'Warszawa', length: 4, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BER_WAR_2', from: 'Berlin', to: 'Warszawa', length: 4, color: 'YELLOW', ownerId: null, routeIndex: 1 },
+  { id: 'EU_BER_WIE', from: 'Berlin', to: 'Wien', length: 3, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_DAN_WAR', from: 'Danzig', to: 'Warszawa', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_DAN_RIG', from: 'Danzig', to: 'Riga', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_RIG_PET', from: 'Riga', to: 'Petrograd', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_RIG_WIL', from: 'Riga', to: 'Wilno', length: 4, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WAR_WIE', from: 'Warszawa', to: 'Wien', length: 4, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WAR_WIL', from: 'Warszawa', to: 'Wilno', length: 3, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WAR_KYI', from: 'Warszawa', to: 'Kyiv', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WIE_BUD_1', from: 'Wien', to: 'Budapest', length: 1, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WIE_BUD_2', from: 'Wien', to: 'Budapest', length: 1, color: 'WHITE', ownerId: null, routeIndex: 1 },
+  { id: 'EU_WIE_ZAG', from: 'Wien', to: 'Zagreb', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+
+  // Balkans & Carpathians
+  { id: 'EU_ZAG_BUD', from: 'Zagreb', to: 'Budapest', length: 2, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ZAG_SAR', from: 'Zagreb', to: 'Sarajevo', length: 3, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BUD_SAR', from: 'Budapest', to: 'Sarajevo', length: 3, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BUD_BUC', from: 'Budapest', to: 'Bucuresti', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_BUD_KYI', from: 'Budapest', to: 'Kyiv', length: 6, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_SAR_ATH', from: 'Sarajevo', to: 'Athina', length: 4, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_SAR_SOF', from: 'Sarajevo', to: 'Sofia', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_ATH_SOF', from: 'Athina', to: 'Sofia', length: 3, color: 'PINK', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ATH_SMY', from: 'Athina', to: 'Smyrna', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_SOF_BUC', from: 'Sofia', to: 'Bucuresti', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_SOF_CON', from: 'Sofia', to: 'Constantinople', length: 3, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BUC_CON', from: 'Bucuresti', to: 'Constantinople', length: 3, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BUC_SEV', from: 'Bucuresti', to: 'Sevastopol', length: 4, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_BUC_KYI', from: 'Bucuresti', to: 'Kyiv', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+
+  // Eastern Europe, Russia, Black Sea & Anatolia
+  { id: 'EU_WIL_PET', from: 'Wilno', to: 'Petrograd', length: 4, color: 'BLUE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WIL_SMO', from: 'Wilno', to: 'Smolensk', length: 3, color: 'YELLOW', ownerId: null, routeIndex: 0 },
+  { id: 'EU_WIL_KYI', from: 'Wilno', to: 'Kyiv', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_PET_MOS', from: 'Petrograd', to: 'Moskva', length: 4, color: 'WHITE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_SMO_MOS', from: 'Smolensk', to: 'Moskva', length: 2, color: 'ORANGE', ownerId: null, routeIndex: 0 },
+  { id: 'EU_SMO_KYI', from: 'Smolensk', to: 'Kyiv', length: 3, color: 'RED', ownerId: null, routeIndex: 0 },
+  { id: 'EU_MOS_KHA', from: 'Moskva', to: 'Kharkov', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_KYI_KHA', from: 'Kyiv', to: 'Kharkov', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_KHA_ROS', from: 'Kharkov', to: 'Rostov', length: 2, color: 'GREEN', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ROS_SEV', from: 'Rostov', to: 'Sevastopol', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_ROS_SOC', from: 'Rostov', to: 'Sochi', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0 },
+  { id: 'EU_SEV_SOC', from: 'Sevastopol', to: 'Sochi', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 1 },
+  { id: 'EU_SEV_CON', from: 'Sevastopol', to: 'Constantinople', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 2 },
+  { id: 'EU_SEV_ERZ', from: 'Sevastopol', to: 'Erzurum', length: 4, color: 'GRAY', ownerId: null, routeIndex: 0, ferryLocomotives: 2 },
+  { id: 'EU_SOC_ERZ', from: 'Sochi', to: 'Erzurum', length: 3, color: 'RED', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_CON_SMY', from: 'Constantinople', to: 'Smyrna', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_CON_ANG', from: 'Constantinople', to: 'Angora', length: 2, color: 'GRAY', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_SMY_ANG', from: 'Smyrna', to: 'Angora', length: 3, color: 'ORANGE', ownerId: null, routeIndex: 0, isTunnel: true },
+  { id: 'EU_ANG_ERZ', from: 'Angora', to: 'Erzurum', length: 3, color: 'BLACK', ownerId: null, routeIndex: 0 },
+];
+
 

@@ -231,6 +231,9 @@ export const GameRegistry: Readonly<
       options?: GameSetupOptions
     ) =>
       initTTRGame(playerIds, seed, {
+        mapId: options?.selectedExpansions?.includes('europe_map')
+          ? 'EUROPE'
+          : 'USA',
         enableAlvinAndDexter: Boolean(
           options?.selectedExpansions?.includes('alvin_and_dexter')
         ),

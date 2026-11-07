@@ -16,7 +16,10 @@ import {
   CARD_GAMES_CATALOG,
   GAME_CATALOG_BY_ID,
 } from '../src/registry/catalog.js';
-import { getEffectivePlayerBounds } from '../src/types/game.js';
+import {
+  getEffectivePlayerBounds,
+  isExpansionCompatibleWithMap,
+} from '../src/types/game.js';
 import {
   BOARD_GAME_METADATA_LIST,
   CARD_GAME_METADATA_LIST,
@@ -1632,6 +1635,196 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(finalScores['p2']).toBe(9);
       // p3: -11 (uncompleted normal ticket) = -11
       expect(finalScores['p3']).toBe(-11);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 13. Ticket to Ride: Europe Map, Ferries, Mountain Tunnels & Train Stations
+  // ---------------------------------------------------------------------------
+  describe('Ticket to Ride: Europe Map, Ferries, Tunnels & Train Stations', () => {
+    it('deals 1 Long Route + 3 Regular Routes at setup, enforces Ferry locomotive costs, resolves Tunnels, builds Train Stations (1/2/3 cost), and scores +4 pts per unused station & borrows 1 rival route', () => {
+      let state = GameRegistry.ttr.initGame(['p1', 'p2'], 20261108, {
+        selectedExpansions: ['europe_map'],
+      }) as GameState;
+
+      expect(state.mapId).toBe('EUROPE');
+      expect(state.stations).toEqual({});
+      expect(state.players['p1']!.stationsRemaining).toBe(3);
+      expect(state.players['p2']!.stationsRemaining).toBe(3);
+
+      // Each player is dealt 1 Long Route (20-21 pts) + 3 Regular Routes = 4 pending tickets
+      expect(state.players['p1']!.pendingTickets).toHaveLength(4);
+      expect(
+        state.players['p1']!.pendingTickets.filter((t) => t.isLongRoute)
+      ).toHaveLength(1);
+      expect(state.players['p2']!.pendingTickets).toHaveLength(4);
+      expect(
+        state.players['p2']!.pendingTickets.filter((t) => t.isLongRoute)
+      ).toHaveLength(1);
+
+      // Both players keep at least 2 tickets to start playing
+      for (const pid of ['p1', 'p2']) {
+        const keepIds = state.players[pid]!.pendingTickets
+          .slice(0, 2)
+          .map((t) => t.id);
+        state = applyAction(state, pid, {
+          type: 'KEEP_TICKETS',
+          ticketIds: keepIds,
+        });
+      }
+      expect(state.phase).toBe('PLAYING');
+
+      // Give p1 and p2 cards to test Ferries, Tunnels, and Train Stations
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            hand: {
+              ...state.players['p1']!.hand,
+              RED: 6,
+              BLUE: 6,
+              GREEN: 6,
+              LOCOMOTIVE: 4,
+            },
+          },
+          p2: {
+            ...state.players['p2']!,
+            hand: {
+              ...state.players['p2']!.hand,
+              YELLOW: 6,
+              BLACK: 6,
+              LOCOMOTIVE: 4,
+            },
+          },
+        },
+      };
+
+      // 1. Ferry validation: London <-> Dieppe (length 2, GRAY, ferryLocomotives = 1)
+      const ferryRoute = state.routes.find(
+        (r) =>
+          (r.from === 'London' && r.to === 'Dieppe') ||
+          (r.from === 'Dieppe' && r.to === 'London')
+      )!;
+      expect(ferryRoute.ferryLocomotives).toBe(1);
+
+      // Rejects claiming ferry without a Locomotive
+      const badFerry = validateAction(state, 'p1', {
+        type: 'CLAIM_ROUTE',
+        routeId: ferryRoute.id,
+        payment: { RED: 2 },
+      });
+      expect(badFerry.valid).toBe(false);
+      expect(badFerry.reason).toContain('Ferry route');
+
+      // Succeeds when paying 1 RED + 1 LOCOMOTIVE
+      state = applyAction(state, 'p1', {
+        type: 'CLAIM_ROUTE',
+        routeId: ferryRoute.id,
+        payment: { RED: 1, LOCOMOTIVE: 1 },
+      });
+      expect(
+        state.routes.find((r) => r.id === ferryRoute.id)!.ownerId
+      ).toBe('p1');
+
+      // 2. Train Station building:
+      // p2 builds 1st station in Paris for 1 card (YELLOW: 1)
+      expect(
+        validateAction(state, 'p2', {
+          type: 'BUILD_STATION',
+          cityName: 'Paris',
+          payment: { YELLOW: 2 }, // Wrong count: 1st station costs 1 card
+        }).valid
+      ).toBe(false);
+
+      state = applyAction(state, 'p2', {
+        type: 'BUILD_STATION',
+        cityName: 'Paris',
+        payment: { YELLOW: 1 },
+      });
+      expect(state.stations?.['Paris']).toBe('p2');
+      expect(state.players['p2']!.stationsRemaining).toBe(2);
+
+      // p1 cannot build a station in Paris because p2 already built one there
+      expect(
+        validateAction(state, 'p1', {
+          type: 'BUILD_STATION',
+          cityName: 'Paris',
+          payment: { BLUE: 1 },
+        }).valid
+      ).toBe(false);
+
+      // p1 claims Dieppe <-> Paris (length 1) so p1 owns London-Dieppe AND Dieppe-Paris
+      const dieppeParis = state.routes.find(
+        (r) =>
+          (r.from === 'Dieppe' && r.to === 'Paris') ||
+          (r.from === 'Paris' && r.to === 'Dieppe')
+      )!;
+      state = applyAction(state, 'p1', {
+        type: 'CLAIM_ROUTE',
+        routeId: dieppeParis.id,
+        payment: { LOCOMOTIVE: 1 },
+      });
+
+      // p2 builds 2nd station in Dieppe for 2 cards of same color (BLACK: 2)
+      state = applyAction(state, 'p2', {
+        type: 'BUILD_STATION',
+        cityName: 'Dieppe',
+        payment: { BLACK: 2 },
+      });
+      expect(state.stations?.['Dieppe']).toBe('p2');
+      expect(state.players['p2']!.stationsRemaining).toBe(1);
+
+      // 3. End-game scoring with Stations:
+      // - p2 owns NO routes directly, but has built Stations in Paris and Dieppe (1 unused station left = +4 pts).
+      // - Using the Paris station (borrows p1's Paris-Dieppe route) and Dieppe station (borrows p1's Dieppe-London route),
+      //   p2 completes a London -> Paris ticket worth 7 points!
+      // - p1 has 3 unused stations (+12 pts) + 10 pts Longest Path.
+      const endState: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            claimedRoutePoints: 3,
+            tickets: [],
+          },
+          p2: {
+            ...state.players['p2']!,
+            claimedRoutePoints: 0,
+            tickets: [{ id: 'EU_TEST', from: 'London', to: 'Paris', points: 7 }],
+          },
+        },
+      };
+
+      const finalScores = calculateFinalScores(endState);
+      // p1: 3 (routes) + 12 (3 unused stations * 4) + 10 (longest path) = 25
+      expect(finalScores['p1']).toBe(25);
+      // p2: 0 (routes) + 7 (completed London->Paris via borrowed station routes) + 4 (1 unused station * 4) = 11
+      expect(finalScores['p2']).toBe(11);
+    });
+
+    it('filters Ticket to Ride expansions by map compatibility (USA vs EUROPE)', () => {
+      const ttrDef = GAME_CATALOG_BY_ID.ttr;
+      const otherExpansions = ttrDef.expansions.filter(
+        (exp) => exp.id !== 'europe_map'
+      );
+
+      const usaCompatible = otherExpansions
+        .filter((exp) => isExpansionCompatibleWithMap(exp, 'USA'))
+        .map((exp) => exp.id);
+      const europeCompatible = otherExpansions
+        .filter((exp) => isExpansionCompatibleWithMap(exp, 'EUROPE'))
+        .map((exp) => exp.id);
+
+      // North America (Base Map) supports both Alvin & Dexter and USA 1910 Mystery Train
+      expect(usaCompatible).toContain('alvin_and_dexter');
+      expect(usaCompatible).toContain('1910_mystery_train');
+
+      // Europe Map only supports Alvin & Dexter (not USA 1910)
+      expect(europeCompatible).toContain('alvin_and_dexter');
+      expect(europeCompatible).not.toContain('1910_mystery_train');
     });
   });
 });

@@ -23,6 +23,17 @@ export interface GameExpansion {
   readonly description: string;
   readonly minPlayersOverride?: number;
   readonly maxPlayersOverride?: number;
+  readonly compatibleMaps?: readonly ('USA' | 'EUROPE')[];
+}
+
+export function isExpansionCompatibleWithMap(
+  expansion: GameExpansion,
+  mapId: 'USA' | 'EUROPE'
+): boolean {
+  if (!expansion.compatibleMaps || expansion.compatibleMaps.length === 0) {
+    return true;
+  }
+  return expansion.compatibleMaps.includes(mapId);
 }
 
 export interface GameSetupOptions {

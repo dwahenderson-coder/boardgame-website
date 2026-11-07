@@ -31,7 +31,8 @@ export const ClaimRoutePopover: React.FC<ClaimRoutePopoverProps> = ({
   const validOptions = getValidPaymentsForRoute(
     route.color,
     route.length,
-    playerHand
+    playerHand,
+    route.ferryLocomotives ?? 0
   );
 
   const [customPayment, setCustomPayment] = useState<
@@ -95,6 +96,20 @@ export const ClaimRoutePopover: React.FC<ClaimRoutePopoverProps> = ({
             </span>{' '}
             • Route ID: <code className="text-slate-300">{route.id}</code>
           </p>
+          {(route.isTunnel || (route.ferryLocomotives ?? 0) > 0) && (
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+              {(route.ferryLocomotives ?? 0) > 0 && (
+                <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 font-bold text-[10px]">
+                  ⛴️ Ferry: Requires ≥ {route.ferryLocomotives} Locomotive(s)
+                </span>
+              )}
+              {route.isTunnel && (
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-200 font-bold text-[10px]">
+                  ⛰️ Mountain Tunnel: Draws 3 top cards for tunnel tax
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <button
           onClick={onClose}

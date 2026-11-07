@@ -14,6 +14,7 @@ import {
   GameDefinition,
   GameId,
   getEffectivePlayerBounds,
+  isExpansionCompatibleWithMap,
 } from '../types/game.js';
 
 export interface GameLobbyProps {
@@ -486,83 +487,285 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 2B. Expansions & Modules Section */}
-            <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="font-black uppercase tracking-wider text-purple-300 text-[11px]">
-                    🧩 Optional Expansions & Modules
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    {isHost ? 'Host Toggles' : 'Synced with Host'}
-                  </span>
-                </div>
+            {/* 2B. Map Selection (for TTR) + Expansions & Modules Section */}
+            <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 flex flex-col justify-between space-y-4">
+              {stagedGame.id === 'ttr' ? (
+                <div className="space-y-4">
+                  {/* Option 1: Map Selector */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-emerald-300 text-[11px]">
+                        🗺️ Option 1: Select Map
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Selection' : 'Synced with Host'}
+                      </span>
+                    </div>
 
-                {stagedGame.expansions.length === 0 ? (
-                  <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 text-center">
-                    Standard base rules only for this title.
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {stagedGame.expansions.map((exp) => {
-                      const enabled = selectedExpansions.includes(exp.id);
-                      return (
-                        <div
-                          key={exp.id}
-                          onClick={() => {
-                            if (isHost) {
-                              onToggleExpansion(exp.id);
-                            }
-                          }}
-                          title={exp.description}
-                          className={`p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
-                            enabled
-                              ? 'bg-purple-950/40 border-purple-400/80 shadow'
-                              : 'bg-slate-900/70 border-slate-800'
-                          } ${
-                            isHost
-                              ? 'cursor-pointer hover:border-purple-400/60'
-                              : 'cursor-default'
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-bold text-slate-100 text-xs">
-                                {exp.name}
-                              </span>
-                              {(exp.minPlayersOverride !== undefined ||
-                                exp.maxPlayersOverride !== undefined) && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
-                                  Up to {exp.maxPlayersOverride ?? stagedGame.maxPlayers}P
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {(() => {
+                        const isEurope =
+                          selectedExpansions.includes('europe_map');
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && isEurope) {
+                                  onToggleExpansion('europe_map');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                !isEurope
+                                  ? 'bg-emerald-950/40 border-emerald-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${
+                                isHost ? 'cursor-pointer' : 'cursor-default'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  🗽 North America (Base Map)
                                 </span>
-                              )}
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    !isEurope
+                                      ? 'bg-emerald-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {!isEurope ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Classic 36-city USA &amp; Canada railway network
+                                with 30 Destination Tickets and Trans America
+                                Express (+10 pts).
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isEurope) {
+                                  onToggleExpansion('europe_map');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isEurope
+                                  ? 'bg-emerald-950/40 border-emerald-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${
+                                isHost ? 'cursor-pointer' : 'cursor-default'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  🏰 Europe (Ticket to Ride: Europe)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    isEurope
+                                      ? 'bg-emerald-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {isEurope ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                47 European cities with Ferries, Mountain
+                                Tunnels, 3 Train Stations per player (+4 pts
+                                unused), and 1 Long + 3 Regular starting
+                                tickets.
+                              </p>
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Option 2: Other Expansions (Map-Filtered) */}
+                  <div className="pt-3 border-t border-slate-800/80">
+                    {(() => {
+                      const activeMapId: 'USA' | 'EUROPE' =
+                        selectedExpansions.includes('europe_map')
+                          ? 'EUROPE'
+                          : 'USA';
+                      const compatibleExpansions = stagedGame.expansions.filter(
+                        (exp) =>
+                          exp.id !== 'europe_map' &&
+                          isExpansionCompatibleWithMap(exp, activeMapId)
+                      );
+                      return (
+                        <>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black uppercase tracking-wider text-purple-300 text-[11px]">
+                                🧩 Option 2: Other Expansions
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[9px] font-bold">
+                                Compatible with{' '}
+                                {activeMapId === 'EUROPE'
+                                  ? 'Europe'
+                                  : 'North America'}{' '}
+                                Map
+                              </span>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                              {exp.description}
-                            </p>
+                            <span className="text-[10px] text-slate-400">
+                              {isHost ? 'Host Toggles' : 'Synced with Host'}
+                            </span>
                           </div>
 
-                          {/* Toggle Switch / Status Badge */}
-                          <span
-                            className={`px-2.5 py-1 rounded-full font-black text-[10px] uppercase shrink-0 border ${
+                          <div className="space-y-2.5">
+                            {compatibleExpansions.map((exp) => {
+                              const enabled = selectedExpansions.includes(
+                                exp.id
+                              );
+                              return (
+                                <div
+                                  key={exp.id}
+                                  onClick={() => {
+                                    if (isHost) {
+                                      onToggleExpansion(exp.id);
+                                    }
+                                  }}
+                                  title={exp.description}
+                                  className={`p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
+                                    enabled
+                                      ? 'bg-purple-950/40 border-purple-400/80 shadow'
+                                      : 'bg-slate-900/70 border-slate-800'
+                                  } ${
+                                    isHost
+                                      ? 'cursor-pointer hover:border-purple-400/60'
+                                      : 'cursor-default'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-bold text-slate-100 text-xs">
+                                        {exp.name}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                      {exp.description}
+                                    </p>
+                                  </div>
+
+                                  <span
+                                    className={`px-2.5 py-1 rounded-full font-black text-[10px] uppercase shrink-0 border ${
+                                      enabled
+                                        ? 'bg-purple-500 text-slate-950 border-purple-300'
+                                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                                    }`}
+                                  >
+                                    {enabled ? '✓ Enabled' : 'Disabled'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="font-black uppercase tracking-wider text-purple-300 text-[11px]">
+                      🧩 Optional Expansions & Modules
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {isHost ? 'Host Toggles' : 'Synced with Host'}
+                    </span>
+                  </div>
+
+                  {stagedGame.expansions.length === 0 ? (
+                    <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 text-center">
+                      Standard base rules only for this title.
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {stagedGame.expansions.map((exp) => {
+                        const enabled = selectedExpansions.includes(exp.id);
+                        return (
+                          <div
+                            key={exp.id}
+                            onClick={() => {
+                              if (isHost) {
+                                onToggleExpansion(exp.id);
+                              }
+                            }}
+                            title={exp.description}
+                            className={`p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
                               enabled
-                                ? 'bg-purple-500 text-slate-950 border-purple-300'
-                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                                ? 'bg-purple-950/40 border-purple-400/80 shadow'
+                                : 'bg-slate-900/70 border-slate-800'
+                            } ${
+                              isHost
+                                ? 'cursor-pointer hover:border-purple-400/60'
+                                : 'cursor-default'
                             }`}
                           >
-                            {enabled ? '✓ Enabled' : 'Disabled'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-100 text-xs">
+                                  {exp.name}
+                                </span>
+                                {(exp.minPlayersOverride !== undefined ||
+                                  exp.maxPlayersOverride !== undefined) && (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-bold">
+                                    Up to{' '}
+                                    {exp.maxPlayersOverride ??
+                                      stagedGame.maxPlayers}
+                                    P
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                {exp.description}
+                              </p>
+                            </div>
+
+                            {/* Toggle Switch / Status Badge */}
+                            <span
+                              className={`px-2.5 py-1 rounded-full font-black text-[10px] uppercase shrink-0 border ${
+                                enabled
+                                  ? 'bg-purple-500 text-slate-950 border-purple-300'
+                                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                              }`}
+                            >
+                              {enabled ? '✓ Enabled' : 'Disabled'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Active Expansions:</span>
+                <span>
+                  {stagedGame.id === 'ttr'
+                    ? `Map: ${
+                        selectedExpansions.includes('europe_map')
+                          ? 'Europe'
+                          : 'North America'
+                      }`
+                    : 'Active Expansions:'}
+                </span>
                 <strong className="text-purple-300">
-                  {selectedExpansions.length === 0
+                  {stagedGame.id === 'ttr'
+                    ? `${
+                        selectedExpansions.filter((id) => id !== 'europe_map')
+                          .length
+                      } Expansion(s) Enabled`
+                    : selectedExpansions.length === 0
                     ? 'Base Game Only'
                     : `${selectedExpansions.length} Enabled`}
                 </strong>

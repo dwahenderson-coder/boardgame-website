@@ -15,11 +15,14 @@ export type RouteColor = TrainCardColor | 'GRAY';
 
 export type MonsterType = 'ALVIN' | 'DEXTER';
 
+export type TTRMapId = 'USA' | 'EUROPE';
+
 export interface DestinationTicket {
   readonly id: string;
   readonly from: string;
   readonly to: string;
   readonly points: number;
+  readonly isLongRoute?: boolean;
 }
 
 export interface RouteEdge {
@@ -30,6 +33,8 @@ export interface RouteEdge {
   readonly color: RouteColor;
   readonly ownerId: string | null;
   readonly routeIndex: number; // 0 for single or first double-route, 1 for parallel double-route
+  readonly ferryLocomotives?: number; // Required locomotives to claim a Ferry route on Europe map
+  readonly isTunnel?: boolean; // Mountain Tunnel route on Europe map
 }
 
 export type HandCounts = Readonly<Record<TrainCardColor, number>>;
@@ -43,6 +48,7 @@ export interface PlayerState {
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
   readonly recentDrawnCards: Partial<Record<TrainCardColor, number>>;
+  readonly stationsRemaining?: number;
   readonly alvinCards?: number;
   readonly dexterCards?: number;
   readonly faceUpAlvinTurnsRemaining?: number;
@@ -73,12 +79,14 @@ export type TurnStep =
   | 'PLACING_MONSTER';
 
 export interface GameState {
+  readonly mapId?: TTRMapId;
   readonly phase: GamePhase;
   readonly playerOrder: readonly string[];
   readonly activePlayerIndex: number;
   readonly turnStep: TurnStep;
   readonly players: Readonly<Record<string, PlayerState>>;
   readonly routes: readonly RouteEdge[];
+  readonly stations?: Readonly<Record<string, string>>;
   readonly faceUpCards: readonly (TrainCardColor | null)[];
   readonly trainDeck: DeckState<TrainCardColor>;
   readonly ticketDeck: DeckState<DestinationTicket>;
@@ -96,11 +104,13 @@ export interface SanitizedOpponentState {
   readonly pendingTicketCount: number;
   readonly trainsRemaining: number;
   readonly claimedRoutePoints: number;
+  readonly stationsRemaining?: number;
   readonly hasFaceUpAlvin?: boolean;
   readonly hasFaceUpDexter?: boolean;
 }
 
 export interface SanitizedGameState {
+  readonly mapId?: TTRMapId;
   readonly phase: GamePhase;
   readonly playerOrder: readonly string[];
   readonly activePlayerId: string;
@@ -108,6 +118,7 @@ export interface SanitizedGameState {
   readonly self: PlayerState;
   readonly opponents: Readonly<Record<string, SanitizedOpponentState>>;
   readonly routes: readonly RouteEdge[];
+  readonly stations?: Readonly<Record<string, string>>;
   readonly faceUpCards: readonly (TrainCardColor | null)[];
   readonly trainDeckCount: number;
   readonly trainDiscardCount: number;
@@ -162,13 +173,20 @@ export interface MoveMonsterAction {
   readonly targetCity: string;
 }
 
+export interface BuildStationAction {
+  readonly type: 'BUILD_STATION';
+  readonly cityName: string;
+  readonly payment: Partial<Record<TrainCardColor, number>>;
+}
+
 export type Action =
   | DrawCardsAction
   | ClaimRouteAction
   | DrawTicketsAction
   | KeepTicketsAction
   | PlaceMonsterAction
-  | MoveMonsterAction;
+  | MoveMonsterAction
+  | BuildStationAction;
 
 export interface ValidationResult {
   readonly valid: boolean;

@@ -87,22 +87,24 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [
       {
+        id: 'europe_map',
+        name: 'Europe (Ticket to Ride: Europe Map)',
+        description:
+          'Plays on the 47-city Europe Map featuring Ferries (requiring Locomotives), Mountain Tunnels, 3 Train Stations per player (+4 pts per unused station or borrow 1 rival route), and 1 Long Route + 3 Regular Tickets dealt at setup.',
+      },
+      {
         id: 'alvin_and_dexter',
         name: 'Alvin & Dexter',
         description:
-          'Adds Alvin the Alien (🛸 Flying Saucer) & Dexter the Dinosaur (🦖 T-Rex)! Cities in Chaos block route claims and halve ticket values. Spend 1–2 Locomotives on your turn to move a monster and collect Monster cards (+15 pts for most Alvin / Dexter cards).',
+          'Usable on all maps! Adds Alvin the Alien (🛸 Flying Saucer) & Dexter the Dinosaur (🦖 T-Rex). Cities in Chaos block route claims and halve ticket values. Spend 1–2 Locomotives on your turn to move a monster and collect Monster cards (+15 pts for most Alvin / Dexter cards).',
+        compatibleMaps: ['USA', 'EUROPE'],
       },
       {
         id: '1910_mystery_train',
-        name: '1910 Mystery Train',
+        name: 'USA 1910 / Mystery Train',
         description:
-          'Adds 35 new Destination Tickets, the Globetrotter bonus card, and expanded Big Cities route variants.',
-      },
-      {
-        id: 'europe_stations',
-        name: 'Europe Map / Stations',
-        description:
-          'Introduces Passenger Stations, Ferries, and Mountain Tunnels allowing players to share a single rival route.',
+          'North America Map expansion adding 1910 Destination Tickets, the Globetrotter bonus card, and Big Cities route variants.',
+        compatibleMaps: ['USA'],
       },
     ],
   },
