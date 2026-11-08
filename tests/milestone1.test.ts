@@ -23,6 +23,7 @@ import {
 import {
   BOARD_GAME_METADATA_LIST,
   CARD_GAME_METADATA_LIST,
+  GameId,
   GameRegistry,
 } from '../src/games/registry.js';
 import { HoldemGameState } from '../src/games/texas-holdem/index.js';
@@ -1825,6 +1826,108 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       // Europe Map only supports Alvin & Dexter (not USA 1910)
       expect(europeCompatible).toContain('alvin_and_dexter');
       expect(europeCompatible).not.toContain('1910_mystery_train');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 14. Kings Corners 0.00d: Swapped Card Highlighting, Deck Exhaustion & Dev Sandbox All-Games Check
+  // ---------------------------------------------------------------------------
+  describe('Kings Corners 0.00d Updates & Dev Sandbox All-Games Integration', () => {
+    it('highlights swapped card slot in opponent mini displays and ends the hand when the draw deck is exhausted without reshuffling', () => {
+      const kcEngine = GameRegistry.kings_corners;
+      const deck = createStandardDeck();
+      const cardById = (id: string) => deck.find((c) => c.id === id)!;
+
+      let state = kcEngine.initGame(['p1', 'p2'], 404) as KingsCornersGameState;
+      // Finish initial peek for both players
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_PEEK_CARDS',
+        row: 'TOP',
+      }) as KingsCornersGameState;
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_PEEK_CARDS',
+        row: 'BOTTOM',
+      }) as KingsCornersGameState;
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_FINISH_PEEK',
+      }) as KingsCornersGameState;
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_FINISH_PEEK',
+      }) as KingsCornersGameState;
+
+      // Active player is p2 (clockwise from dealer p1)
+      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+
+      // 1. p2 takes the top discard and swaps it into slot #2 (Bottom-Left)
+      state = kcEngine.applyAction(state, 'p2', {
+        type: 'KC_TAKE_DISCARD',
+        replaceSlotIndex: 2,
+      }) as KingsCornersGameState;
+
+      expect(state.players['p2']!.lastSwappedSlot).toBe(2);
+      expect(state.lastSwappedMove).toEqual({
+        playerId: 'p2',
+        slotIndex: 2,
+      });
+
+      // Verify p1's sanitized view exposes p2's lastSwappedSlot so p2's mini display highlights slot #2
+      const p1Perspective = kcEngine.getPlayerPerspective(state, 'p1');
+      if (p1Perspective.gameId === 'kings_corners') {
+        expect(p1Perspective.opponents['p2']!.lastSwappedSlot).toBe(2);
+        expect(p1Perspective.lastSwappedMove).toEqual({
+          playerId: 'p2',
+          slotIndex: 2,
+        });
+      }
+
+      // 2. Set drawPile to have only 1 card left and multiple cards in discardPile.
+      // When p1 draws that last card and resolves their turn, the hand must end immediately WITHOUT reshuffling!
+      state = {
+        ...state,
+        drawPile: [cardById('KH')],
+        discardPile: [cardById('2C'), cardById('3D'), cardById('4S')],
+      };
+
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_DRAW_DECK',
+      }) as KingsCornersGameState;
+      expect(state.turnStep).toBe('DECIDING_DRAWN_CARD');
+      expect(state.drawPile).toHaveLength(0);
+
+      // p1 swaps the drawn King into slot #0 -> drawPile is now exhausted, so hand ends immediately!
+      state = kcEngine.applyAction(state, 'p1', {
+        type: 'KC_USE_DRAWN',
+        replaceSlotIndex: 0,
+      }) as KingsCornersGameState;
+
+      expect(state.turnStep).toBe('HAND_OVER');
+      expect(state.drawPile).toHaveLength(0);
+      expect(state.lastHandSummary?.endedByDeckExhausted).toBe(true);
+    });
+
+    it('initializes and computes sanitized perspectives and live scores for every game in the Dev Sandbox catalog', () => {
+      for (const meta of [...BOARD_GAMES_CATALOG, ...CARD_GAMES_CATALOG]) {
+        const engine = GameRegistry[meta.id];
+        const playerIds = Array.from(
+          { length: meta.minPlayers },
+          (_, i) => `Player_${i + 1}`
+        );
+        const state = engine.initGame(playerIds, 20261107, {
+          selectedExpansions: [],
+        });
+        const stateGameId: GameId =
+          'gameId' in state ? (state.gameId as GameId) : 'ttr';
+        expect(stateGameId).toBe(meta.id);
+
+        const view = GameRegistry[stateGameId].getPlayerPerspective(
+          state,
+          playerIds[0]!
+        );
+        expect(view.self.id).toBe(playerIds[0]);
+
+        const scores = GameRegistry[stateGameId].calculateFinalScores(state);
+        expect(Object.keys(scores)).toHaveLength(meta.minPlayers);
+      }
     });
   });
 });

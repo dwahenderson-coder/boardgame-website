@@ -241,8 +241,13 @@ export const SandboxApp: React.FC = () => {
   const isMultiplayerActive =
     runnerMode === 'MULTIPLAYER' && mp.sanitizedView !== null;
 
+  // Always derive the engine for localGameState directly from localGameState so
+  // staging a different game in the Dev Sandbox menu never mismatches state and engine.
+  const localStateGameId: GameId =
+    'gameId' in localGameState ? localGameState.gameId : 'ttr';
+
   const activeGameId: GameId =
-    runnerMode === 'MULTIPLAYER' ? mp.selectedGameId : localSelectedGameId;
+    runnerMode === 'MULTIPLAYER' ? mp.selectedGameId : localStateGameId;
 
   // Active Perspective resolution (either Local Engine or Server State Sync)
   const localActivePlayerId =
@@ -255,9 +260,9 @@ export const SandboxApp: React.FC = () => {
     viewport === 'GOD_MODE' ? localActivePlayerId : viewport;
 
   const localSanitizedPerspective = useMemo(() => {
-    const engine = GameRegistry[localSelectedGameId];
+    const engine = GameRegistry[localStateGameId];
     return engine.getPlayerPerspective(localGameState, localViewedPlayerId);
-  }, [localGameState, localSelectedGameId, localViewedPlayerId]);
+  }, [localGameState, localStateGameId, localViewedPlayerId]);
 
   const activeSanitized = isMultiplayerActive
     ? mp.sanitizedView!
@@ -367,9 +372,9 @@ export const SandboxApp: React.FC = () => {
   }, [ttrSanitized, viewedPlayerId]);
 
   const localLiveScores = useMemo(() => {
-    const engine = GameRegistry[localSelectedGameId];
+    const engine = GameRegistry[localStateGameId];
     return engine.calculateFinalScores(localGameState);
-  }, [localGameState, localSelectedGameId]);
+  }, [localGameState, localStateGameId]);
 
   // Compute local final standings for the Game Over modal when playing in Local Sandbox
   const localFinalStandings = useMemo<readonly PlayerFinalStanding[]>(() => {
@@ -740,18 +745,45 @@ export const SandboxApp: React.FC = () => {
 
   const handleLocalSelectGame = (gameId: GameId | null) => {
     setLocalConfiguredGameId(gameId);
+    setLocalErrorBanner(null);
     if (gameId) {
       const def = GAME_CATALOG_BY_ID[gameId];
+      const clamped = Math.min(
+        def.maxPlayers,
+        Math.max(def.minPlayers, playerCountInput)
+      );
       setLocalSelectedGameId(gameId);
       setLocalCategory(def.category);
       setLocalSelectedExpansions([]);
       setLocalEnableAlvinAndDexter(false);
       setLocalPlayerColors({});
-      const clamped = Math.min(
-        def.maxPlayers,
-        Math.max(def.minPlayers, playerCountInput)
-      );
       setPlayerCountInput(clamped);
+
+      // Immediately initialize the background sandbox state for the selected game
+      // so all games in the catalog are live-connected as soon as selected or launched.
+      const parsedSeed = Number.parseInt(seedInput, 10);
+      const effectiveSeed = Number.isNaN(parsedSeed)
+        ? Math.floor(Math.random() * 1_000_000)
+        : parsedSeed;
+      const ids = generatePlayerIds(clamped);
+      const defaultColors: Record<string, string> = {};
+      ids.forEach((pid, idx) => {
+        defaultColors[pid] =
+          def.availableColors[idx % def.availableColors.length]?.id ?? 'red';
+      });
+      const nextState = GameRegistry[gameId].initGame(ids, effectiveSeed, {
+        selectedExpansions: [],
+        playerColors: defaultColors,
+      });
+      setLocalGameState(nextState);
+      setSelectedRouteId(null);
+      setSelectedPendingIds([]);
+      setMoveMonsterOpen(false);
+      setBuildStationOpen(false);
+      setActionLog([]);
+      if (viewport !== 'GOD_MODE' && !ids.includes(viewport)) {
+        setViewport('GOD_MODE');
+      }
     }
   };
 
@@ -868,8 +900,8 @@ export const SandboxApp: React.FC = () => {
       return;
     }
 
-    // Local Sandbox Mode — Route through GameRegistry[localSelectedGameId]
-    const engine = GameRegistry[localSelectedGameId];
+    // Local Sandbox Mode — Route through GameRegistry[localStateGameId]
+    const engine = GameRegistry[localStateGameId];
     const check = engine.validateAction(localGameState, actorId, action);
     const logEntry: ActionLogEntry = {
       id: Date.now() + Math.random(),
@@ -901,7 +933,9 @@ export const SandboxApp: React.FC = () => {
     // Auto-switch viewport in Hot-Seat mode if enabled
     if (followActiveTurn && viewport !== 'GOD_MODE') {
       const nextActive =
-        nextState.playerOrder[nextState.activePlayerIndex]!;
+        'gameId' in nextState && nextState.gameId === 'power_grid'
+          ? getPowerGridActivePlayerId(nextState as PowerGridGameState)
+          : nextState.playerOrder[nextState.activePlayerIndex]!;
       setViewport(nextActive);
     }
   };
@@ -1171,10 +1205,12 @@ export const SandboxApp: React.FC = () => {
               <div className="flex items-center gap-1.5 text-xs">
                 <label className="text-slate-400 font-medium">Game:</label>
                 <select
-                  value={localSelectedGameId}
-                  onChange={(e) =>
-                    handleStartNewLocalGame(e.target.value as GameId)
-                  }
+                  value={localStateGameId}
+                  onChange={(e) => {
+                    const nextGameId = e.target.value as GameId;
+                    setLocalConfiguredGameId(nextGameId);
+                    handleStartNewLocalGame(nextGameId, undefined, false, []);
+                  }}
                   className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-amber-300 font-bold focus:outline-none focus:border-amber-400"
                 >
                   <optgroup label="🎲 Board Games">
@@ -2851,10 +2887,18 @@ export const SandboxApp: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => setIsLocalSetupOpen(false)}
+                    onClick={() => {
+                      if (localConfiguredGameId) {
+                        handleStartNewLocalGame();
+                      } else {
+                        setIsLocalSetupOpen(false);
+                      }
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold transition"
                   >
-                    Resume Current Board →
+                    {localConfiguredGameId
+                      ? `Launch ${GAME_CATALOG_BY_ID[localConfiguredGameId].name} →`
+                      : 'Resume Current Board →'}
                   </button>
                 </div>
               </div>

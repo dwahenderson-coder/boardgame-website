@@ -25,6 +25,7 @@ export interface KingsCornersPlayerState {
   readonly readyAfterPeek: boolean;
   readonly lastActionLabel: string | null;
   readonly lastHandScore: number | null;
+  readonly lastSwappedSlot?: (0 | 1 | 2 | 3) | null;
 }
 
 export interface KingsCornersSanitizedPlayerState {
@@ -46,17 +47,24 @@ export interface KingsCornersSanitizedPlayerState {
   readonly readyAfterPeek: boolean;
   readonly lastActionLabel: string | null;
   readonly lastHandScore: number | null;
+  readonly lastSwappedSlot?: (0 | 1 | 2 | 3) | null;
 }
 
 export interface KingsCornersHandSummary {
   readonly handNumber: number;
   readonly knockerId: string;
+  readonly endedByDeckExhausted?: boolean;
   readonly highestScore: number;
   readonly lowestScore: number;
   readonly scoresByPlayer: Readonly<Record<string, number>>;
   readonly losers: readonly string[];
   readonly isPush: boolean;
   readonly pushReason: string | null;
+}
+
+export interface KingsCornersSwappedMove {
+  readonly playerId: string;
+  readonly slotIndex: 0 | 1 | 2 | 3;
 }
 
 export interface KingsCornersGameState {
@@ -78,6 +86,7 @@ export interface KingsCornersGameState {
   readonly winnerId: string | null;
   readonly lastActionSummary: string | null;
   readonly lastHandSummary: KingsCornersHandSummary | null;
+  readonly lastSwappedMove?: KingsCornersSwappedMove | null;
 }
 
 export interface KingsCornersSanitizedGameState {
@@ -104,6 +113,7 @@ export interface KingsCornersSanitizedGameState {
   readonly winnerId: string | null;
   readonly lastActionSummary: string | null;
   readonly lastHandSummary: KingsCornersHandSummary | null;
+  readonly lastSwappedMove?: KingsCornersSwappedMove | null;
 }
 
 export type KingsCornersAction =

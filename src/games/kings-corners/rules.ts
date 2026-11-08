@@ -91,6 +91,7 @@ function dealKingsCornersHand(
         readyAfterPeek: false,
         lastActionLabel: 'Choosing 2 cards to peek...',
         lastHandScore: null,
+        lastSwappedSlot: null,
       };
     } else {
       // Eliminated players keep placeholder cards and are skipped
@@ -103,6 +104,7 @@ function dealKingsCornersHand(
         readyAfterPeek: true,
         lastActionLabel: 'Eliminated (0 Quarters)',
         lastHandScore: null,
+        lastSwappedSlot: null,
       };
     }
   }
@@ -133,6 +135,7 @@ function dealKingsCornersHand(
     winnerId: null,
     lastActionSummary: `Hand #${handNumber} dealt! Each player may peek at either their Top 2 or Bottom 2 cards before play begins.`,
     lastHandSummary: null,
+    lastSwappedMove: null,
   };
 }
 
@@ -233,8 +236,8 @@ export function validateKingsCornersAction(
   if (state.turnStep === 'AWAITING_TURN_ACTION') {
     switch (action.type) {
       case 'KC_DRAW_DECK':
-        if (state.drawPile.length === 0 && state.discardPile.length <= 1) {
-          return { valid: false, reason: 'No cards remaining to draw.' };
+        if (state.drawPile.length === 0) {
+          return { valid: false, reason: 'No cards remaining in the draw deck.' };
         }
         return { valid: true };
 
@@ -298,7 +301,8 @@ export function validateKingsCornersAction(
 function resolveKingsCornersHandEnd(
   state: KingsCornersGameState,
   nextPlayers: Record<string, KingsCornersPlayerState>,
-  lastMoveText: string
+  lastMoveText: string,
+  endedByDeckExhausted = false
 ): KingsCornersGameState {
   const activePlayerIds = state.playerOrder.filter(
     (pid) => !nextPlayers[pid]!.eliminated
@@ -371,9 +375,13 @@ function resolveKingsCornersHandEnd(
     ? `Tie at ${highestScore} pts would eliminate multiple players on their last quarter — Hand is a PUSH!`
     : null;
 
+  const reasonPrefix = endedByDeckExhausted
+    ? `${lastMoveText} — Draw Deck Exhausted! Hand #${state.handNumber} Over!`
+    : `${lastMoveText} — Hand #${state.handNumber} Over!`;
+
   const outcomeSummary = isPush
-    ? `${lastMoveText} — Hand #${state.handNumber} Over! ${pushReason}`
-    : `${lastMoveText} — Hand #${state.handNumber} Over! Highest score (${highestScore} pts): ${losers.join(', ')} put${losers.length === 1 ? 's' : ''} a quarter in the pot ($${(nextPotQuarters * 0.25).toFixed(2)}).`;
+    ? `${reasonPrefix} ${pushReason}`
+    : `${reasonPrefix} Highest score (${highestScore} pts): ${losers.join(', ')} put${losers.length === 1 ? 's' : ''} a quarter in the pot ($${(nextPotQuarters * 0.25).toFixed(2)}).`;
 
   return {
     ...state,
@@ -388,6 +396,7 @@ function resolveKingsCornersHandEnd(
     lastHandSummary: {
       handNumber: state.handNumber,
       knockerId: state.knockerId ?? activePlayerIds[0]!,
+      endedByDeckExhausted,
       highestScore,
       lowestScore,
       scoresByPlayer,
@@ -472,24 +481,9 @@ export function applyKingsCornersAction(
     }
   }
 
-  // 2. Handle Drawing a card from the Deck
+  // 2. Handle Drawing a card from the Deck (Do NOT reshuffle discard pile when deck is exhausted)
   if (action.type === 'KC_DRAW_DECK') {
-    let currentDrawPile = [...state.drawPile];
-    let currentDiscardPile = [...state.discardPile];
-    let nextPrng = state.prng;
-
-    if (currentDrawPile.length === 0 && currentDiscardPile.length > 1) {
-      const topDiscard = currentDiscardPile[currentDiscardPile.length - 1]!;
-      const recyclable = currentDiscardPile.slice(0, -1);
-      const recycleZone = new CardZone<StandardCard>({
-        id: 'recycle',
-        initialCards: recyclable,
-      });
-      nextPrng = recycleZone.shuffle(nextPrng);
-      currentDrawPile = [...recycleZone.getCards()];
-      currentDiscardPile = [topDiscard];
-    }
-
+    const currentDrawPile = [...state.drawPile];
     const drawnCard = currentDrawPile.shift()!;
     nextPlayers[playerId] = {
       ...actingPlayer,
@@ -500,10 +494,8 @@ export function applyKingsCornersAction(
       ...state,
       turnStep: 'DECIDING_DRAWN_CARD',
       drawPile: currentDrawPile,
-      discardPile: currentDiscardPile,
       pendingDrawnCard: drawnCard,
       players: nextPlayers,
-      prng: nextPrng,
       lastActionSummary: `${playerId} drew a card from the deck and is deciding whether to swap or discard it.`,
     };
   }
@@ -511,6 +503,7 @@ export function applyKingsCornersAction(
   // 3. Actions that complete a player's turn (KC_USE_DRAWN, KC_DISCARD_DRAWN, KC_TAKE_DISCARD, KC_KNOCK)
   let nextDiscardPile = [...state.discardPile];
   let nextKnockerId = state.knockerId;
+  let nextLastSwappedMove = state.lastSwappedMove ?? null;
   let moveDescription = '';
 
   if (action.type === 'KC_USE_DRAWN') {
@@ -529,14 +522,17 @@ export function applyKingsCornersAction(
     nextPlayers[playerId] = {
       ...actingPlayer,
       cards: updatedCards,
+      lastSwappedSlot: slot,
       lastActionLabel: `Swapped Slot #${slot + 1} (Discarded ${formatCardLabel(replacedCard)})`,
     };
+    nextLastSwappedMove = { playerId, slotIndex: slot };
     moveDescription = `${playerId} replaced card #${slot + 1} with their drawn card and discarded ${formatCardLabel(replacedCard)}.`;
   } else if (action.type === 'KC_DISCARD_DRAWN') {
     const drawn = state.pendingDrawnCard!;
     nextDiscardPile.push(drawn);
     nextPlayers[playerId] = {
       ...actingPlayer,
+      lastSwappedSlot: null,
       lastActionLabel: `Discarded Drawn ${formatCardLabel(drawn)}`,
     };
     moveDescription = `${playerId} discarded their drawn card (${formatCardLabel(drawn)}).`;
@@ -556,13 +552,16 @@ export function applyKingsCornersAction(
     nextPlayers[playerId] = {
       ...actingPlayer,
       cards: updatedCards,
+      lastSwappedSlot: slot,
       lastActionLabel: `Took ${formatCardLabel(takenDiscard)} for Slot #${slot + 1}`,
     };
+    nextLastSwappedMove = { playerId, slotIndex: slot };
     moveDescription = `${playerId} took ${formatCardLabel(takenDiscard)} from the discard pile for slot #${slot + 1} and discarded ${formatCardLabel(replacedCard)}.`;
   } else if (action.type === 'KC_KNOCK') {
     nextKnockerId = playerId;
     nextPlayers[playerId] = {
       ...actingPlayer,
+      lastSwappedSlot: null,
       lastActionLabel: '🔔 KNOCKED!',
     };
     moveDescription = `🔔 ${playerId} KNOCKED! Every other player gets one final turn.`;
@@ -576,17 +575,23 @@ export function applyKingsCornersAction(
   );
   const nextActivePlayerId = state.playerOrder[nextActiveIndex]!;
 
-  // If play has circled back to the player who knocked, the hand ends immediately!
-  if (nextKnockerId !== null && nextActivePlayerId === nextKnockerId) {
+  // If play has circled back to the player who knocked OR the draw deck is exhausted, the hand ends immediately!
+  const circledBackToKnocker =
+    nextKnockerId !== null && nextActivePlayerId === nextKnockerId;
+  const deckExhausted = state.drawPile.length === 0;
+
+  if (circledBackToKnocker || deckExhausted) {
     return resolveKingsCornersHandEnd(
       {
         ...state,
         knockerId: nextKnockerId,
         discardPile: nextDiscardPile,
         pendingDrawnCard: null,
+        lastSwappedMove: nextLastSwappedMove,
       },
       nextPlayers,
-      moveDescription
+      moveDescription,
+      deckExhausted && !circledBackToKnocker
     );
   }
 
@@ -600,6 +605,7 @@ export function applyKingsCornersAction(
     pendingDrawnCard: null,
     players: nextPlayers,
     lastActionSummary: moveDescription,
+    lastSwappedMove: nextLastSwappedMove,
   };
 }
 
@@ -642,6 +648,7 @@ function buildSanitizedKingsCornersPlayer(
     readyAfterPeek: p.readyAfterPeek,
     lastActionLabel: p.lastActionLabel,
     lastHandScore: p.lastHandScore,
+    lastSwappedSlot: p.lastSwappedSlot ?? null,
   };
 }
 
@@ -705,6 +712,7 @@ export function getKingsCornersPlayerPerspective(
     winnerId: state.winnerId,
     lastActionSummary: state.lastActionSummary,
     lastHandSummary: state.lastHandSummary,
+    lastSwappedMove: state.lastSwappedMove ?? null,
   };
 }
 
