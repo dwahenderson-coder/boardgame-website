@@ -8,7 +8,8 @@ export type GameId =
   | 'holdem'
   | 'euchre'
   | 'cribbage'
-  | 'kings_corners';
+  | 'kings_corners'
+  | 'dominion';
 
 export interface GameColorDefinition {
   readonly id: string;

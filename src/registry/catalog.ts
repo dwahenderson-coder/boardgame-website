@@ -343,6 +343,34 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
       },
     ],
   },
+  {
+    id: 'dominion',
+    category: 'card',
+    icon: '🏰',
+    name: 'Dominion',
+    subtitle: 'Classic Deck-Building Kingdom Engine',
+    description:
+      'Start with Coppers and Estates, draft Action, Treasure, and Victory cards from 10 Kingdom Supply piles, defend with Moats, and claim Provinces.',
+    minPlayers: 2,
+    maxPlayers: 4,
+    estimatedMinutes: 30,
+    mechanicsLabel: 'Deck Cycling, Action Chains & Supply Drafting',
+    badgeColor: 'amber',
+    availableColors: [
+      STANDARD_COLORS['red']!,
+      STANDARD_COLORS['blue']!,
+      STANDARD_COLORS['green']!,
+      STANDARD_COLORS['yellow']!,
+    ],
+    expansions: [
+      {
+        id: 'dominion_chapel_witch_gardens',
+        name: 'Intrigue / Base Extended Kingdom (Chapel, Witch & Gardens)',
+        description:
+          'Replaces Merchant, Mine, and Workshop with Chapel (trash up to 4 cards), Witch (+2 Cards & Curse attack), and Gardens (1 VP per 10 cards owned).',
+      },
+    ],
+  },
 ] as const;
 
 export const GAME_CATALOG_BY_ID: Readonly<Record<GameId, GameDefinition>> =

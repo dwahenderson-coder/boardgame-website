@@ -1,6 +1,11 @@
 import { customAlphabet } from 'nanoid';
 import { CatanGameState } from '../games/catan/index.js';
 import { CribbageGameState } from '../games/cribbage/index.js';
+import {
+  calculatePlayerVictoryPoints,
+  DominionGameState,
+  getAllOwnedCards,
+} from '../games/dominion/index.js';
 import { EuchreGameState } from '../games/euchre/index.js';
 import { KingsCornersGameState } from '../games/kings-corners/index.js';
 import {
@@ -428,6 +433,28 @@ export class RoomManager {
             ticketPoints: 0,
             totalScore: p.quarters,
             trainsRemaining: p.lastHandScore ?? 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'dominion' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'dominion')
+    ) {
+      const domState = room.gameState as DominionGameState;
+      return domState.playerOrder
+        .map((playerId) => {
+          const p = domState.players[playerId]!;
+          const vp = calculatePlayerVictoryPoints(p);
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: vp,
+            ticketPoints: 0,
+            totalScore: vp,
+            trainsRemaining: getAllOwnedCards(p).length,
             tickets: [],
           };
         })

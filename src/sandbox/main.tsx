@@ -11,6 +11,12 @@ import {
   CribbageSanitizedGameState,
 } from '../games/cribbage/index.js';
 import {
+  calculatePlayerVictoryPoints as calculateDominionVP,
+  DominionGameState,
+  getAllOwnedCards as getAllDominionCards,
+  SanitizedDominionState,
+} from '../games/dominion/index.js';
+import {
   EuchreGameState,
   EuchreSanitizedGameState,
 } from '../games/euchre/index.js';
@@ -78,6 +84,7 @@ import {
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
 import { CribbageBoard } from './CribbageBoard.js';
+import { DominionBoard } from './DominionBoard.js';
 import { EuchreBoard } from './EuchreBoard.js';
 import { GameLobby } from './GameLobby.js';
 import { HoldemBoard } from './HoldemBoard.js';
@@ -283,6 +290,8 @@ export const SandboxApp: React.FC = () => {
     'gameId' in activeSanitized && activeSanitized.gameId === 'cribbage';
   const isKingsCornersActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'kings_corners';
+  const isDominionActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'dominion';
   const isStockpileActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'stockpile';
   const isPowerGridActive =
@@ -305,6 +314,9 @@ export const SandboxApp: React.FC = () => {
     : null;
   const kingsCornersSanitized = isKingsCornersActive
     ? (activeSanitized as KingsCornersSanitizedGameState)
+    : null;
+  const dominionSanitized = isDominionActive
+    ? (activeSanitized as SanitizedDominionState)
     : null;
   const stockpileSanitized = isStockpileActive
     ? (activeSanitized as StockpileSanitizedGameState)
@@ -470,6 +482,24 @@ export const SandboxApp: React.FC = () => {
             ticketPoints: 0,
             totalScore: p.quarters,
             trainsRemaining: p.lastHandScore ?? 0,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'dominion') {
+      const ds = localGameState as DominionGameState;
+      return ds.playerOrder
+        .map((pid) => {
+          const p = ds.players[pid]!;
+          const vp = calculateDominionVP(p);
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: vp,
+            ticketPoints: 0,
+            totalScore: vp,
+            trainsRemaining: getAllDominionCards(p).length,
             tickets: [],
           };
         })
@@ -1492,7 +1522,17 @@ export const SandboxApp: React.FC = () => {
           {/* =================================================================
               DYNAMIC BOARD COMPONENT LOADER (`GameContainer`)
              ================================================================= */}
-          {kingsCornersSanitized ? (
+          {dominionSanitized ? (
+            /* Mount <DominionBoard /> when `selectedGameId === 'dominion'` */
+            <DominionBoard
+              gameState={dominionSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              sendAction={(action) =>
+                dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : kingsCornersSanitized ? (
             /* Mount <KingsCornersBoard /> when `selectedGameId === 'kings_corners'` */
             <KingsCornersBoard
               gameState={kingsCornersSanitized}

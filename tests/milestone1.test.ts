@@ -878,6 +878,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'euchre',
         'cribbage',
         'kings_corners',
+        'dominion',
       ]);
     });
 
@@ -1341,6 +1342,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'euchre',
         'cribbage',
         'kings_corners',
+        'dominion',
       ]);
 
       // Catan base bounds (3-4 players) vs 5-6 Player Extension override (3-6 players)

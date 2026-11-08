@@ -29,6 +29,17 @@ import {
   validateCribbageAction,
 } from './cribbage/index.js';
 import {
+  applyDominionAction,
+  calculateDominionFinalScores,
+  DEFAULT_BASE_KINGDOM_CARD_IDS,
+  DominionAction,
+  DominionGameState,
+  getDominionPlayerPerspective,
+  initDominionGame,
+  SanitizedDominionState,
+  validateDominionAction,
+} from './dominion/index.js';
+import {
   applyEuchreAction,
   calculateEuchreFinalScores,
   EuchreAction,
@@ -102,7 +113,8 @@ export type AnyGameState =
   | HoldemGameState
   | EuchreGameState
   | CribbageGameState
-  | KingsCornersGameState;
+  | KingsCornersGameState
+  | DominionGameState;
 
 export type AnySanitizedGameState =
   | TTRSanitizedGameState
@@ -112,7 +124,8 @@ export type AnySanitizedGameState =
   | HoldemSanitizedGameState
   | EuchreSanitizedGameState
   | CribbageSanitizedGameState
-  | KingsCornersSanitizedGameState;
+  | KingsCornersSanitizedGameState
+  | SanitizedDominionState;
 
 export type AnyGameAction =
   | TTRAction
@@ -122,7 +135,8 @@ export type AnyGameAction =
   | HoldemAction
   | EuchreAction
   | CribbageAction
-  | KingsCornersAction;
+  | KingsCornersAction
+  | DominionAction;
 
 export interface GameMetadata {
   readonly id: GameId;
@@ -315,5 +329,36 @@ export const GameRegistry: Readonly<
     applyAction: applyKingsCornersAction,
     getPlayerPerspective: getKingsCornersPlayerPerspective,
     calculateFinalScores: calculateKingsCornersFinalScores,
+  },
+  dominion: {
+    ...findMetadata('dominion'),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) => {
+      const useExtended = options?.selectedExpansions?.includes(
+        'dominion_chapel_witch_gardens'
+      );
+      const kingdomCards = useExtended
+        ? [
+            'cellar',
+            'chapel',
+            'market',
+            'militia',
+            'moat',
+            'remodel',
+            'smithy',
+            'village',
+            'witch',
+            'gardens',
+          ]
+        : DEFAULT_BASE_KINGDOM_CARD_IDS;
+      return initDominionGame(playerIds, seed, { kingdomCards });
+    },
+    validateAction: validateDominionAction,
+    applyAction: applyDominionAction,
+    getPlayerPerspective: getDominionPlayerPerspective,
+    calculateFinalScores: calculateDominionFinalScores,
   },
 };
