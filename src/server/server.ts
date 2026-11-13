@@ -313,6 +313,53 @@ io.on('connection', (socket) => {
 
     const activeGameId = ctx.room.configuredGameId ?? ctx.room.selectedGameId;
     const catalogEntry = GAME_CATALOG_BY_ID[activeGameId];
+
+    // Special handling for Dominion Kingdom Setup tokens (`mode:*`, `preset:*`, `card:*`)
+    if (
+      activeGameId === 'dominion' &&
+      (expansionId.startsWith('mode:') ||
+        expansionId.startsWith('preset:') ||
+        expansionId.startsWith('card:'))
+    ) {
+      let nextExpansions = [...ctx.room.selectedExpansions];
+      if (expansionId.startsWith('mode:')) {
+        nextExpansions = [
+          ...nextExpansions.filter((id) => !id.startsWith('mode:')),
+          expansionId,
+        ];
+      } else if (expansionId.startsWith('preset:')) {
+        nextExpansions = [
+          ...nextExpansions.filter(
+            (id) => !id.startsWith('preset:') && !id.startsWith('mode:')
+          ),
+          'mode:preset',
+          expansionId,
+        ];
+      } else if (expansionId.startsWith('card:')) {
+        if (nextExpansions.includes(expansionId)) {
+          nextExpansions = nextExpansions.filter((id) => id !== expansionId);
+        } else {
+          const currentCards = nextExpansions.filter((id) =>
+            id.startsWith('card:')
+          );
+          if (currentCards.length >= 10) {
+            socket.emit('action_error', {
+              message: 'You can select at most 10 Kingdom cards.',
+            });
+            return;
+          }
+          nextExpansions = [
+            ...nextExpansions.filter((id) => !id.startsWith('mode:')),
+            'mode:custom',
+            expansionId,
+          ];
+        }
+      }
+      ctx.room.selectedExpansions = nextExpansions;
+      broadcastRoomLobby(ctx.room);
+      return;
+    }
+
     const expansion = catalogEntry.expansions.find(
       (e) => e.id === expansionId
     );
@@ -529,6 +576,21 @@ io.on('connection', (socket) => {
         if (!settings.ready) {
           socket.emit('action_error', {
             message: `Waiting for ${p.name} to mark Ready.`,
+          });
+          return;
+        }
+      }
+
+      if (
+        gameId === 'dominion' &&
+        ctx.room.selectedExpansions.includes('mode:custom')
+      ) {
+        const selectedCardCount = ctx.room.selectedExpansions.filter((id) =>
+          id.startsWith('card:')
+        ).length;
+        if (selectedCardCount !== 10) {
+          socket.emit('action_error', {
+            message: `Please select 10 Kingdom cards before starting (${selectedCardCount}/10 selected).`,
           });
           return;
         }

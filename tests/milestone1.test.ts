@@ -866,19 +866,19 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
   // ---------------------------------------------------------------------------
   describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
-    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
       expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'ttr',
         'catan',
         'stockpile',
         'power_grid',
+        'dominion',
       ]);
       expect(CARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'holdem',
         'euchre',
         'cribbage',
         'kings_corners',
-        'dominion',
       ]);
     });
 
@@ -1336,13 +1336,13 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'catan',
         'stockpile',
         'power_grid',
+        'dominion',
       ]);
       expect(CARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
         'holdem',
         'euchre',
         'cribbage',
         'kings_corners',
-        'dominion',
       ]);
 
       // Catan base bounds (3-4 players) vs 5-6 Player Extension override (3-6 players)

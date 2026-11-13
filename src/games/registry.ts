@@ -31,11 +31,11 @@ import {
 import {
   applyDominionAction,
   calculateDominionFinalScores,
-  DEFAULT_BASE_KINGDOM_CARD_IDS,
   DominionAction,
   DominionGameState,
   getDominionPlayerPerspective,
   initDominionGame,
+  resolveDominionKingdomCardsFromExpansions,
   SanitizedDominionState,
   validateDominionAction,
 } from './dominion/index.js';
@@ -337,23 +337,10 @@ export const GameRegistry: Readonly<
       seed: number,
       options?: GameSetupOptions
     ) => {
-      const useExtended = options?.selectedExpansions?.includes(
-        'dominion_chapel_witch_gardens'
+      const kingdomCards = resolveDominionKingdomCardsFromExpansions(
+        options?.selectedExpansions,
+        seed
       );
-      const kingdomCards = useExtended
-        ? [
-            'cellar',
-            'chapel',
-            'market',
-            'militia',
-            'moat',
-            'remodel',
-            'smithy',
-            'village',
-            'witch',
-            'gardens',
-          ]
-        : DEFAULT_BASE_KINGDOM_CARD_IDS;
       return initDominionGame(playerIds, seed, { kingdomCards });
     },
     validateAction: validateDominionAction,

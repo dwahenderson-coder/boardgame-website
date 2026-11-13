@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALL_BASE_KINGDOM_CARD_IDS,
   applyAction,
   calculateDominionFinalScores,
   calculatePlayerVictoryPoints,
   DOMINION_CARDS,
+  DOMINION_PRESET_GAMES,
   drawCardsForPlayer,
   getPlayerPerspective,
   initGame,
+  resolveDominionKingdomCardsFromExpansions,
   validateAction,
 } from './index.js';
 
@@ -514,6 +517,139 @@ describe('Dominion Core Engine (Base Game 2-4P State Machine, Deck Cycling & Car
       expect(state.supply['market']).toBe(0);
       expect(state.isGameOver).toBe(true);
       expect(state.phase).toBe('GAME_OVER');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. Pre-Set Games, Random 10 Cards, Custom 10 Cards & Militia Waiting Display
+  // ---------------------------------------------------------------------------
+  describe('7. Pre-Set Games, Random 10 Cards, Custom 10 Cards & Militia Waiting Display', () => {
+    it('supports all 26 Base Game Kingdom cards and all 6 Pre-Set games with Base Game as default', () => {
+      expect(ALL_BASE_KINGDOM_CARD_IDS).toHaveLength(26);
+      expect(DOMINION_PRESET_GAMES.map((p) => p.name)).toEqual([
+        'Base Game',
+        'Size Distortion',
+        'Deck Top',
+        'Sleight of Hand',
+        'Improvements',
+        'Silver & Gold',
+      ]);
+
+      // Default selection resolves to Base Game
+      expect(resolveDominionKingdomCardsFromExpansions([], 42)).toEqual([
+        'cellar',
+        'market',
+        'merchant',
+        'militia',
+        'mine',
+        'moat',
+        'remodel',
+        'smithy',
+        'village',
+        'workshop',
+      ]);
+
+      // Size Distortion preset
+      expect(
+        resolveDominionKingdomCardsFromExpansions(
+          ['mode:preset', 'preset:size_distortion'],
+          42
+        )
+      ).toEqual([
+        'artisan',
+        'bandit',
+        'bureaucrat',
+        'chapel',
+        'festival',
+        'gardens',
+        'sentry',
+        'throne_room',
+        'witch',
+        'workshop',
+      ]);
+
+      // Random mode selects 10 distinct cards from the 26 Base Game Kingdom cards
+      const random10 = resolveDominionKingdomCardsFromExpansions(
+        ['mode:random'],
+        20261108
+      );
+      expect(random10).toHaveLength(10);
+      expect(new Set(random10).size).toBe(10);
+      for (const cid of random10) {
+        expect(ALL_BASE_KINGDOM_CARD_IDS).toContain(cid);
+      }
+
+      // Custom mode selects the 10 chosen cards
+      const customTokens = [
+        'mode:custom',
+        ...ALL_BASE_KINGDOM_CARD_IDS.slice(0, 10).map((cid) => `card:${cid}`),
+      ];
+      expect(resolveDominionKingdomCardsFromExpansions(customTokens, 99)).toEqual(
+        ALL_BASE_KINGDOM_CARD_IDS.slice(0, 10)
+      );
+    });
+
+    it('includes Militia waiting message for single or multiple non-immune players', () => {
+      // 3-player game: p2 has Moat (immune), p3 has 5 Coppers (1 player being waited on)
+      let state = initGame(['p1', 'p2', 'p3'], 808);
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            hand: [c('militia')],
+            actions: 1,
+          },
+          p2: {
+            ...state.players['p2']!,
+            hand: [c('moat'), c('copper'), c('copper'), c('copper'), c('copper')],
+          },
+          p3: {
+            ...state.players['p3']!,
+            hand: [
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+            ],
+          },
+        },
+      };
+
+      const afterSingleTarget = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'militia',
+      });
+      expect(afterSingleTarget.lastActionSummary).toContain(
+        'Waiting for "p3" to discard.'
+      );
+
+      // Now test when both p2 and p3 have 5 Coppers and no Moat (2 players being waited on)
+      const stateTwoTargets = {
+        ...state,
+        players: {
+          ...state.players,
+          p2: {
+            ...state.players['p2']!,
+            hand: [
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+            ],
+          },
+        },
+      };
+      const afterMultiTarget = applyAction(stateTwoTargets, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'militia',
+      });
+      expect(afterMultiTarget.lastActionSummary).toContain(
+        'Waiting for other players to discard.'
+      );
     });
   });
 });

@@ -106,6 +106,8 @@ export const DominionBoard: React.FC<DominionBoardProps> = ({
     if (isMyPendingInteraction && pending) {
       if (
         pending.promptType === 'DISCARD_FOR_DRAW' ||
+        pending.promptType === 'DISCARD_EXACT_COUNT' ||
+        pending.promptType === 'PUT_CARD_ONTO_DECK' ||
         pending.promptType === 'TRASH_UP_TO_N' ||
         pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD'
       ) {
@@ -197,20 +199,50 @@ export const DominionBoard: React.FC<DominionBoardProps> = ({
         <div className="w-full max-w-6xl mx-auto p-3.5 rounded-2xl bg-purple-950/90 border-2 border-purple-400 shadow-xl flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-0.5">
             <div className="text-xs font-black uppercase tracking-wider text-purple-200">
-              ⚡ Interactive Resolution Required ({pending.sourceCard.name}) — Target:{' '}
-              {formatName(pending.playerId)}
+              {!isMyPendingInteraction &&
+              pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD' ? (
+                1 + (pending.remainingTargetQueue?.length ?? 0) > 1 ? (
+                  '⚔️ Militia Played — Waiting for other players to discard.'
+                ) : (
+                  `⚔️ Militia Played — Waiting for "${
+                    playerNames[pending.playerId] ?? pending.playerId
+                  }" to discard.`
+                )
+              ) : (
+                <>
+                  ⚡ Interactive Resolution Required ({pending.sourceCard.name}) —
+                  Target: {formatName(pending.playerId)}
+                </>
+              )}
             </div>
             <div className="text-xs text-slate-200">
-              {pending.promptType === 'DISCARD_FOR_DRAW' &&
-                'Select any number of cards from your hand to discard, then click Confirm to draw that many.'}
-              {pending.promptType === 'TRASH_UP_TO_N' &&
-                `Select up to ${pending.maxCount} cards from your hand to trash, then click Confirm.`}
-              {pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD' &&
-                `Select ${pending.minCount} card(s) from your hand to discard down to 3 (or reveal Moat if held).`}
-              {pending.promptType === 'GAIN_COSTING_UP_TO' &&
-                `Click a card in the Supply costing up to $${pending.maxCost ?? 4} to gain it.`}
-              {pending.promptType === 'TRASH_AND_UPGRADE' &&
-                `Step 1: Click 1 ${pending.restrictedCardKind ?? ''} card in your hand to trash, then click a Supply card costing up to +$${pending.upgradeMaxCostDelta ?? 2} more!`}
+              {!isMyPendingInteraction &&
+              pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD' ? (
+                1 + (pending.remainingTargetQueue?.length ?? 0) > 1 ? (
+                  'Waiting for other players to discard.'
+                ) : (
+                  `Waiting for "${
+                    playerNames[pending.playerId] ?? pending.playerId
+                  }" to discard.`
+                )
+              ) : (
+                <>
+                  {pending.promptType === 'DISCARD_FOR_DRAW' &&
+                    'Select any number of cards from your hand to discard, then click Confirm to draw that many.'}
+                  {pending.promptType === 'DISCARD_EXACT_COUNT' &&
+                    `Select ${pending.minCount} card(s) from your hand to discard, then click Confirm.`}
+                  {pending.promptType === 'PUT_CARD_ONTO_DECK' &&
+                    `Select ${pending.minCount} card(s) from your hand to put onto your deck, then click Confirm.`}
+                  {pending.promptType === 'TRASH_UP_TO_N' &&
+                    `Select up to ${pending.maxCount} cards from your hand to trash, then click Confirm.`}
+                  {pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD' &&
+                    `Select ${pending.minCount} card(s) from your hand to discard down to 3 (or reveal Moat if held).`}
+                  {pending.promptType === 'GAIN_COSTING_UP_TO' &&
+                    `Click a card in the Supply costing up to $${pending.maxCost ?? 4} to gain it.`}
+                  {pending.promptType === 'TRASH_AND_UPGRADE' &&
+                    `Step 1: Click 1 ${pending.restrictedCardKind ?? ''} card in your hand to trash, then click a Supply card costing up to +$${pending.upgradeMaxCostDelta ?? 2} more!`}
+                </>
+              )}
             </div>
           </div>
 
@@ -233,6 +265,8 @@ export const DominionBoard: React.FC<DominionBoardProps> = ({
                 )}
 
               {(pending.promptType === 'DISCARD_FOR_DRAW' ||
+                pending.promptType === 'DISCARD_EXACT_COUNT' ||
+                pending.promptType === 'PUT_CARD_ONTO_DECK' ||
                 pending.promptType === 'TRASH_UP_TO_N' ||
                 pending.promptType === 'ATTACK_DEFENSE_OR_DISCARD') && (
                 <button

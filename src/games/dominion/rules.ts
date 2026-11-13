@@ -215,6 +215,8 @@ export function validateAction(
 
     switch (pending.promptType) {
       case 'DISCARD_FOR_DRAW':
+      case 'DISCARD_EXACT_COUNT':
+      case 'PUT_CARD_ONTO_DECK':
       case 'TRASH_UP_TO_N': {
         const selected = action.selectedCardIds ?? [];
         if (
@@ -585,6 +587,40 @@ export function applyAction(
         };
       }
 
+      case 'DISCARD_EXACT_COUNT': {
+        const selected = action.selectedCardIds ?? [];
+        const removed = removeCardsFromHand(targetPlayer.hand, selected);
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+          discard: [...targetPlayer.discard, ...removed.removedCards],
+        };
+
+        return {
+          ...state,
+          players: nextPlayers,
+          pendingInteraction: null,
+          lastActionSummary: `${pending.playerId} discarded ${removed.removedCards.length} card(s) for ${pending.sourceCard.name}.`,
+        };
+      }
+
+      case 'PUT_CARD_ONTO_DECK': {
+        const selected = action.selectedCardIds ?? [];
+        const removed = removeCardsFromHand(targetPlayer.hand, selected);
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+          deck: [...removed.removedCards, ...targetPlayer.deck],
+        };
+
+        return {
+          ...state,
+          players: nextPlayers,
+          pendingInteraction: null,
+          lastActionSummary: `${pending.playerId} placed ${removed.removedCards.length} card(s) from hand onto their deck (${pending.sourceCard.name}).`,
+        };
+      }
+
       case 'TRASH_UP_TO_N': {
         const selected = action.selectedCardIds ?? [];
         const removed = removeCardsFromHand(targetPlayer.hand, selected);
@@ -611,10 +647,19 @@ export function applyAction(
             pending.sourceCard,
             queue
           );
+          const waitingCount = nextPending
+            ? 1 + (nextPending.remainingTargetQueue?.length ?? 0)
+            : 0;
+          const waitingSuffix =
+            waitingCount === 1 && nextPending
+              ? ` Waiting for "${nextPending.playerId}" to discard.`
+              : waitingCount > 1
+              ? ' Waiting for other players to discard.'
+              : '';
           return {
             ...state,
             pendingInteraction: nextPending,
-            lastActionSummary: `${pending.playerId} revealed Moat and is unaffected by ${pending.sourceCard.name}!`,
+            lastActionSummary: `${pending.playerId} revealed Moat and is unaffected by ${pending.sourceCard.name}!${waitingSuffix}`,
           };
         }
 
@@ -631,12 +676,21 @@ export function applyAction(
           pending.sourceCard,
           queue
         );
+        const waitingCount = nextPending
+          ? 1 + (nextPending.remainingTargetQueue?.length ?? 0)
+          : 0;
+        const waitingSuffix =
+          waitingCount === 1 && nextPending
+            ? ` Waiting for "${nextPending.playerId}" to discard.`
+            : waitingCount > 1
+            ? ' Waiting for other players to discard.'
+            : '';
 
         return {
           ...state,
           players: nextPlayers,
           pendingInteraction: nextPending,
-          lastActionSummary: `${pending.playerId} discarded ${removed.removedCards.length} card(s) down to 3 in hand (${pending.sourceCard.name}).`,
+          lastActionSummary: `${pending.playerId} discarded ${removed.removedCards.length} card(s) down to 3 in hand (${pending.sourceCard.name}).${waitingSuffix}`,
         };
       }
 
@@ -663,11 +717,24 @@ export function applyAction(
           };
         }
 
+        // If this was Artisan (gain to hand costing up to 5), follow up with PUT_CARD_ONTO_DECK
+        const nextPending: PendingInteraction | null =
+          pending.sourceCard.customEffectId === 'ARTISAN' &&
+          nextPlayers[pending.playerId]!.hand.length > 0
+            ? {
+                playerId: pending.playerId,
+                sourceCard: pending.sourceCard,
+                promptType: 'PUT_CARD_ONTO_DECK',
+                minCount: 1,
+                maxCount: 1,
+              }
+            : null;
+
         const updatedState: DominionGameState = {
           ...state,
           players: nextPlayers,
           supply: nextSupply,
-          pendingInteraction: null,
+          pendingInteraction: nextPending,
         };
         return finalizeStateIfGameOver(
           updatedState,
@@ -790,10 +857,120 @@ export function applyAction(
       [playerId]: updatedPlayer,
     };
     const nextSupply: Record<string, number> = { ...state.supply };
+    let nextTrash = [...state.trash];
     let pendingInteraction: PendingInteraction | null = null;
     let summaryText = `${playerId} played ${card.name}.`;
 
     switch (card.customEffectId) {
+      case 'ARTISAN': {
+        const hasGainable = Object.entries(nextSupply).some(([cid, count]) => {
+          const def = getDominionCard(cid);
+          return count > 0 && def !== undefined && def.cost <= 5;
+        });
+        if (hasGainable) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'GAIN_COSTING_UP_TO',
+            minCount: 1,
+            maxCount: 1,
+            maxCost: 5,
+            gainDestination: 'HAND',
+          };
+        } else if (updatedPlayer.hand.length > 0) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'PUT_CARD_ONTO_DECK',
+            minCount: 1,
+            maxCount: 1,
+          };
+        }
+        break;
+      }
+
+      case 'BANDIT': {
+        if ((nextSupply['gold'] ?? 0) > 0) {
+          nextSupply['gold'] = (nextSupply['gold'] ?? 1) - 1;
+          updatedPlayer = {
+            ...updatedPlayer,
+            discard: [...updatedPlayer.discard, DOMINION_CARDS['gold']!],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ' Gained a Gold.';
+        }
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId = state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          const hasMoat = opp.hand.some(
+            (c) => c.id === 'moat' || c.customEffectId === 'MOAT'
+          );
+          if (hasMoat) {
+            summaryText += ` (${oppId} revealed Moat!)`;
+            continue;
+          }
+          // Reveal up to 2 cards from opp's deck (recycling if needed)
+          const beforeHandLen = opp.hand.length;
+          const drawnRes = drawCardsForPlayer(opp, 2, nextPrng);
+          nextPrng = drawnRes.prng;
+          const revealed = drawnRes.drawn;
+          const restoredHand = drawnRes.player.hand.slice(0, beforeHandLen);
+          // Find a non-Copper Treasure (prefer trashing Silver over Gold)
+          const nonCopperIdx = revealed.findIndex(
+            (c) => c.types.includes('TREASURE') && c.id !== 'copper'
+          );
+          const toDiscard: Card[] = [];
+          for (let i = 0; i < revealed.length; i++) {
+            if (i === nonCopperIdx) {
+              nextTrash = [...nextTrash, revealed[i]!];
+            } else {
+              toDiscard.push(revealed[i]!);
+            }
+          }
+          nextPlayers[oppId] = {
+            ...drawnRes.player,
+            hand: restoredHand,
+            discard: [...drawnRes.player.discard, ...toDiscard],
+          };
+        }
+        break;
+      }
+
+      case 'BUREAUCRAT': {
+        if ((nextSupply['silver'] ?? 0) > 0) {
+          nextSupply['silver'] = (nextSupply['silver'] ?? 1) - 1;
+          updatedPlayer = {
+            ...updatedPlayer,
+            deck: [DOMINION_CARDS['silver']!, ...updatedPlayer.deck],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ' Gained a Silver onto deck.';
+        }
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId = state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          const hasMoat = opp.hand.some(
+            (c) => c.id === 'moat' || c.customEffectId === 'MOAT'
+          );
+          if (hasMoat) {
+            summaryText += ` (${oppId} revealed Moat!)`;
+            continue;
+          }
+          const victoryCard = opp.hand.find((c) => c.types.includes('VICTORY'));
+          if (victoryCard) {
+            const removedVic = removeCardsFromHand(opp.hand, [victoryCard.id]);
+            nextPlayers[oppId] = {
+              ...opp,
+              hand: removedVic.remainingHand,
+              deck: [...removedVic.removedCards, ...opp.deck],
+            };
+          }
+        }
+        break;
+      }
+
       case 'CELLAR': {
         if (updatedPlayer.hand.length > 0) {
           pendingInteraction = {
@@ -816,6 +993,191 @@ export function applyAction(
             minCount: 0,
             maxCount: Math.min(4, updatedPlayer.hand.length),
           };
+        }
+        break;
+      }
+
+      case 'COUNCIL_ROOM': {
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId = state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          const drawOpp = drawCardsForPlayer(opp, 1, nextPrng);
+          nextPlayers[oppId] = drawOpp.player;
+          nextPrng = drawOpp.prng;
+        }
+        summaryText += ' Each other player drew 1 card.';
+        break;
+      }
+
+      case 'HARBINGER': {
+        if (updatedPlayer.discard.length > 0) {
+          let bestIdx = 0;
+          for (let i = 1; i < updatedPlayer.discard.length; i++) {
+            if (updatedPlayer.discard[i]!.cost > updatedPlayer.discard[bestIdx]!.cost) {
+              bestIdx = i;
+            }
+          }
+          const chosen = updatedPlayer.discard[bestIdx]!;
+          const nextDiscard = updatedPlayer.discard.filter((_, idx) => idx !== bestIdx);
+          updatedPlayer = {
+            ...updatedPlayer,
+            discard: nextDiscard,
+            deck: [chosen, ...updatedPlayer.deck],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ` Put ${chosen.name} from discard onto deck.`;
+        }
+        break;
+      }
+
+      case 'LIBRARY': {
+        let safety = 0;
+        while (
+          updatedPlayer.hand.length < 7 &&
+          (updatedPlayer.deck.length > 0 || updatedPlayer.discard.length > 0) &&
+          safety < 40
+        ) {
+          const drawRes = drawCardsForPlayer(updatedPlayer, 1, nextPrng);
+          updatedPlayer = drawRes.player;
+          nextPrng = drawRes.prng;
+          safety += 1;
+        }
+        nextPlayers[playerId] = updatedPlayer;
+        break;
+      }
+
+      case 'MONEYLENDER': {
+        const hasCopper = updatedPlayer.hand.some((c) => c.id === 'copper');
+        if (hasCopper) {
+          const removedCopper = removeCardsFromHand(updatedPlayer.hand, ['copper']);
+          updatedPlayer = {
+            ...updatedPlayer,
+            hand: removedCopper.remainingHand,
+            coins: updatedPlayer.coins + 3,
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          nextTrash = [...nextTrash, ...removedCopper.removedCards];
+          summaryText += ' Trashed a Copper for +3 Coins.';
+        }
+        break;
+      }
+
+      case 'POACHER': {
+        let emptyPiles = 0;
+        for (const count of Object.values(nextSupply)) {
+          if (count <= 0) {
+            emptyPiles += 1;
+          }
+        }
+        if (emptyPiles > 0 && updatedPlayer.hand.length > 0) {
+          const reqCount = Math.min(emptyPiles, updatedPlayer.hand.length);
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'DISCARD_EXACT_COUNT',
+            minCount: reqCount,
+            maxCount: reqCount,
+          };
+        }
+        break;
+      }
+
+      case 'SENTRY': {
+        const beforeHandLen = updatedPlayer.hand.length;
+        const peekRes = drawCardsForPlayer(updatedPlayer, 2, nextPrng);
+        nextPrng = peekRes.prng;
+        const peeked = peekRes.drawn;
+        const restoredHand = peekRes.player.hand.slice(0, beforeHandLen);
+        const keptForDeck: Card[] = [];
+        for (const c of peeked) {
+          if (c.id === 'curse' || c.id === 'copper' || c.id === 'estate') {
+            nextTrash = [...nextTrash, c];
+          } else {
+            keptForDeck.push(c);
+          }
+        }
+        updatedPlayer = {
+          ...peekRes.player,
+          hand: restoredHand,
+          deck: [...keptForDeck, ...peekRes.player.deck],
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        break;
+      }
+
+      case 'THRONE_ROOM': {
+        const actionCardsInHand = updatedPlayer.hand.filter((c) =>
+          c.types.includes('ACTION')
+        );
+        if (actionCardsInHand.length > 0) {
+          actionCardsInHand.sort((a, b) => b.cost - a.cost);
+          const targetAction = actionCardsInHand[0]!;
+          const remTarget = removeCardsFromHand(updatedPlayer.hand, [
+            targetAction.id,
+          ]);
+          updatedPlayer = {
+            ...updatedPlayer,
+            hand: remTarget.remainingHand,
+            inPlay: [...updatedPlayer.inPlay, targetAction],
+            actions: updatedPlayer.actions + targetAction.actions * 2,
+            buys: updatedPlayer.buys + targetAction.buys * 2,
+            coins: updatedPlayer.coins + targetAction.coins * 2,
+            merchantsPlayedThisTurn:
+              targetAction.customEffectId === 'MERCHANT'
+                ? updatedPlayer.merchantsPlayedThisTurn + 2
+                : updatedPlayer.merchantsPlayedThisTurn,
+          };
+          if (targetAction.cards > 0) {
+            const drawTwice = drawCardsForPlayer(
+              updatedPlayer,
+              targetAction.cards * 2,
+              nextPrng
+            );
+            updatedPlayer = drawTwice.player;
+            nextPrng = drawTwice.prng;
+          }
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ` Played ${targetAction.name} twice!`;
+        }
+        break;
+      }
+
+      case 'VASSAL': {
+        const beforeHandLen = updatedPlayer.hand.length;
+        const topRes = drawCardsForPlayer(updatedPlayer, 1, nextPrng);
+        nextPrng = topRes.prng;
+        const revealedTop = topRes.drawn[0];
+        const restoredHand = topRes.player.hand.slice(0, beforeHandLen);
+        if (revealedTop) {
+          if (revealedTop.types.includes('ACTION')) {
+            updatedPlayer = {
+              ...topRes.player,
+              hand: restoredHand,
+              inPlay: [...topRes.player.inPlay, revealedTop],
+              actions: topRes.player.actions + revealedTop.actions,
+              buys: topRes.player.buys + revealedTop.buys,
+              coins: topRes.player.coins + revealedTop.coins,
+            };
+            if (revealedTop.cards > 0) {
+              const vassalDraw = drawCardsForPlayer(
+                updatedPlayer,
+                revealedTop.cards,
+                nextPrng
+              );
+              updatedPlayer = vassalDraw.player;
+              nextPrng = vassalDraw.prng;
+            }
+            summaryText += ` Discarded and played ${revealedTop.name}!`;
+          } else {
+            updatedPlayer = {
+              ...topRes.player,
+              hand: restoredHand,
+              discard: [...topRes.player.discard, revealedTop],
+            };
+            summaryText += ` Discarded ${revealedTop.name}.`;
+          }
+          nextPlayers[playerId] = updatedPlayer;
         }
         break;
       }
@@ -900,6 +1262,15 @@ export function applyAction(
         if (immuneNames.length > 0) {
           summaryText += ` (${immuneNames.join(', ')} revealed Moat and ignored the attack!)`;
         }
+        if (pendingInteraction) {
+          const waitingCount =
+            1 + (pendingInteraction.remainingTargetQueue?.length ?? 0);
+          if (waitingCount === 1) {
+            summaryText += ` Waiting for "${pendingInteraction.playerId}" to discard.`;
+          } else if (waitingCount > 1) {
+            summaryText += ' Waiting for other players to discard.';
+          }
+        }
         break;
       }
 
@@ -943,6 +1314,7 @@ export function applyAction(
       ...state,
       players: nextPlayers,
       supply: nextSupply,
+      trash: nextTrash,
       pendingInteraction,
       prng: nextPrng,
       lastActionSummary: summaryText,

@@ -819,6 +819,31 @@ export const SandboxApp: React.FC = () => {
 
   const handleLocalToggleExpansion = (expansionId: string) => {
     setLocalSelectedExpansions((prev) => {
+      if (localStagedGameDef.id === 'dominion') {
+        if (expansionId.startsWith('mode:')) {
+          const withoutMode = prev.filter((id) => !id.startsWith('mode:'));
+          return [...withoutMode, expansionId];
+        }
+        if (expansionId.startsWith('preset:')) {
+          const withoutPresetAndMode = prev.filter(
+            (id) => !id.startsWith('preset:') && !id.startsWith('mode:')
+          );
+          return [...withoutPresetAndMode, 'mode:preset', expansionId];
+        }
+        if (expansionId.startsWith('card:')) {
+          const exists = prev.includes(expansionId);
+          if (exists) {
+            return prev.filter((id) => id !== expansionId);
+          }
+          const currentCards = prev.filter((id) => id.startsWith('card:'));
+          if (currentCards.length >= 10) {
+            return prev;
+          }
+          const withoutMode = prev.filter((id) => !id.startsWith('mode:'));
+          return [...withoutMode, 'mode:custom', expansionId];
+        }
+      }
+
       const exists = prev.includes(expansionId);
       let next = exists
         ? prev.filter((id) => id !== expansionId)

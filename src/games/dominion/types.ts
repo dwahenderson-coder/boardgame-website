@@ -9,16 +9,27 @@ export type CardKind =
   | 'CURSE';
 
 export type DominionCustomEffectId =
+  | 'ARTISAN'
+  | 'BANDIT'
+  | 'BUREAUCRAT'
   | 'CELLAR'
   | 'CHAPEL'
+  | 'COUNCIL_ROOM'
+  | 'GARDENS'
+  | 'HARBINGER'
+  | 'LIBRARY'
   | 'MERCHANT'
   | 'MILITIA'
   | 'MINE'
   | 'MOAT'
+  | 'MONEYLENDER'
+  | 'POACHER'
   | 'REMODEL'
+  | 'SENTRY'
+  | 'THRONE_ROOM'
+  | 'VASSAL'
   | 'WITCH'
-  | 'WORKSHOP'
-  | 'GARDENS';
+  | 'WORKSHOP';
 
 export interface Card {
   readonly id: string;
@@ -45,7 +56,9 @@ export type InteractionPromptType =
   | 'TRASH_UP_TO_N'
   | 'ATTACK_DEFENSE_OR_DISCARD'
   | 'TRASH_AND_UPGRADE'
-  | 'GAIN_COSTING_UP_TO';
+  | 'GAIN_COSTING_UP_TO'
+  | 'PUT_CARD_ONTO_DECK'
+  | 'DISCARD_EXACT_COUNT';
 
 export interface PendingInteraction {
   readonly playerId: string;

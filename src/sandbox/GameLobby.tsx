@@ -1,5 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ALL_BASE_KINGDOM_CARD_IDS,
+  DOMINION_CARDS,
+  DOMINION_PRESET_GAMES,
+} from '../games/dominion/index.js';
+import {
   PlayerLobbySettings,
   RoomPlayerSummary,
 } from '../network/socketTypes.js';
@@ -158,11 +163,32 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       }
     }
 
+    if (
+      stagedGame.id === 'dominion' &&
+      selectedExpansions.includes('mode:custom')
+    ) {
+      const selectedCardCount = selectedExpansions.filter((e) =>
+        e.startsWith('card:')
+      ).length;
+      if (selectedCardCount !== 10) {
+        return {
+          canStart: false,
+          reason: `Dominion Custom Kingdom requires 10 cards selected (${selectedCardCount}/10 selected).`,
+        };
+      }
+    }
+
     return {
       canStart: true,
       reason: `All ${count} players ready — Launch ${stagedGame.name}!`,
     };
-  }, [stagedGame, connectedPlayers, effectiveBounds, playerSettings]);
+  }, [
+    stagedGame,
+    connectedPlayers,
+    effectiveBounds,
+    playerSettings,
+    selectedExpansions,
+  ]);
 
   const handleCopyInviteLink = () => {
     const inviteUrl = `${window.location.origin}/join/${roomId}`;
@@ -673,6 +699,229 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     })()}
                   </div>
                 </div>
+              ) : stagedGame.id === 'dominion' ? (
+                (() => {
+                  const activeMode: 'preset' | 'random' | 'custom' =
+                    selectedExpansions.includes('mode:random')
+                      ? 'random'
+                      : selectedExpansions.includes('mode:custom')
+                      ? 'custom'
+                      : 'preset';
+                  const presetToken = selectedExpansions.find((e) =>
+                    e.startsWith('preset:')
+                  );
+                  const activePresetId = presetToken
+                    ? presetToken.slice('preset:'.length)
+                    : 'base_game';
+                  const customSelectedCardIds = selectedExpansions
+                    .filter((e) => e.startsWith('card:'))
+                    .map((e) => e.slice('card:'.length));
+
+                  return (
+                    <div className="space-y-3.5">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
+                            🏰 Dominion Kingdom Card Setup
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {isHost ? 'Host Selection' : 'Synced with Host'}
+                          </span>
+                        </div>
+
+                        {/* Basic Supply Note */}
+                        <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-[10px] text-amber-200 mb-3">
+                          <strong>Included in All Games:</strong> Gold, Silver,
+                          Copper, Estate, Duchy, Province, and Curse.
+                        </div>
+
+                        {/* 3 Mode Tabs: Pre-Set Game (Default: Base Game), Random 10 Cards, Select 10 Cards */}
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost && activeMode !== 'preset') {
+                                onToggleExpansion('mode:preset');
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-center font-black text-[11px] transition ${
+                              activeMode === 'preset'
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 shadow'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            📋 Pre-Set Game
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost && activeMode !== 'random') {
+                                onToggleExpansion('mode:random');
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-center font-black text-[11px] transition ${
+                              activeMode === 'random'
+                                ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            🎲 Random 10 Cards
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost && activeMode !== 'custom') {
+                                onToggleExpansion('mode:custom');
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-center font-black text-[11px] transition ${
+                              activeMode === 'custom'
+                                ? 'bg-purple-500 text-slate-950 border-purple-300 shadow'
+                                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            ✨ Select 10 Cards ({customSelectedCardIds.length}/10)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Mode 1: Pre-Set Games */}
+                      {activeMode === 'preset' && (
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                          {DOMINION_PRESET_GAMES.map((preset) => {
+                            const isSelected = activePresetId === preset.id;
+                            const cardNames = preset.cards
+                              .map((cid) => DOMINION_CARDS[cid]?.name ?? cid)
+                              .join(', ');
+                            return (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                disabled={!isHost}
+                                onClick={() => {
+                                  if (isHost) {
+                                    onToggleExpansion(`preset:${preset.id}`);
+                                  }
+                                }}
+                                className={`w-full p-2.5 rounded-xl border text-left transition flex flex-col gap-1 ${
+                                  isSelected
+                                    ? 'bg-amber-950/40 border-amber-400 shadow'
+                                    : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                                } ${
+                                  isHost ? 'cursor-pointer' : 'cursor-default'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-black text-slate-100 text-xs">
+                                    {preset.name}
+                                    {preset.id === 'base_game'
+                                      ? ' (Default)'
+                                      : ''}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                      isSelected
+                                        ? 'bg-amber-400 text-slate-950'
+                                        : 'bg-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {isSelected ? '✓ Active' : 'Select'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-300 leading-snug">
+                                  {cardNames}
+                                </p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Mode 2: Random 10 Kingdom Cards */}
+                      {activeMode === 'random' && (
+                        <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2">
+                          <div className="font-black text-emerald-300 text-xs">
+                            🎲 Random 10 Kingdom Cards
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-relaxed">
+                            10 Kingdom cards will be randomly dealt from the 26
+                            available Base Game cards when the game starts:
+                          </p>
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            {ALL_BASE_KINGDOM_CARD_IDS.map(
+                              (cid) => DOMINION_CARDS[cid]?.name ?? cid
+                            ).join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Mode 3: Custom 10-Card Selection */}
+                      {activeMode === 'custom' && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-300 font-semibold">
+                              Choose exactly 10 Kingdom cards:
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-black text-[10px] ${
+                                customSelectedCardIds.length === 10
+                                  ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+                                  : 'bg-amber-500/20 border border-amber-400 text-amber-300'
+                              }`}
+                            >
+                              {customSelectedCardIds.length} / 10 Selected
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-64 overflow-y-auto pr-1">
+                            {ALL_BASE_KINGDOM_CARD_IDS.map((cid) => {
+                              const card = DOMINION_CARDS[cid]!;
+                              const isPicked =
+                                customSelectedCardIds.includes(cid);
+                              const isMaxed =
+                                !isPicked && customSelectedCardIds.length >= 10;
+                              return (
+                                <button
+                                  key={cid}
+                                  type="button"
+                                  disabled={!isHost || isMaxed}
+                                  onClick={() => {
+                                    if (isHost) {
+                                      onToggleExpansion(`card:${cid}`);
+                                    }
+                                  }}
+                                  title={card.description}
+                                  className={`p-2 rounded-lg border text-left transition flex items-center justify-between gap-1 ${
+                                    isPicked
+                                      ? 'bg-purple-950/60 border-purple-400 text-purple-100 shadow'
+                                      : 'bg-slate-900/70 border-slate-800 text-slate-300'
+                                  } ${
+                                    isHost && !isMaxed
+                                      ? 'cursor-pointer hover:border-purple-400/60'
+                                      : 'opacity-50 cursor-default'
+                                  }`}
+                                >
+                                  <span className="font-bold text-[11px] truncate">
+                                    {isPicked ? '✓ ' : ''}
+                                    {card.name}
+                                  </span>
+                                  <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] shrink-0">
+                                    ${card.cost}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-2.5">
@@ -757,6 +1006,8 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                           ? 'Europe'
                           : 'North America'
                       }`
+                    : stagedGame.id === 'dominion'
+                    ? 'Kingdom Setup:'
                     : 'Active Expansions:'}
                 </span>
                 <strong className="text-purple-300">
@@ -765,6 +1016,24 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                         selectedExpansions.filter((id) => id !== 'europe_map')
                           .length
                       } Expansion(s) Enabled`
+                    : stagedGame.id === 'dominion'
+                    ? selectedExpansions.includes('mode:random')
+                      ? 'Random 10 Cards'
+                      : selectedExpansions.includes('mode:custom')
+                      ? `Custom (${
+                          selectedExpansions.filter((e) =>
+                            e.startsWith('card:')
+                          ).length
+                        }/10 Cards)`
+                      : `Pre-Set: ${
+                          DOMINION_PRESET_GAMES.find(
+                            (p) =>
+                              `preset:${p.id}` ===
+                              selectedExpansions.find((e) =>
+                                e.startsWith('preset:')
+                              )
+                          )?.name ?? 'Base Game'
+                        }`
                     : selectedExpansions.length === 0
                     ? 'Base Game Only'
                     : `${selectedExpansions.length} Enabled`}
