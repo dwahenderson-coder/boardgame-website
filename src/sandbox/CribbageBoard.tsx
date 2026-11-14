@@ -8,7 +8,6 @@ import {
 } from '../games/cribbage/index.js';
 import { HandView } from './components/cards/HandView.js';
 import { PlayingCard } from './components/cards/PlayingCard.js';
-import { getPlayerPalette } from './mapData.js';
 
 export interface CribbageBoardProps {
   readonly gameState: CribbageSanitizedGameState;
@@ -16,6 +15,17 @@ export interface CribbageBoardProps {
   readonly playerNames: Readonly<Record<string, string>>;
   readonly sendAction: (action: CribbageAction) => void;
 }
+
+const PEG_COLORS: readonly {
+  readonly fill: string;
+  readonly stroke: string;
+  readonly label: string;
+}[] = [
+  { fill: '#ef4444', stroke: '#fecaca', label: 'Red' },
+  { fill: '#3b82f6', stroke: '#bfdbfe', label: 'Blue' },
+  { fill: '#10b981', stroke: '#a7f3d0', label: 'Green' },
+  { fill: '#f59e0b', stroke: '#fde68a', label: 'Gold' },
+];
 
 export const CribbageBoard: React.FC<CribbageBoardProps> = ({
   gameState,
@@ -41,6 +51,15 @@ export const CribbageBoard: React.FC<CribbageBoardProps> = ({
     gameState.playerOrder.map((pid) =>
       pid === self.id ? self : gameState.opponents[pid]!
     );
+
+  // Counting order at the end of a hand: starts left of dealer and continues clockwise around the table to dealer last
+  const showCountingOrder: CribbagePublicPlayerState[] =
+    gameState.playerOrder.map((_, offset) => {
+      const idx =
+        (gameState.dealerIndex + 1 + offset) % gameState.playerOrder.length;
+      const pid = gameState.playerOrder[idx]!;
+      return pid === self.id ? self : gameState.opponents[pid]!;
+    });
 
   const toggleDiscardCard = (card: StandardCard) => {
     if (gameState.turnStep !== 'DISCARD_TO_CRIB' || self.discardedToCrib) {
@@ -87,53 +106,153 @@ export const CribbageBoard: React.FC<CribbageBoardProps> = ({
           </span>
         </div>
 
-        {/* 121-Point Peg Board Progress Bars */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {allPlayersInOrder.map((p) => {
-            const palette = getPlayerPalette(p.id, gameState.playerOrder);
-            const pct = Math.min(
-              100,
-              Math.round((p.score / gameState.targetScore) * 100)
-            );
-            const isDealer =
-              gameState.playerOrder.indexOf(p.id) === gameState.dealerIndex;
-            return (
-              <div
-                key={p.id}
-                className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col gap-1.5"
-              >
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${palette.dotClass}`}
-                    />
-                    <span className="font-bold text-white truncate">
-                      {formatName(p.id)}
-                    </span>
-                    {isDealer && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black">
-                        CRIB
+        {/* Visual Wooden 121-Hole Cribbage Pegging Board */}
+        <div
+          className="w-full rounded-2xl border-2 border-amber-700/80 p-3.5 shadow-2xl relative overflow-x-auto"
+          style={{
+            background:
+              'linear-gradient(180deg, #5c3415 0%, #78441c 50%, #4b280e 100%)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-2 text-[11px] font-black text-amber-200 uppercase tracking-wider">
+            <span>🏁 Start (0)</span>
+            <span>Corner 1 (30)</span>
+            <span>Corner 2 (60)</span>
+            <span className="text-rose-300">🦨 Skunk Line (90)</span>
+            <span className="text-emerald-300">🏆 Finish Peg (121)</span>
+          </div>
+
+          <div className="space-y-2 min-w-[760px]">
+            {allPlayersInOrder.map((p, pIdx) => {
+              const pegStyle = PEG_COLORS[pIdx % PEG_COLORS.length]!;
+              const isDealer =
+                gameState.playerOrder.indexOf(p.id) === gameState.dealerIndex;
+              const clampedScore = Math.min(121, Math.max(0, p.score));
+
+              return (
+                <div
+                  key={`crib_lane_${p.id}`}
+                  className="rounded-xl bg-amber-950/65 border border-amber-800/70 px-3 py-2 flex flex-col gap-1.5"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full border-2 shadow"
+                        style={{
+                          backgroundColor: pegStyle.fill,
+                          borderColor: pegStyle.stroke,
+                        }}
+                      />
+                      <span className="font-black text-amber-100">
+                        {formatName(p.id)}
                       </span>
-                    )}
+                      {isDealer && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black">
+                          DEALER • CRIB
+                        </span>
+                      )}
+                      {p.lastActionLabel && (
+                        <span className="text-[11px] text-amber-300/90 font-semibold">
+                          • {p.lastActionLabel}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono font-black text-emerald-300">
+                      Hole {p.score} / {gameState.targetScore}
+                    </span>
                   </div>
-                  <span className="font-mono font-black text-emerald-400 shrink-0">
-                    {p.score} / {gameState.targetScore}
-                  </span>
-                </div>
-                <div className="w-full h-2.5 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-300"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                {p.lastActionLabel && (
-                  <div className="text-[10px] text-slate-400 truncate">
-                    {p.lastActionLabel}
+
+                  {/* 24 Five-Hole Groups (1..120) + Start (0) + Winning Hole (121) */}
+                  <div className="flex items-center gap-1">
+                    {/* Start Hole 0 */}
+                    <div
+                      title={`${formatName(p.id)}: Start (0)`}
+                      className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                        clampedScore === 0
+                          ? 'scale-125 shadow-lg'
+                          : 'bg-amber-950 border-amber-700/70'
+                      }`}
+                      style={
+                        clampedScore === 0
+                          ? {
+                              backgroundColor: pegStyle.fill,
+                              borderColor: pegStyle.stroke,
+                            }
+                          : undefined
+                      }
+                    />
+
+                    {/* 24 groups of 5 holes = 120 holes */}
+                    {Array.from({ length: 24 }, (_, groupIdx) => {
+                      const baseHole = groupIdx * 5;
+                      const isCornerGroup =
+                        baseHole + 5 === 30 ||
+                        baseHole + 5 === 60 ||
+                        baseHole + 5 === 90;
+                      return (
+                        <div
+                          key={`grp_${p.id}_${groupIdx}`}
+                          className={`flex items-center gap-[2px] px-1 py-0.5 rounded bg-amber-900/40 ${
+                            isCornerGroup
+                              ? 'border-r-2 border-amber-400/80 pr-1.5'
+                              : 'border border-amber-800/40'
+                          }`}
+                        >
+                          {Array.from({ length: 5 }, (__, hOffset) => {
+                            const holeNum = baseHole + hOffset + 1;
+                            const isCurrentPeg = clampedScore === holeNum;
+                            const isPassed = clampedScore > holeNum;
+                            return (
+                              <div
+                                key={`hole_${p.id}_${holeNum}`}
+                                title={`Hole ${holeNum}`}
+                                className={`w-2 h-2 rounded-full transition-all ${
+                                  isCurrentPeg
+                                    ? 'w-3 h-3 scale-125 ring-2 ring-white shadow-md z-10'
+                                    : isPassed
+                                      ? 'opacity-70'
+                                      : 'bg-stone-950/90 border border-amber-900/80'
+                                }`}
+                                style={
+                                  isCurrentPeg || isPassed
+                                    ? {
+                                        backgroundColor: pegStyle.fill,
+                                      }
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+
+                    {/* Winning Game Hole 121 */}
+                    <div
+                      title="Winning Hole 121"
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ml-1 ${
+                        clampedScore >= 121
+                          ? 'scale-125 ring-2 ring-emerald-300 shadow-lg'
+                          : 'bg-emerald-950 border-emerald-500/70'
+                      }`}
+                      style={
+                        clampedScore >= 121
+                          ? {
+                              backgroundColor: pegStyle.fill,
+                              borderColor: pegStyle.stroke,
+                            }
+                          : undefined
+                      }
+                    >
+                      <span className="text-[7px] font-black text-white">
+                        ★
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -278,42 +397,54 @@ export const CribbageBoard: React.FC<CribbageBoardProps> = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                {allPlayersInOrder.map((p) => (
-                  <div
-                    key={p.id}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-white">
-                        {formatName(p.id)} Hand
-                      </span>
-                      <span className="font-mono font-black text-emerald-400">
-                        +{p.lastShowBreakdown?.total ?? 0} pts
-                      </span>
+                {showCountingOrder.map((p, orderIdx) => {
+                  const wasCounted = p.lastShowBreakdown !== null;
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-white">
+                          #{orderIdx + 1} {formatName(p.id)} Hand
+                        </span>
+                        {wasCounted ? (
+                          <span className="font-mono font-black text-emerald-400">
+                            +{p.lastShowBreakdown?.total ?? 0} pts
+                          </span>
+                        ) : (
+                          <span className="font-mono font-bold text-slate-500">
+                            Not Counted
+                          </span>
+                        )}
+                      </div>
+                      <HandView
+                        cards={p.handZone.cards}
+                        cardCount={p.handZone.cardCount}
+                        size="sm"
+                        fanAngleDeg={3}
+                      />
+                      <div className="text-[10px] text-slate-400">
+                        {!wasCounted
+                          ? 'Game ended prior to counting this hand (121+ pts reached).'
+                          : p.lastShowBreakdown &&
+                              p.lastShowBreakdown.details.length > 0
+                            ? p.lastShowBreakdown.details.join(' • ')
+                            : '0 pts (No 15s, pairs, or runs)'}
+                      </div>
                     </div>
-                    <HandView
-                      cards={p.handZone.cards}
-                      cardCount={p.handZone.cardCount}
-                      size="sm"
-                      fanAngleDeg={3}
-                    />
-                    <div className="text-[10px] text-slate-400">
-                      {p.lastShowBreakdown &&
-                      p.lastShowBreakdown.details.length > 0
-                        ? p.lastShowBreakdown.details.join(' • ')
-                        : '0 pts (No 15s, pairs, or runs)'}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
-                {gameState.cribBreakdown && (
+                {gameState.cribBreakdown ? (
                   <div className="p-2.5 rounded-xl bg-amber-950/25 border border-amber-500/40 space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-amber-300">
+                        #{showCountingOrder.length + 1}{' '}
                         {formatName(
                           gameState.playerOrder[gameState.dealerIndex]!
                         )}{' '}
-                        Crib
+                        Crib (Last)
                       </span>
                       <span className="font-mono font-black text-amber-300">
                         +{gameState.cribBreakdown.total} pts
@@ -323,6 +454,23 @@ export const CribbageBoard: React.FC<CribbageBoardProps> = ({
                       {gameState.cribBreakdown.details.length > 0
                         ? gameState.cribBreakdown.details.join(' • ')
                         : '0 pts in Crib'}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-400">
+                        {formatName(
+                          gameState.playerOrder[gameState.dealerIndex]!
+                        )}{' '}
+                        Crib (Last)
+                      </span>
+                      <span className="font-mono font-bold text-slate-500">
+                        Not Counted
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Game ended prior to counting the Crib (121+ pts reached).
                     </div>
                   </div>
                 )}

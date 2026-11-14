@@ -1,5 +1,6 @@
 import { customAlphabet } from 'nanoid';
 import { CatanGameState } from '../games/catan/index.js';
+import { ClueGameState } from '../games/clue/index.js';
 import { CribbageGameState } from '../games/cribbage/index.js';
 import {
   calculatePlayerVictoryPoints,
@@ -497,6 +498,28 @@ export class RoomManager {
             ticketPoints: 0,
             totalScore: p.victoryPoints,
             trainsRemaining: p.settlementsRemaining,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'clue' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'clue')
+    ) {
+      const clueState = room.gameState as ClueGameState;
+      return clueState.playerOrder
+        .map((playerId) => {
+          const p = clueState.players[playerId]!;
+          const isWinner = clueState.winnerId === playerId ? 1 : 0;
+          return {
+            playerId,
+            name: `${nameMap[playerId] ?? playerId} (${p.suspect})`,
+            routePoints: isWinner,
+            ticketPoints: 0,
+            totalScore: isWinner,
+            trainsRemaining: p.hand.length,
             tickets: [],
           };
         })

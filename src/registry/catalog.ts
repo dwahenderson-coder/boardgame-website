@@ -257,6 +257,59 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
       },
     ],
   },
+  {
+    id: 'clue',
+    category: 'board',
+    icon: '🔎',
+    name: 'Clue',
+    subtitle: 'Classic Mansion Murder Mystery Deduction',
+    description:
+      'Move through the 9 Mansion rooms and secret passages, make Suggestions to summon suspects and weapons, privately disprove leads clockwise, and make the winning Accusation.',
+    minPlayers: 2,
+    maxPlayers: 6,
+    estimatedMinutes: 45,
+    mechanicsLabel: 'Grid Movement, Secret Passages & Private Deduction',
+    badgeColor: 'amber',
+    availableColors: [
+      {
+        id: 'Miss Scarlet',
+        name: 'Miss Scarlet (Red)',
+        hex: '#DC2626',
+        strokeHex: '#FCA5A5',
+      },
+      {
+        id: 'Colonel Mustard',
+        name: 'Col. Mustard (Yellow)',
+        hex: '#EAB308',
+        strokeHex: '#FEF08A',
+      },
+      {
+        id: 'Mrs. White',
+        name: 'Mrs. White (White)',
+        hex: '#F8FAFC',
+        strokeHex: '#CBD5E1',
+      },
+      {
+        id: 'Mr. Green',
+        name: 'Mr. Green (Green)',
+        hex: '#16A34A',
+        strokeHex: '#86EFAC',
+      },
+      {
+        id: 'Mrs. Peacock',
+        name: 'Mrs. Peacock (Light Blue)',
+        hex: '#38BDF8',
+        strokeHex: '#BAE6FD',
+      },
+      {
+        id: 'Professor Plum',
+        name: 'Prof. Plum (Purple)',
+        hex: '#9333EA',
+        strokeHex: '#D8B4FE',
+      },
+    ],
+    expansions: [],
+  },
 
   // =========================================================================
   // CARD GAMES

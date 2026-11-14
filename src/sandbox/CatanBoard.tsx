@@ -234,6 +234,11 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
   const [yopResource1, setYopResource1] = useState<CatanResource>('WHEAT');
   const [yopResource2, setYopResource2] = useState<CatanResource>('ORE');
 
+  // Discard on 7 state
+  const [discardAmounts, setDiscardAmounts] = useState<
+    Record<CatanResource, number>
+  >(() => createZeroBundle());
+
   const lastRollSum = view.lastDiceRoll
     ? view.lastDiceRoll[0] + view.lastDiceRoll[1]
     : null;
@@ -301,22 +306,17 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
       return;
     }
 
-    if (isMyTurn && view.turnStep === 'MAIN_PHASE') {
-      // If clicking own settlement, upgrade to City if affordable
-      if (
-        vertex.ownerId === selfPlayer.id &&
-        vertex.building === 'settlement' &&
-        selfPlayer.resources.WHEAT >= 2 &&
-        selfPlayer.resources.ORE >= 3 &&
-        selfPlayer.citiesRemaining > 0
-      ) {
+    if (isMyTurn && view.turnStep === 'SELECT_CITY_UPGRADE') {
+      if (vertex.ownerId === selfPlayer.id && vertex.building === 'settlement') {
         onDispatchAction(selfPlayer.id, {
           type: 'CATAN_UPGRADE_CITY',
           vertexId,
         });
-        return;
       }
+      return;
+    }
 
+    if (isMyTurn && view.turnStep === 'MAIN_PHASE') {
       // If clicking valid empty settlement spot and affordable, build Settlement
       if (
         validMainPhaseVertices.has(vertexId) &&
@@ -599,20 +599,43 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                 return (
                   <g
                     key={hexNode.id}
-                    onClick={() => setSelectedHexId(hexNode.id)}
+                    onClick={() => {
+                      setSelectedHexId(hexNode.id);
+                      if (
+                        isMyTurn &&
+                        !isControlsLocked &&
+                        !pendingAction &&
+                        view.turnStep === 'MOVE_ROBBER' &&
+                        hexNode.id !== view.board.robberHexId
+                      ) {
+                        onDispatchAction(selfPlayer.id, {
+                          type: 'CATAN_MOVE_ROBBER',
+                          targetHexId: hexNode.id,
+                        });
+                      }
+                    }}
                     className="cursor-pointer"
                   >
                     <polygon
                       points={cornerPoints}
                       fill={theme.fill}
                       stroke={
-                        isSelected
+                        view.turnStep === 'MOVE_ROBBER' &&
+                        hexNode.id !== view.board.robberHexId
+                          ? '#f43f5e'
+                          : isSelected
                           ? '#fbbf24'
                           : isHotRoll
                           ? '#34d399'
                           : theme.stroke
                       }
-                      strokeWidth={isSelected || isHotRoll ? 3.5 : 2}
+                      strokeWidth={
+                        view.turnStep === 'MOVE_ROBBER' ||
+                        isSelected ||
+                        isHotRoll
+                          ? 3.5
+                          : 2
+                      }
                     />
 
                     {/* Terrain Icon */}
@@ -792,8 +815,22 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                           view.playerOrder
                         );
                         const isCity = vertex.building === 'city';
+                        const isUpgradeableTarget =
+                          isMyTurn &&
+                          view.turnStep === 'SELECT_CITY_UPGRADE' &&
+                          vertex.ownerId === selfPlayer.id &&
+                          vertex.building === 'settlement';
                         return (
                           <g>
+                            {isUpgradeableTarget && (
+                              <circle
+                                r="14"
+                                fill="none"
+                                stroke="#38bdf8"
+                                strokeWidth="3"
+                                strokeDasharray="3 2"
+                              />
+                            )}
                             {isCity ? (
                               <rect
                                 x="-10"
@@ -809,7 +846,7 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                               <polygon
                                 points="0,-10 9,-2 7,9 -7,9 -9,-2"
                                 fill={palette.fillHex}
-                                stroke="#020617"
+                                stroke={isUpgradeableTarget ? '#38bdf8' : '#020617'}
                                 strokeWidth="2.2"
                               />
                             )}
@@ -929,8 +966,208 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
             </div>
           )}
 
-          {/* BOTTOM-RIGHT PICTURE OF THE DICE ROLL RESULTS */}
-          <div className="absolute bottom-3 right-3 bg-slate-900/95 border-2 border-amber-500/70 rounded-2xl p-3 shadow-2xl backdrop-blur-md text-xs w-64 space-y-2 z-10">
+          {/* CITY UPGRADE BOARD SELECTION BANNER */}
+          {view.turnStep === 'SELECT_CITY_UPGRADE' && (
+            <div className="absolute top-3 right-3 max-w-xs bg-sky-950/95 border-2 border-sky-400 rounded-2xl p-3.5 shadow-2xl text-xs space-y-1.5 z-30">
+              <div className="font-black uppercase tracking-wider text-sky-300 text-[11px]">
+                🏛️ Select Settlement to Upgrade
+              </div>
+              <p className="text-sky-100 text-[11px] leading-relaxed">
+                Payment of 2 Wheat + 3 Ore received!{' '}
+                <strong>{formatPlayerLabel(view.activePlayerId)}</strong>, click
+                on one of your highlighted Settlements on the board to upgrade
+                it to a City!
+              </p>
+            </div>
+          )}
+
+          {/* MOVE ROBBER BANNER */}
+          {view.turnStep === 'MOVE_ROBBER' && (
+            <div className="absolute top-3 right-3 max-w-xs bg-rose-950/95 border-2 border-rose-400 rounded-2xl p-3.5 shadow-2xl text-xs space-y-1.5 z-30">
+              <div className="font-black uppercase tracking-wider text-rose-300 text-[11px]">
+                🦹 Move the Robber
+              </div>
+              <p className="text-rose-100 text-[11px] leading-relaxed">
+                <strong>{formatPlayerLabel(view.activePlayerId)}</strong>: Click
+                any hex on the board (highlighted in red) to move the Robber to
+                that hex!
+              </p>
+            </div>
+          )}
+
+          {/* DISCARD ON 7 MODAL (Players with >= 8 Resource Cards Discard Half Rounding Down) */}
+          {view.turnStep === 'DISCARD_ON_SEVEN' && (
+            <div className="absolute inset-x-8 top-14 max-w-xl mx-auto bg-slate-900/98 border-2 border-rose-500 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="font-black uppercase tracking-wider text-rose-300 text-xs">
+                  🎲 7 Rolled! Players with 8+ Cards Must Discard Half (Rounding Down)
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {Object.entries(view.pendingDiscards).map(([pid, reqCount]) => {
+                  const isSelfDiscard = pid === selfPlayer.id;
+                  const currentSum = ALL_CATAN_RESOURCES.reduce(
+                    (s, r) => s + discardAmounts[r],
+                    0
+                  );
+                  return (
+                    <div
+                      key={pid}
+                      className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-100">
+                          {formatPlayerLabel(pid)} must discard{' '}
+                          <strong className="text-rose-400">{reqCount}</strong>{' '}
+                          card(s)
+                        </span>
+                        {isSelfDiscard && (
+                          <span className="font-mono text-[11px] text-amber-300">
+                            Selected: {currentSum} / {reqCount}
+                          </span>
+                        )}
+                      </div>
+
+                      {isSelfDiscard && (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            {ALL_CATAN_RESOURCES.map((r) => (
+                              <label
+                                key={`disc_${r}`}
+                                className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-700 text-[11px]"
+                              >
+                                <span>
+                                  {TERRAIN_THEMES[r].icon} {r} (Have{' '}
+                                  {selfPlayer.resources[r]}):
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={selfPlayer.resources[r]}
+                                  value={discardAmounts[r]}
+                                  onChange={(e) =>
+                                    setDiscardAmounts((prev) => ({
+                                      ...prev,
+                                      [r]: Math.max(
+                                        0,
+                                        Math.min(
+                                          selfPlayer.resources[r],
+                                          Number(e.target.value) || 0
+                                        )
+                                      ),
+                                    }))
+                                  }
+                                  className="w-10 bg-slate-950 border border-slate-700 rounded px-1 text-center font-mono text-white"
+                                />
+                              </label>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={currentSum !== reqCount}
+                            onClick={() => {
+                              onDispatchAction(selfPlayer.id, {
+                                type: 'CATAN_DISCARD_RESOURCES',
+                                resources: discardAmounts,
+                              });
+                              setDiscardAmounts(createZeroBundle());
+                            }}
+                            className="px-3.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 disabled:opacity-40 text-slate-950 font-black text-xs"
+                          >
+                            Confirm Discard ({currentSum}/{reqCount})
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SELECT ROBBER VICTIM MODAL */}
+          {view.turnStep === 'SELECT_ROBBER_VICTIM' && (
+            <div className="absolute inset-x-8 top-16 max-w-md mx-auto bg-slate-900/98 border-2 border-amber-400 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
+              <div className="font-black uppercase tracking-wider text-amber-300 text-xs border-b border-slate-800 pb-2">
+                🦹 Select Player on Robber Hex to Steal From
+              </div>
+              <p className="text-slate-300 text-[11px]">
+                Select a player who has a settlement or city on the Robber hex:
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                {view.robberEligibleVictimIds.map((vid) => {
+                  const oppCards =
+                    view.opponents[vid]?.totalResourceCards ?? 0;
+                  return (
+                    <button
+                      key={vid}
+                      type="button"
+                      disabled={!isMyTurn || isControlsLocked}
+                      onClick={() =>
+                        onDispatchAction(selfPlayer.id, {
+                          type: 'CATAN_SELECT_ROBBER_VICTIM',
+                          victimPlayerId: vid,
+                        })
+                      }
+                      className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/50 flex items-center justify-between font-bold text-slate-100 transition"
+                    >
+                      <span>{formatPlayerLabel(vid)}</span>
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[11px]">
+                        {oppCards} Resource Card(s)
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SHUFFLED RESOURCE CARD STEAL DISPLAY */}
+          {view.turnStep === 'STEAL_ROBBER_CARD' && view.robberVictimId && (
+            <div className="absolute inset-x-8 top-16 max-w-lg mx-auto bg-slate-900/98 border-2 border-emerald-400 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="font-black uppercase tracking-wider text-emerald-300 text-xs">
+                  🃏 Pick 1 Card from {formatPlayerLabel(view.robberVictimId)}&apos;s Shuffled Hand
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-200 font-mono font-black text-[11px]">
+                  Picking from {view.robberVictimCardCount} Card(s)
+                </span>
+              </div>
+              <p className="text-slate-300 text-[11px]">
+                {formatPlayerLabel(view.robberVictimId)}&apos;s{' '}
+                <strong>{view.robberVictimCardCount}</strong> resource cards have
+                been shuffled face-down. Click any card below to steal it!
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2.5 py-2">
+                {Array.from(
+                  { length: view.robberVictimCardCount },
+                  (_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={!isMyTurn || isControlsLocked}
+                      onClick={() =>
+                        onDispatchAction(selfPlayer.id, {
+                          type: 'CATAN_STEAL_CARD',
+                          cardIndex: idx,
+                        })
+                      }
+                      className="w-16 h-24 rounded-xl bg-gradient-to-br from-amber-700 via-amber-900 to-slate-950 hover:from-emerald-600 hover:to-emerald-900 border-2 border-amber-400 hover:border-emerald-300 shadow-lg flex flex-col items-center justify-center gap-1 transition transform hover:-translate-y-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <span className="text-lg">🌾</span>
+                      <span className="font-mono font-black text-[10px] text-amber-200">
+                        Card #{idx + 1}
+                      </span>
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* BOTTOM-RIGHT PICTURE OF THE DICE ROLL RESULTS + ALL STARTING PLAYER ROLLS */}
+          <div className="absolute bottom-3 right-3 bg-slate-900/95 border-2 border-amber-500/70 rounded-2xl p-3 shadow-2xl backdrop-blur-md text-xs w-72 space-y-2 z-10">
             <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
               <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
                 🎲 Dice Roll Results
@@ -967,12 +1204,42 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
               </div>
             )}
 
-            {view.startingPlayerId && (
-              <div className="text-[10px] text-slate-400 border-t border-slate-800/80 pt-1 flex items-center justify-between">
-                <span>Starting High Roll:</span>
-                <span className="font-semibold text-amber-200">
-                  {formatPlayerLabel(view.startingPlayerId)}
-                </span>
+            {/* Display the results of all starting player rolls */}
+            {Object.keys(view.startingRolls).length > 0 && (
+              <div className="text-[10px] text-slate-300 border-t border-slate-800/80 pt-1.5 space-y-1">
+                <div className="font-black uppercase tracking-wider text-amber-300 text-[9px] flex items-center justify-between">
+                  <span>All Starting Player Rolls:</span>
+                  {view.startingPlayerId && (
+                    <span className="text-emerald-300">
+                      ★ 1st: {formatPlayerLabel(view.startingPlayerId)}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-0.5">
+                  {view.playerOrder.map((pid) => {
+                    const roll = view.startingRolls[pid];
+                    if (!roll) return null;
+                    const isStarter = pid === view.startingPlayerId;
+                    return (
+                      <div
+                        key={`start_roll_${pid}`}
+                        className={`flex items-center justify-between px-1.5 py-0.5 rounded ${
+                          isStarter
+                            ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold'
+                            : 'bg-slate-950/60 text-slate-400'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {isStarter ? '★ ' : ''}
+                          {formatPlayerLabel(pid)}
+                        </span>
+                        <span className="font-mono">
+                          🎲 {roll[0]} + {roll[1]} = {roll[0] + roll[1]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -1412,13 +1679,20 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
               }
               onClick={() =>
                 onDispatchAction(selfPlayer.id, {
-                  type: 'CATAN_UPGRADE_CITY',
-                  ...(selectedVertexId ? { vertexId: selectedVertexId } : {}),
+                  type: 'CATAN_START_UPGRADE_CITY',
                 })
               }
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-35 border border-slate-700 text-slate-100 font-semibold transition flex flex-col items-start"
+              className={`p-2 rounded-xl border text-slate-100 font-semibold transition flex flex-col items-start ${
+                view.turnStep === 'SELECT_CITY_UPGRADE'
+                  ? 'bg-sky-900 border-sky-400 text-sky-100'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 disabled:opacity-35'
+              }`}
             >
-              <span className="font-bold">🏛 Upgrade City</span>
+              <span className="font-bold">
+                {view.turnStep === 'SELECT_CITY_UPGRADE'
+                  ? '🏛 Click Settlement on Board'
+                  : '🏛 Upgrade City'}
+              </span>
               <span className="text-[9px] text-slate-400">
                 2 Wheat + 3 Ore (+1 VP)
               </span>
@@ -1453,7 +1727,9 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
               📜 Development Cards ({selfPlayer.devCards.length})
             </span>
             <span className="text-[10px] text-slate-400">
-              Deck: {view.devCardDeckCount} left
+              {view.hasPlayedDevCardThisTurn
+                ? '✓ 1 Played This Turn'
+                : `Deck: ${view.devCardDeckCount} left`}
             </span>
           </div>
 
@@ -1469,7 +1745,8 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                 const boughtThisTurn = card.purchasedOnTurn === view.turnNumber;
                 const canPlayThisTurn =
                   isMyTurn &&
-                  (card.category === 'VICTORY_POINT' || !boughtThisTurn);
+                  (card.category === 'VICTORY_POINT' ||
+                    (!boughtThisTurn && !view.hasPlayedDevCardThisTurn));
 
                 return (
                   <div
@@ -1525,6 +1802,9 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                     >
                       {boughtThisTurn && card.category !== 'VICTORY_POINT'
                         ? 'Next Turn'
+                        : view.hasPlayedDevCardThisTurn &&
+                          card.category !== 'VICTORY_POINT'
+                        ? '1/Turn Limit'
                         : 'Play'}
                     </button>
                   </div>

@@ -19,6 +19,16 @@ import {
   validateCatanAction,
 } from './catan/index.js';
 import {
+  applyClueAction,
+  calculateClueFinalScores,
+  ClueAction,
+  ClueGameState,
+  ClueSanitizedGameState,
+  getCluePlayerPerspective,
+  initClueGame,
+  validateClueAction,
+} from './clue/index.js';
+import {
   applyCribbageAction,
   calculateCribbageFinalScores,
   CribbageAction,
@@ -110,6 +120,7 @@ export type AnyGameState =
   | CatanGameState
   | StockpileGameState
   | PowerGridGameState
+  | ClueGameState
   | HoldemGameState
   | EuchreGameState
   | CribbageGameState
@@ -121,6 +132,7 @@ export type AnySanitizedGameState =
   | CatanSanitizedGameState
   | StockpileSanitizedGameState
   | SanitizedPowerGridState
+  | ClueSanitizedGameState
   | HoldemSanitizedGameState
   | EuchreSanitizedGameState
   | CribbageSanitizedGameState
@@ -132,6 +144,7 @@ export type AnyGameAction =
   | CatanAction
   | StockpileAction
   | PowerGridAction
+  | ClueAction
   | HoldemAction
   | EuchreAction
   | CribbageAction
@@ -347,5 +360,17 @@ export const GameRegistry: Readonly<
     applyAction: applyDominionAction,
     getPlayerPerspective: getDominionPlayerPerspective,
     calculateFinalScores: calculateDominionFinalScores,
+  },
+  clue: {
+    ...findMetadata('clue'),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) => initClueGame(playerIds, seed, options),
+    validateAction: validateClueAction,
+    applyAction: applyClueAction,
+    getPlayerPerspective: getCluePlayerPerspective,
+    calculateFinalScores: calculateClueFinalScores,
   },
 };

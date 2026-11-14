@@ -5,6 +5,7 @@ export type GameId =
   | 'catan'
   | 'stockpile'
   | 'power_grid'
+  | 'clue'
   | 'holdem'
   | 'euchre'
   | 'cribbage'

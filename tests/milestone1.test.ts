@@ -908,13 +908,14 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
   // ---------------------------------------------------------------------------
   describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
-    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion, clue) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
       expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'ttr',
         'catan',
         'stockpile',
         'power_grid',
         'dominion',
+        'clue',
       ]);
       expect(CARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'holdem',
@@ -1123,6 +1124,52 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       ) as CribbageGameState;
       expect(cribState.gameId).toBe('cribbage');
       expect(cribState.players['p1']!.handZone.cards).toHaveLength(6);
+
+      // Verify Cribbage Show counting order (starts left of dealer) & immediate 121-pt cutoff without counting remaining hands/crib:
+      // Dealer = p1 (index 0), so p2 (left of dealer, index 1) counts first!
+      const showCutoffState: CribbageGameState = {
+        ...cribState,
+        turnStep: 'PEGGING',
+        dealerIndex: 0,
+        activePlayerIndex: 1,
+        runningCount: 20,
+        starterCard: c('5S'),
+        cribZone: {
+          ...cribState.cribZone,
+          cards: [c('5H'), c('5C'), c('5D'), c('JS')],
+        },
+        players: {
+          p1: {
+            ...cribState.players['p1']!,
+            score: 118,
+            peggingCards: [],
+            handZone: {
+              ...cribState.players['p1']!.handZone,
+              cards: [c('5H'), c('5C'), c('5D'), c('JS')], // 29 pts if counted
+            },
+          },
+          p2: {
+            ...cribState.players['p2']!,
+            score: 115,
+            peggingCards: [c('2C')], // plays last card (+1 Go = 116), then counts hand first (+8 = 124 >= 121!)
+            handZone: {
+              ...cribState.players['p2']!.handZone,
+              cards: [c('10H'), c('10D'), c('5C'), c('2C')],
+            },
+          },
+        },
+      };
+      const afterLastCard = GameRegistry.cribbage.applyAction(
+        showCutoffState,
+        'p2',
+        { type: 'CRIB_PLAY_CARD', cardId: '2C' }
+      ) as CribbageGameState;
+      expect(afterLastCard.phase).toBe('GAME_OVER');
+      expect(afterLastCard.winnerId).toBe('p2');
+      // p1's hand and Crib were NOT counted because p2 reached 121+ first!
+      expect(afterLastCard.players['p1']!.score).toBe(118);
+      expect(afterLastCard.players['p1']!.lastShowBreakdown).toBeNull();
+      expect(afterLastCard.cribBreakdown).toBeNull();
     });
   });
 
@@ -1379,6 +1426,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'stockpile',
         'power_grid',
         'dominion',
+        'clue',
       ]);
       expect(CARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
         'holdem',

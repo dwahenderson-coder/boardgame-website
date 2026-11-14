@@ -311,24 +311,42 @@ describe('Catan Functionality Update 0.00h — Planar Graph Board Generator, Sna
         },
       };
 
-      // Play 3 Knights (including before rolling!) -> awards Largest Army (+2 VP)!
+      // Play 1st Knight (including before rolling!) -> sets hasPlayedDevCardThisTurn = true
       state = applyCatanAction(state, activePid, { type: 'CATAN_PLAY_KNIGHT' });
+      expect(state.hasPlayedDevCardThisTurn).toBe(true);
+
+      // Cannot play a 2nd Knight or Progress card on the same turn!
+      expect(
+        validateCatanAction(
+          { ...state, turnStep: 'MAIN_PHASE' },
+          activePid,
+          { type: 'CATAN_PLAY_KNIGHT' }
+        ).valid
+      ).toBe(false);
+
+      // Advance to next turns for 2nd and 3rd Knights -> awards Largest Army (+2 VP)!
+      state = { ...state, turnNumber: 3, hasPlayedDevCardThisTurn: false, turnStep: 'MAIN_PHASE' };
       state = applyCatanAction(state, activePid, { type: 'CATAN_PLAY_KNIGHT' });
       expect(state.largestArmyOwnerId).toBeNull();
+
+      state = { ...state, turnNumber: 4, hasPlayedDevCardThisTurn: false, turnStep: 'MAIN_PHASE' };
       state = applyCatanAction(state, activePid, { type: 'CATAN_PLAY_KNIGHT' });
       expect(state.players[activePid]!.faceUpKnights).toBe(3);
       expect(state.largestArmyOwnerId).toBe(activePid);
       expect(state.players[activePid]!.hasLargestArmy).toBe(true);
       expect(state.players[activePid]!.victoryPoints).toBe(4); // 2 settlements + 2 Largest Army
 
-      // Play Year of Plenty (+2 ORE) and Monopoly (WOOD)
+      // Play Year of Plenty (+2 ORE) and Monopoly (WOOD) on subsequent turns
+      state = { ...state, turnNumber: 5, hasPlayedDevCardThisTurn: false, turnStep: 'MAIN_PHASE' };
       state = applyCatanAction(state, activePid, {
         type: 'CATAN_PLAY_YEAR_OF_PLENTY',
         resource1: 'ORE',
         resource2: 'ORE',
       });
       expect(state.players[activePid]!.resources.ORE).toBe(2);
+      expect(state.hasPlayedDevCardThisTurn).toBe(true);
 
+      state = { ...state, turnNumber: 6, hasPlayedDevCardThisTurn: false, turnStep: 'MAIN_PHASE' };
       state = applyCatanAction(state, activePid, {
         type: 'CATAN_PLAY_MONOPOLY',
         resource: 'WOOD',
@@ -456,6 +474,131 @@ describe('Catan Functionality Update 0.00h — Planar Graph Board Generator, Sna
         WHEAT: 0,
         ORE: 1,
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 5. Catan Functionality 2 Update 0.00i — 7-Roll Discard, Robber Victim & Shuffled Card Steal, Two-Step City Upgrade
+  // ---------------------------------------------------------------------------
+  describe('5. Catan Functionality 2 Update 0.00i — 7-Roll Discard, Robber Steal & City Upgrade', () => {
+    it('discards half rounding down for players with >= 8 cards on a 7, moves robber, selects victim, and steals from shuffled cards', () => {
+      let state = initCatanGame(['p1', 'p2', 'p3'], 999, { skipSetup: true });
+      const [activePid, opp1, opp2] = state.playerOrder as [string, string, string];
+
+      // Give opp1 9 cards (must discard Math.floor(9/2) = 4) and opp2 7 cards (no discard)
+      state = {
+        ...state,
+        turnStep: 'DISCARD_ON_SEVEN',
+        lastDiceRoll: [3, 4],
+        pendingDiscards: { [opp1]: 4 },
+        robberReturnStep: 'MAIN_PHASE',
+        players: {
+          ...state.players,
+          [opp1]: {
+            ...state.players[opp1]!,
+            resources: { WOOD: 3, BRICK: 2, SHEEP: 2, WHEAT: 1, ORE: 1 },
+          },
+          [opp2]: {
+            ...state.players[opp2]!,
+            resources: { WOOD: 2, BRICK: 2, SHEEP: 1, WHEAT: 1, ORE: 1 },
+          },
+        },
+      };
+
+      // Find a hex where opp1 and opp2 both have buildings so victim selection is triggered
+      const targetHex = Object.values(state.board.hexes).find(
+        (h) => h.id !== state.board.robberHexId
+      )!;
+      const touchingVertices = Object.values(state.board.vertices).filter((v) =>
+        v.touchingHexIds.includes(targetHex.id)
+      );
+      const v1 = touchingVertices[0]!;
+      const v2 = touchingVertices[2]!;
+      v1.building = 'settlement';
+      v1.ownerId = opp1;
+      v2.building = 'city';
+      v2.ownerId = opp2;
+
+      // opp1 discards 4 cards -> transitions to MOVE_ROBBER
+      state = applyCatanAction(state, opp1, {
+        type: 'CATAN_DISCARD_RESOURCES',
+        resources: { WOOD: 2, BRICK: 1, SHEEP: 1 },
+      });
+      expect(state.turnStep).toBe('MOVE_ROBBER');
+
+      // Active player moves robber to targetHex -> transitions to SELECT_ROBBER_VICTIM
+      state = applyCatanAction(state, activePid, {
+        type: 'CATAN_MOVE_ROBBER',
+        targetHexId: targetHex.id,
+      });
+      expect(state.turnStep).toBe('SELECT_ROBBER_VICTIM');
+      expect(state.robberEligibleVictimIds).toContain(opp1);
+      expect(state.robberEligibleVictimIds).toContain(opp2);
+
+      // Active player selects opp1 (who now has 5 cards left) -> shuffles opp1's 5 cards
+      state = applyCatanAction(state, activePid, {
+        type: 'CATAN_SELECT_ROBBER_VICTIM',
+        victimPlayerId: opp1,
+      });
+      expect(state.turnStep).toBe('STEAL_ROBBER_CARD');
+      expect(state.robberShuffledVictimCards).toHaveLength(5);
+
+      // Active player picks index 2 from the 5 shuffled cards
+      const activeBeforeTotal = Object.values(
+        state.players[activePid]!.resources
+      ).reduce((a, b) => a + b, 0);
+      state = applyCatanAction(state, activePid, {
+        type: 'CATAN_STEAL_CARD',
+        cardIndex: 2,
+      });
+      expect(state.turnStep).toBe('MAIN_PHASE');
+      const activeAfterTotal = Object.values(
+        state.players[activePid]!.resources
+      ).reduce((a, b) => a + b, 0);
+      const opp1AfterTotal = Object.values(
+        state.players[opp1]!.resources
+      ).reduce((a, b) => a + b, 0);
+      expect(activeAfterTotal).toBe(activeBeforeTotal + 1);
+      expect(opp1AfterTotal).toBe(4);
+    });
+
+    it('upgrades a settlement to a city by paying first and then clicking a settlement on the board', () => {
+      let state = initCatanGame(['p1', 'p2', 'p3'], 1010, { skipSetup: true });
+      const activePid = state.playerOrder[state.activePlayerIndex]!;
+
+      const mySettlement = Object.values(state.board.vertices).find(
+        (v) => v.ownerId === activePid && v.building === 'settlement'
+      )!;
+
+      state = {
+        ...state,
+        turnStep: 'MAIN_PHASE',
+        players: {
+          ...state.players,
+          [activePid]: {
+            ...state.players[activePid]!,
+            resources: { WOOD: 0, BRICK: 0, SHEEP: 0, WHEAT: 2, ORE: 3 },
+          },
+        },
+      };
+
+      // Step 1: Pay 2 WHEAT + 3 ORE to start City Upgrade
+      state = applyCatanAction(state, activePid, {
+        type: 'CATAN_START_UPGRADE_CITY',
+      });
+      expect(state.turnStep).toBe('SELECT_CITY_UPGRADE');
+      expect(state.cityUpgradePaid).toBe(true);
+      expect(state.players[activePid]!.resources.WHEAT).toBe(0);
+      expect(state.players[activePid]!.resources.ORE).toBe(0);
+
+      // Step 2: Click the settlement on the board to complete upgrade
+      state = applyCatanAction(state, activePid, {
+        type: 'CATAN_UPGRADE_CITY',
+        vertexId: mySettlement.id,
+      });
+      expect(state.turnStep).toBe('MAIN_PHASE');
+      expect(state.cityUpgradePaid).toBe(false);
+      expect(state.board.vertices[mySettlement.id]!.building).toBe('city');
     });
   });
 });

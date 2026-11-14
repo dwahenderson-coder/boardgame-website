@@ -7,6 +7,10 @@ import {
   CatanSanitizedGameState,
 } from '../games/catan/index.js';
 import {
+  ClueGameState,
+  ClueSanitizedGameState,
+} from '../games/clue/index.js';
+import {
   CribbageGameState,
   CribbageSanitizedGameState,
 } from '../games/cribbage/index.js';
@@ -83,6 +87,7 @@ import {
 } from '../types/game.js';
 import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
+import { ClueBoard } from './ClueBoard.js';
 import { CribbageBoard } from './CribbageBoard.js';
 import { DominionBoard } from './DominionBoard.js';
 import { EuchreBoard } from './EuchreBoard.js';
@@ -260,8 +265,13 @@ export const SandboxApp: React.FC = () => {
   const localActivePlayerId =
     'gameId' in localGameState && localGameState.gameId === 'power_grid'
       ? getPowerGridActivePlayerId(localGameState as PowerGridGameState)
-      : localGameState.playerOrder[localGameState.activePlayerIndex] ??
-        localGameState.playerOrder[0]!;
+      : 'gameId' in localGameState &&
+          localGameState.gameId === 'clue' &&
+          localGameState.turnStep === 'DISPROVING' &&
+          localGameState.activeSuggestion?.disproverPlayerId
+        ? localGameState.activeSuggestion.disproverPlayerId
+        : localGameState.playerOrder[localGameState.activePlayerIndex] ??
+          localGameState.playerOrder[0]!;
 
   const localViewedPlayerId =
     viewport === 'GOD_MODE' ? localActivePlayerId : viewport;
@@ -282,6 +292,8 @@ export const SandboxApp: React.FC = () => {
 
   const isCatanActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'catan';
+  const isClueActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'clue';
   const isHoldemActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'holdem';
   const isEuchreActive =
@@ -302,6 +314,9 @@ export const SandboxApp: React.FC = () => {
       : null;
   const catanSanitized = isCatanActive
     ? (activeSanitized as CatanSanitizedGameState)
+    : null;
+  const clueSanitized = isClueActive
+    ? (activeSanitized as ClueSanitizedGameState)
     : null;
   const holdemSanitized = isHoldemActive
     ? (activeSanitized as HoldemSanitizedGameState)
@@ -534,6 +549,23 @@ export const SandboxApp: React.FC = () => {
             ticketPoints: 0,
             totalScore: p.victoryPoints,
             trainsRemaining: p.settlementsRemaining,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'clue') {
+      const cls = localGameState as ClueGameState;
+      return cls.playerOrder
+        .map((pid) => {
+          const isWin = cls.winnerId === pid ? 1 : 0;
+          return {
+            playerId: pid,
+            name: `${pid} (${cls.players[pid]!.suspect})`,
+            routePoints: isWin,
+            ticketPoints: 0,
+            totalScore: isWin,
+            trainsRemaining: cls.players[pid]!.hand.length,
             tickets: [],
           };
         })
@@ -1555,6 +1587,17 @@ export const SandboxApp: React.FC = () => {
               playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
               sendAction={(action) =>
                 dispatchEngineAction(viewedPlayerId, action)
+              }
+            />
+          ) : clueSanitized ? (
+            /* Mount <ClueBoard /> when `selectedGameId === 'clue'` */
+            <ClueBoard
+              gameState={clueSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              isLocalSandbox={runnerMode === 'LOCAL'}
+              sendAction={(action, actorOverrideId) =>
+                dispatchEngineAction(actorOverrideId ?? viewedPlayerId, action)
               }
             />
           ) : kingsCornersSanitized ? (

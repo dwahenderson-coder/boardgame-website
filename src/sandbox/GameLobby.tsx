@@ -1131,12 +1131,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               </div>
             </div>
 
-            {/* 2C. Player Color Selection Bar */}
+            {/* 2C. Player Color / Suspect Selection Bar */}
             <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2.5">
                   <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
-                    🎨 Claim Your Player Color
+                    {stagedGame.id === 'clue'
+                      ? '🕵️ Select the Suspect You Will Play As'
+                      : '🎨 Claim Your Player Color'}
                   </span>
                   <span className="text-[10px] text-slate-400">
                     {mySettings.colorId
@@ -1144,7 +1146,9 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                           getGameColorById(stagedGame.id, mySettings.colorId)
                             ?.name ?? mySettings.colorId
                         }`
-                      : 'Click an open swatch below'}
+                      : stagedGame.id === 'clue'
+                        ? 'Click an open Suspect below'
+                        : 'Click an open swatch below'}
                   </span>
                 </div>
 

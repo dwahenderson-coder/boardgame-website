@@ -318,6 +318,11 @@ export type CatanTurnStep =
   | 'SETUP_SETTLEMENT_2'
   | 'SETUP_ROAD_2'
   | 'ROLL_DICE'
+  | 'DISCARD_ON_SEVEN'
+  | 'MOVE_ROBBER'
+  | 'SELECT_ROBBER_VICTIM'
+  | 'STEAL_ROBBER_CARD'
+  | 'SELECT_CITY_UPGRADE'
   | 'MAIN_PHASE';
 
 export interface CatanGameState {
@@ -335,6 +340,13 @@ export interface CatanGameState {
   readonly freeRoadsRemaining: number;
   readonly lastDiceRoll: readonly [number, number] | null;
   readonly devCardDeck: readonly CatanDevCardInstance[];
+  readonly hasPlayedDevCardThisTurn: boolean;
+  readonly pendingDiscards: Readonly<Record<string, number>>;
+  readonly robberReturnStep: 'ROLL_DICE' | 'MAIN_PHASE';
+  readonly robberEligibleVictimIds: readonly string[];
+  readonly robberVictimId: string | null;
+  readonly robberShuffledVictimCards: readonly CatanResource[];
+  readonly cityUpgradePaid: boolean;
   readonly largestArmyOwnerId: string | null;
   readonly largestArmySize: number;
   readonly longestRoadOwnerId: string | null;
@@ -360,6 +372,12 @@ export interface CatanSanitizedGameState {
   readonly freeRoadsRemaining: number;
   readonly lastDiceRoll: readonly [number, number] | null;
   readonly devCardDeckCount: number;
+  readonly hasPlayedDevCardThisTurn: boolean;
+  readonly pendingDiscards: Readonly<Record<string, number>>;
+  readonly robberEligibleVictimIds: readonly string[];
+  readonly robberVictimId: string | null;
+  readonly robberVictimCardCount: number;
+  readonly cityUpgradePaid: boolean;
   readonly largestArmyOwnerId: string | null;
   readonly largestArmySize: number;
   readonly longestRoadOwnerId: string | null;
@@ -378,6 +396,30 @@ export interface CatanSanitizedGameState {
 
 export interface CatanRollDiceAction {
   readonly type: 'CATAN_ROLL_DICE';
+}
+
+export interface CatanDiscardResourcesAction {
+  readonly type: 'CATAN_DISCARD_RESOURCES';
+  readonly resources: Partial<Record<CatanResource, number>>;
+}
+
+export interface CatanMoveRobberAction {
+  readonly type: 'CATAN_MOVE_ROBBER';
+  readonly targetHexId: string;
+}
+
+export interface CatanSelectRobberVictimAction {
+  readonly type: 'CATAN_SELECT_ROBBER_VICTIM';
+  readonly victimPlayerId: string;
+}
+
+export interface CatanStealCardAction {
+  readonly type: 'CATAN_STEAL_CARD';
+  readonly cardIndex: number;
+}
+
+export interface CatanStartUpgradeCityAction {
+  readonly type: 'CATAN_START_UPGRADE_CITY';
 }
 
 export interface CatanPlaceInitialSettlementAction {
@@ -471,6 +513,11 @@ export interface CatanEndTurnAction {
 
 export type CatanAction =
   | CatanRollDiceAction
+  | CatanDiscardResourcesAction
+  | CatanMoveRobberAction
+  | CatanSelectRobberVictimAction
+  | CatanStealCardAction
+  | CatanStartUpgradeCityAction
   | CatanPlaceInitialSettlementAction
   | CatanPlaceInitialRoadAction
   | CatanBuildRoadAction
@@ -851,6 +898,13 @@ export function initCatanGame(
     freeRoadsRemaining: 0,
     lastDiceRoll: winningRoll,
     devCardDeck,
+    hasPlayedDevCardThisTurn: false,
+    pendingDiscards: {},
+    robberReturnStep: 'MAIN_PHASE',
+    robberEligibleVictimIds: [],
+    robberVictimId: null,
+    robberShuffledVictimCards: [],
+    cityUpgradePaid: false,
     largestArmyOwnerId: null,
     largestArmySize: 0,
     longestRoadOwnerId: null,
@@ -1049,6 +1103,38 @@ export function validateCatanAction(
     }
   }
 
+  // Discarding on a 7 can be performed by any player who has >= 8 cards (pendingDiscards[playerId] > 0)
+  if (action.type === 'CATAN_DISCARD_RESOURCES') {
+    if (state.turnStep !== 'DISCARD_ON_SEVEN') {
+      return {
+        valid: false,
+        reason: 'Not currently waiting for players to discard on a 7.',
+      };
+    }
+    const required = state.pendingDiscards[playerId] ?? 0;
+    if (required <= 0) {
+      return {
+        valid: false,
+        reason: 'You do not need to discard any resource cards.',
+      };
+    }
+    const discardBundle = normalizeResourceBundle(action.resources);
+    const totalToDiscard = getTotalResourceCards(discardBundle);
+    if (totalToDiscard !== required) {
+      return {
+        valid: false,
+        reason: `You must discard exactly ${required} resource card(s) (half your hand rounded down).`,
+      };
+    }
+    if (!hasResources(player.resources, discardBundle)) {
+      return {
+        valid: false,
+        reason: 'You can only discard resource cards that you hold.',
+      };
+    }
+    return { valid: true };
+  }
+
   // All other actions require it to be `playerId`'s turn
   if (playerId !== activePlayerId) {
     return {
@@ -1085,6 +1171,65 @@ export function validateCatanAction(
         };
       }
       return { valid: true };
+
+    case 'CATAN_MOVE_ROBBER': {
+      if (state.turnStep !== 'MOVE_ROBBER') {
+        return {
+          valid: false,
+          reason: 'Not currently in the Move Robber step.',
+        };
+      }
+      if (!state.board.hexes[action.targetHexId]) {
+        return {
+          valid: false,
+          reason: `Target hex ${action.targetHexId} does not exist.`,
+        };
+      }
+      if (action.targetHexId === state.board.robberHexId) {
+        return {
+          valid: false,
+          reason: 'You must move the robber to a different hex.',
+        };
+      }
+      return { valid: true };
+    }
+
+    case 'CATAN_SELECT_ROBBER_VICTIM': {
+      if (state.turnStep !== 'SELECT_ROBBER_VICTIM') {
+        return {
+          valid: false,
+          reason: 'Not currently selecting a player to steal from.',
+        };
+      }
+      if (!state.robberEligibleVictimIds.includes(action.victimPlayerId)) {
+        return {
+          valid: false,
+          reason: 'Selected player does not have a settlement or city on the robber hex.',
+        };
+      }
+      return { valid: true };
+    }
+
+    case 'CATAN_STEAL_CARD': {
+      if (state.turnStep !== 'STEAL_ROBBER_CARD') {
+        return {
+          valid: false,
+          reason: 'Not currently picking a resource card to steal.',
+        };
+      }
+      const count = state.robberShuffledVictimCards.length;
+      if (
+        !Number.isInteger(action.cardIndex) ||
+        action.cardIndex < 0 ||
+        action.cardIndex >= count
+      ) {
+        return {
+          valid: false,
+          reason: `Invalid card selection: choose a card index between 0 and ${count - 1}.`,
+        };
+      }
+      return { valid: true };
+    }
 
     case 'CATAN_PLACE_INITIAL_SETTLEMENT': {
       if (
@@ -1262,11 +1407,11 @@ export function validateCatanAction(
       return { valid: true };
     }
 
-    case 'CATAN_UPGRADE_CITY': {
+    case 'CATAN_START_UPGRADE_CITY': {
       if (state.turnStep !== 'MAIN_PHASE') {
         return {
           valid: false,
-          reason: 'You must roll the dice before upgrading a city.',
+          reason: 'You must be in the main phase of your turn to upgrade a city.',
         };
       }
       if (player.citiesRemaining <= 0) {
@@ -1278,11 +1423,53 @@ export function validateCatanAction(
           reason: 'Upgrading to a City requires 2 WHEAT and 3 ORE.',
         };
       }
+      const hasSettlement = Object.values(state.board.vertices).some(
+        (v) => v.ownerId === playerId && v.building === 'settlement'
+      );
+      if (!hasSettlement) {
+        return {
+          valid: false,
+          reason: 'You do not have any Settlements on the board to upgrade.',
+        };
+      }
+      return { valid: true };
+    }
+
+    case 'CATAN_UPGRADE_CITY': {
+      if (
+        state.turnStep !== 'MAIN_PHASE' &&
+        state.turnStep !== 'SELECT_CITY_UPGRADE'
+      ) {
+        return {
+          valid: false,
+          reason: 'You must roll the dice before upgrading a city.',
+        };
+      }
+      if (player.citiesRemaining <= 0) {
+        return { valid: false, reason: 'No cities remaining in supply.' };
+      }
+      if (
+        !state.cityUpgradePaid &&
+        (player.resources.WHEAT < 2 || player.resources.ORE < 3)
+      ) {
+        return {
+          valid: false,
+          reason: 'Upgrading to a City requires 2 WHEAT and 3 ORE.',
+        };
+      }
       const targetVertexId =
         action.vertexId ??
         (action.buildingId?.startsWith('BLD_')
           ? action.buildingId.slice(4)
           : action.buildingId);
+
+      if (state.turnStep === 'SELECT_CITY_UPGRADE' && !targetVertexId) {
+        return {
+          valid: false,
+          reason: 'Click on one of your Settlements on the board to upgrade it to a City.',
+        };
+      }
+
       const vertex = targetVertexId
         ? state.board.vertices[targetVertexId]
         : Object.values(state.board.vertices).find(
@@ -1339,6 +1526,13 @@ export function validateCatanAction(
           reason: 'Knight cards can only be played on your turn.',
         };
       }
+      if (state.hasPlayedDevCardThisTurn) {
+        return {
+          valid: false,
+          reason:
+            'You may only play 1 Progress or Knight Development Card per turn.',
+        };
+      }
       const playableKnight = player.devCards.find(
         (c) => c.type === 'KNIGHT' && c.purchasedOnTurn < state.turnNumber
       );
@@ -1380,6 +1574,13 @@ export function validateCatanAction(
           reason: 'Progress cards can only be played on your turn.',
         };
       }
+      if (state.hasPlayedDevCardThisTurn) {
+        return {
+          valid: false,
+          reason:
+            'You may only play 1 Progress or Knight Development Card per turn.',
+        };
+      }
       const playable = player.devCards.find(
         (c) => c.type === 'MONOPOLY' && c.purchasedOnTurn < state.turnNumber
       );
@@ -1404,6 +1605,13 @@ export function validateCatanAction(
         return {
           valid: false,
           reason: 'Progress cards can only be played on your turn.',
+        };
+      }
+      if (state.hasPlayedDevCardThisTurn) {
+        return {
+          valid: false,
+          reason:
+            'You may only play 1 Progress or Knight Development Card per turn.',
         };
       }
       const playable = player.devCards.find(
@@ -1437,6 +1645,13 @@ export function validateCatanAction(
         return {
           valid: false,
           reason: 'Progress cards can only be played on your turn.',
+        };
+      }
+      if (state.hasPlayedDevCardThisTurn) {
+        return {
+          valid: false,
+          reason:
+            'You may only play 1 Progress or Knight Development Card per turn.',
         };
       }
       const playable = player.devCards.find(
@@ -1843,40 +2058,221 @@ export function applyCatanAction(
             }
           }
         }
+
+        const prodText =
+          productionNotes.length > 0
+            ? `Produced: ${productionNotes.join(', ')}.`
+            : 'No settlements on matching hexes.';
+
+        return {
+          ...state,
+          prng: nextPrng,
+          turnStep: 'MAIN_PHASE',
+          lastDiceRoll: [d1Val, d2Val],
+          players: nextPlayers,
+          lastActionSummary: `${playerId} rolled 🎲 ${d1Val} + ${d2Val} = ${sum}. ${prodText}`,
+        };
       }
 
-      const prodText =
-        sum === 7
-          ? 'Rolled 7 (Robber activated — no resources produced).'
-          : productionNotes.length > 0
-          ? `Produced: ${productionNotes.join(', ')}.`
-          : 'No settlements on matching hexes.';
+      // Rolled a 7! Check if any player has 8 or more resource cards
+      const pendingDiscards: Record<string, number> = {};
+      for (const pid of state.playerOrder) {
+        const totalCards = getTotalResourceCards(nextPlayers[pid]!.resources);
+        if (totalCards >= 8) {
+          pendingDiscards[pid] = Math.floor(totalCards / 2);
+        }
+      }
+
+      const hasPendingDiscards = Object.keys(pendingDiscards).length > 0;
+      const nextStep: CatanTurnStep = hasPendingDiscards
+        ? 'DISCARD_ON_SEVEN'
+        : 'MOVE_ROBBER';
+
+      const discardNote = hasPendingDiscards
+        ? `Players with 8+ cards must discard half rounding down (${Object.entries(
+            pendingDiscards
+          )
+            .map(([pid, cnt]) => `${pid}: ${cnt}`)
+            .join(', ')}), then ${playerId} moves the Robber.`
+        : `${playerId}, select a hex on the board to move the Robber!`;
 
       return {
         ...state,
         prng: nextPrng,
-        turnStep: 'MAIN_PHASE',
+        turnStep: nextStep,
+        pendingDiscards,
+        robberReturnStep: 'MAIN_PHASE',
+        robberEligibleVictimIds: [],
+        robberVictimId: null,
+        robberShuffledVictimCards: [],
         lastDiceRoll: [d1Val, d2Val],
         players: nextPlayers,
-        lastActionSummary: `${playerId} rolled 🎲 ${d1Val} + ${d2Val} = ${sum}. ${prodText}`,
+        lastActionSummary: `${playerId} rolled 🎲 ${d1Val} + ${d2Val} = 7! ${discardNote}`,
       };
     }
 
-    case 'CATAN_UPGRADE_CITY': {
-      const targetVertexId =
-        action.vertexId ??
-        (action.buildingId?.startsWith('BLD_')
-          ? action.buildingId.slice(4)
-          : action.buildingId) ??
-        Object.values(state.board.vertices).find(
-          (v) => v.ownerId === playerId && v.building === 'settlement'
-        )?.id;
-
-      const board = cloneBoard(state.board);
-      if (targetVertexId && board.vertices[targetVertexId]) {
-        board.vertices[targetVertexId]!.building = 'city';
+    case 'CATAN_DISCARD_RESOURCES': {
+      const discardBundle = normalizeResourceBundle(action.resources);
+      const updatedResources = { ...player.resources };
+      for (const r of ALL_CATAN_RESOURCES) {
+        updatedResources[r] -= discardBundle[r];
       }
 
+      const nextPendingDiscards: Record<string, number> = {
+        ...state.pendingDiscards,
+      };
+      delete nextPendingDiscards[playerId];
+
+      const allDiscarded = Object.keys(nextPendingDiscards).length === 0;
+      const activePlayerId = state.playerOrder[state.activePlayerIndex]!;
+
+      return {
+        ...state,
+        turnStep: allDiscarded ? 'MOVE_ROBBER' : 'DISCARD_ON_SEVEN',
+        pendingDiscards: nextPendingDiscards,
+        players: {
+          ...state.players,
+          [playerId]: {
+            ...player,
+            resources: updatedResources,
+          },
+        },
+        lastActionSummary: allDiscarded
+          ? `${playerId} discarded ${formatResourceBundle(
+              discardBundle
+            )}. All discards complete! ${activePlayerId}, select a hex to move the Robber.`
+          : `${playerId} discarded ${formatResourceBundle(
+              discardBundle
+            )}. Waiting on remaining players to discard.`,
+      };
+    }
+
+    case 'CATAN_MOVE_ROBBER': {
+      const board = cloneBoard(state.board);
+      const targetHexId = action.targetHexId;
+      for (const h of Object.values(board.hexes)) {
+        h.hasRobber = h.id === targetHexId;
+      }
+      board.robberHexId = targetHexId;
+
+      const targetHex = board.hexes[targetHexId]!;
+      const adjacentOpponents: string[] = [];
+      for (const vid of targetHex.vertexIds) {
+        const ownerId = board.vertices[vid]?.ownerId;
+        if (
+          ownerId &&
+          ownerId !== playerId &&
+          !adjacentOpponents.includes(ownerId)
+        ) {
+          adjacentOpponents.push(ownerId);
+        }
+      }
+
+      const { hexes, buildings } = syncLegacyHexesAndBuildings(board);
+
+      if (adjacentOpponents.length > 0) {
+        return {
+          ...state,
+          board,
+          hexes,
+          buildings,
+          turnStep: 'SELECT_ROBBER_VICTIM',
+          robberEligibleVictimIds: adjacentOpponents,
+          robberVictimId: null,
+          robberShuffledVictimCards: [],
+          lastActionSummary: `${playerId} moved the Robber to hex (${targetHexId}). Select a player with a settlement or city on that hex (${adjacentOpponents.join(
+            ', '
+          )}) to steal from!`,
+        };
+      }
+
+      return {
+        ...state,
+        board,
+        hexes,
+        buildings,
+        turnStep: state.robberReturnStep,
+        robberEligibleVictimIds: [],
+        robberVictimId: null,
+        robberShuffledVictimCards: [],
+        lastActionSummary: `${playerId} moved the Robber to hex (${targetHexId}) (no opponent settlements/cities on that hex).`,
+      };
+    }
+
+    case 'CATAN_SELECT_ROBBER_VICTIM': {
+      const victimId = action.victimPlayerId;
+      const victim = state.players[victimId]!;
+      const pool: CatanResource[] = [];
+      for (const r of ALL_CATAN_RESOURCES) {
+        for (let i = 0; i < victim.resources[r]; i++) {
+          pool.push(r);
+        }
+      }
+
+      if (pool.length === 0) {
+        return {
+          ...state,
+          turnStep: state.robberReturnStep,
+          robberEligibleVictimIds: [],
+          robberVictimId: null,
+          robberShuffledVictimCards: [],
+          lastActionSummary: `${playerId} selected ${victimId}, who has 0 resource cards to steal.`,
+        };
+      }
+
+      const rng = createSeededRng(
+        `${state.board.seed}_ROBBER_SHUFFLE_${state.turnNumber}_${victimId}_${pool.length}`
+      );
+      const shuffledCards = shuffleWithRng(pool, rng);
+
+      return {
+        ...state,
+        turnStep: 'STEAL_ROBBER_CARD',
+        robberVictimId: victimId,
+        robberShuffledVictimCards: shuffledCards,
+        lastActionSummary: `${victimId}'s ${shuffledCards.length} resource card(s) have been shuffled! ${playerId}, pick 1 card to steal.`,
+      };
+    }
+
+    case 'CATAN_STEAL_CARD': {
+      const victimId = state.robberVictimId!;
+      const victim = state.players[victimId]!;
+      const stolenRes = state.robberShuffledVictimCards[action.cardIndex]!;
+
+      const nextPlayers: Record<string, CatanPlayerState> = {
+        ...state.players,
+        [victimId]: {
+          ...victim,
+          resources: {
+            ...victim.resources,
+            [stolenRes]: victim.resources[stolenRes] - 1,
+          },
+        },
+        [playerId]: {
+          ...player,
+          resources: {
+            ...player.resources,
+            [stolenRes]: player.resources[stolenRes] + 1,
+          },
+        },
+      };
+
+      return {
+        ...state,
+        turnStep: state.robberReturnStep,
+        robberEligibleVictimIds: [],
+        robberVictimId: null,
+        robberShuffledVictimCards: [],
+        players: nextPlayers,
+        lastActionSummary: `${playerId} picked card #${
+          action.cardIndex + 1
+        } from ${victimId}'s ${
+          state.robberShuffledVictimCards.length
+        } shuffled card(s) and stole 1 resource card!`,
+      };
+    }
+
+    case 'CATAN_START_UPGRADE_CITY': {
       const updatedPlayer: CatanPlayerState = {
         ...player,
         resources: {
@@ -1886,9 +2282,75 @@ export function applyCatanAction(
         },
       };
 
+      return {
+        ...state,
+        turnStep: 'SELECT_CITY_UPGRADE',
+        cityUpgradePaid: true,
+        players: {
+          ...state.players,
+          [playerId]: updatedPlayer,
+        },
+        lastActionSummary: `${playerId} paid 2 WHEAT + 3 ORE to upgrade a City. Click one of your Settlements on the board to upgrade it!`,
+      };
+    }
+
+    case 'CATAN_UPGRADE_CITY': {
+      const explicitTargetId =
+        action.vertexId ??
+        (action.buildingId?.startsWith('BLD_')
+          ? action.buildingId.slice(4)
+          : action.buildingId);
+
+      // If in MAIN_PHASE and no vertexId/buildingId was provided yet, take payment first and prompt the player to click their settlement on the board!
+      if (state.turnStep === 'MAIN_PHASE' && !explicitTargetId) {
+        const updatedPlayer: CatanPlayerState = {
+          ...player,
+          resources: {
+            ...player.resources,
+            WHEAT: player.resources.WHEAT - 2,
+            ORE: player.resources.ORE - 3,
+          },
+        };
+
+        return {
+          ...state,
+          turnStep: 'SELECT_CITY_UPGRADE',
+          cityUpgradePaid: true,
+          players: {
+            ...state.players,
+            [playerId]: updatedPlayer,
+          },
+          lastActionSummary: `${playerId} paid 2 WHEAT + 3 ORE to upgrade a City. Click one of your Settlements on the board to upgrade it!`,
+        };
+      }
+
+      const targetVertexId =
+        explicitTargetId ??
+        Object.values(state.board.vertices).find(
+          (v) => v.ownerId === playerId && v.building === 'settlement'
+        )?.id;
+
+      const board = cloneBoard(state.board);
+      if (targetVertexId && board.vertices[targetVertexId]) {
+        board.vertices[targetVertexId]!.building = 'city';
+      }
+
+      const updatedPlayer: CatanPlayerState = state.cityUpgradePaid
+        ? player
+        : {
+            ...player,
+            resources: {
+              ...player.resources,
+              WHEAT: player.resources.WHEAT - 2,
+              ORE: player.resources.ORE - 3,
+            },
+          };
+
       const nextState = recalculateAwardsAndVictoryPoints({
         ...state,
         board,
+        turnStep: 'MAIN_PHASE',
+        cityUpgradePaid: false,
         players: {
           ...state.players,
           [playerId]: updatedPlayer,
@@ -1939,6 +2401,8 @@ export function applyCatanAction(
         (c) => c.type === 'KNIGHT' && c.purchasedOnTurn < state.turnNumber
       );
       const nextDevCards = player.devCards.filter((_, i) => i !== cardIdx);
+      const returnStep: 'ROLL_DICE' | 'MAIN_PHASE' =
+        state.turnStep === 'ROLL_DICE' ? 'ROLL_DICE' : 'MAIN_PHASE';
 
       const board = cloneBoard(state.board);
       // Determine target robber hex
@@ -1952,7 +2416,6 @@ export function applyCatanAction(
       }
       board.robberHexId = targetHexId;
 
-      // Steal 1 random resource card from an opponent with a settlement/city on targetHexId
       const targetHex = board.hexes[targetHexId]!;
       const adjacentOpponents: string[] = [];
       for (const vid of targetHex.vertexIds) {
@@ -1960,63 +2423,26 @@ export function applyCatanAction(
         if (
           ownerId &&
           ownerId !== playerId &&
-          !adjacentOpponents.includes(ownerId) &&
-          getTotalResourceCards(state.players[ownerId]!.resources) > 0
+          !adjacentOpponents.includes(ownerId)
         ) {
           adjacentOpponents.push(ownerId);
         }
       }
 
-      const victimId =
-        action.victimPlayerId &&
-        adjacentOpponents.includes(action.victimPlayerId)
-          ? action.victimPlayerId
-          : adjacentOpponents[0] ?? null;
-
       const nextPlayers: Record<string, CatanPlayerState> = {
         ...state.players,
-      };
-      let updatedActiveResources = { ...player.resources };
-      let stolenSummary = '';
-
-      if (victimId) {
-        const victim = nextPlayers[victimId]!;
-        const pool: CatanResource[] = [];
-        for (const r of ALL_CATAN_RESOURCES) {
-          for (let i = 0; i < victim.resources[r]; i++) {
-            pool.push(r);
-          }
-        }
-        if (pool.length > 0) {
-          const rng = createSeededRng(
-            `${state.board.seed}_KNIGHT_${state.turnNumber}_${player.faceUpKnights}`
-          );
-          const stolenRes = pool[Math.floor(rng() * pool.length)]!;
-          nextPlayers[victimId] = {
-            ...victim,
-            resources: {
-              ...victim.resources,
-              [stolenRes]: victim.resources[stolenRes] - 1,
-            },
-          };
-          updatedActiveResources = {
-            ...updatedActiveResources,
-            [stolenRes]: updatedActiveResources[stolenRes] + 1,
-          };
-          stolenSummary = ` and stole 1 resource card from ${victimId}`;
-        }
-      }
-
-      nextPlayers[playerId] = {
-        ...player,
-        resources: updatedActiveResources,
-        devCards: nextDevCards,
-        faceUpKnights: player.faceUpKnights + 1,
+        [playerId]: {
+          ...player,
+          devCards: nextDevCards,
+          faceUpKnights: player.faceUpKnights + 1,
+        },
       };
 
       const nextState = recalculateAwardsAndVictoryPoints({
         ...state,
         board,
+        hasPlayedDevCardThisTurn: true,
+        robberReturnStep: returnStep,
         players: nextPlayers,
       });
 
@@ -2027,9 +2453,79 @@ export function applyCatanAction(
           ? ` — ${playerId} claims Largest Army (+2 VP)!`
           : '';
 
+      // If no targetHexId was passed in action, enter MOVE_ROBBER so the player can select the hex on the board (unless no opponents have cards anywhere on default hex)
+      if (!action.targetHexId) {
+        // Check if any opponent on targetHexId has resource cards; if so, prompt victim selection
+        const opponentsWithCards = adjacentOpponents.filter(
+          (oid) => getTotalResourceCards(state.players[oid]!.resources) > 0
+        );
+        if (opponentsWithCards.length > 0) {
+          return {
+            ...nextState,
+            turnStep: 'SELECT_ROBBER_VICTIM',
+            robberEligibleVictimIds: adjacentOpponents,
+            robberVictimId: null,
+            robberShuffledVictimCards: [],
+            lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}. Select a player on that hex to steal from!`,
+          };
+        }
+        return {
+          ...nextState,
+          turnStep: returnStep,
+          robberEligibleVictimIds: [],
+          robberVictimId: null,
+          robberShuffledVictimCards: [],
+          lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}`,
+        };
+      }
+
+      if (
+        action.victimPlayerId &&
+        adjacentOpponents.includes(action.victimPlayerId)
+      ) {
+        const victim = state.players[action.victimPlayerId]!;
+        const pool: CatanResource[] = [];
+        for (const r of ALL_CATAN_RESOURCES) {
+          for (let i = 0; i < victim.resources[r]; i++) {
+            pool.push(r);
+          }
+        }
+        if (pool.length > 0) {
+          const rng = createSeededRng(
+            `${state.board.seed}_KNIGHT_${state.turnNumber}_${player.faceUpKnights}`
+          );
+          const shuffledCards = shuffleWithRng(pool, rng);
+          return {
+            ...nextState,
+            turnStep: 'STEAL_ROBBER_CARD',
+            robberEligibleVictimIds: adjacentOpponents,
+            robberVictimId: action.victimPlayerId,
+            robberShuffledVictimCards: shuffledCards,
+            lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}, and selected ${action.victimPlayerId} (${shuffledCards.length} shuffled cards)!`,
+          };
+        }
+      }
+
+      if (adjacentOpponents.length > 0) {
+        return {
+          ...nextState,
+          turnStep: 'SELECT_ROBBER_VICTIM',
+          robberEligibleVictimIds: adjacentOpponents,
+          robberVictimId: null,
+          robberShuffledVictimCards: [],
+          lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}. Select a player on that hex (${adjacentOpponents.join(
+            ', '
+          )}) to steal from!`,
+        };
+      }
+
       return {
         ...nextState,
-        lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${stolenSummary}${armyNote}`,
+        turnStep: returnStep,
+        robberEligibleVictimIds: [],
+        robberVictimId: null,
+        robberShuffledVictimCards: [],
+        lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}`,
       };
     }
 
@@ -2068,6 +2564,7 @@ export function applyCatanAction(
 
       return {
         ...state,
+        hasPlayedDevCardThisTurn: true,
         players: nextPlayers,
         lastActionSummary: `${playerId} played Monopoly on ${targetRes} and collected ${totalClaimed} ${targetRes} from all other players!`,
       };
@@ -2086,6 +2583,7 @@ export function applyCatanAction(
 
       return {
         ...state,
+        hasPlayedDevCardThisTurn: true,
         players: {
           ...state.players,
           [playerId]: {
@@ -2124,6 +2622,7 @@ export function applyCatanAction(
       const nextState = recalculateAwardsAndVictoryPoints({
         ...state,
         board,
+        hasPlayedDevCardThisTurn: true,
         freeRoadsRemaining: state.freeRoadsRemaining + remainingFree,
         players: {
           ...state.players,
@@ -2412,6 +2911,13 @@ export function applyCatanAction(
         activePlayerIndex: nextIndex,
         turnStep: 'ROLL_DICE',
         turnNumber: state.turnNumber + 1,
+        hasPlayedDevCardThisTurn: false,
+        pendingDiscards: {},
+        robberReturnStep: 'MAIN_PHASE',
+        robberEligibleVictimIds: [],
+        robberVictimId: null,
+        robberShuffledVictimCards: [],
+        cityUpgradePaid: false,
         freeRoadsRemaining: 0,
         activeTrade: null,
         lastActionSummary: `${playerId} ended their turn. It is now ${nextPlayerId}'s turn to roll.`,
@@ -2467,6 +2973,12 @@ export function getCatanPlayerPerspective(
     freeRoadsRemaining: state.freeRoadsRemaining,
     lastDiceRoll: state.lastDiceRoll ? [...state.lastDiceRoll] : null,
     devCardDeckCount: state.devCardDeck.length,
+    hasPlayedDevCardThisTurn: state.hasPlayedDevCardThisTurn,
+    pendingDiscards: { ...state.pendingDiscards },
+    robberEligibleVictimIds: [...state.robberEligibleVictimIds],
+    robberVictimId: state.robberVictimId,
+    robberVictimCardCount: state.robberShuffledVictimCards.length,
+    cityUpgradePaid: state.cityUpgradePaid,
     largestArmyOwnerId: state.largestArmyOwnerId,
     largestArmySize: state.largestArmySize,
     longestRoadOwnerId: state.longestRoadOwnerId,

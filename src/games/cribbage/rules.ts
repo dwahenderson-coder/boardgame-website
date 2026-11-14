@@ -453,7 +453,11 @@ function findNextPlayerWithAnyPegCards(
 }
 
 /**
- * Scores the Show (Non-Dealer hands in order, then Dealer hand, then Dealer's Crib).
+ * Scores the Show: begins with the player to the left of the dealer and continues
+ * clockwise around the table until the dealer has counted their hand and the Crib last.
+ * If any player reaches 121+ points (`state.targetScore`) prior to all players counting
+ * their hand (or prior to the Crib), the game ends immediately right there without the
+ * remaining players (or Crib) counting their hands!
  */
 function scoreCribbageShowPhase(
   state: CribbageGameState,
@@ -462,10 +466,9 @@ function scoreCribbageShowPhase(
 ): CribbageGameState {
   const n = state.playerOrder.length;
   const dealerId = state.playerOrder[state.dealerIndex]!;
-  let winnerId: string | null = null;
   const showSummaries: string[] = [];
 
-  // Score hands clockwise starting left of dealer (so non-dealer counts first!)
+  // Score hands clockwise starting with the player to the left of the dealer (offset = 1 .. n)
   for (let offset = 1; offset <= n; offset++) {
     const idx = (state.dealerIndex + offset) % n;
     const pid = state.playerOrder[idx]!;
@@ -485,12 +488,28 @@ function scoreCribbageShowPhase(
     };
     showSummaries.push(`${pid} Hand +${breakdown.total}`);
 
-    if (!winnerId && updatedScore >= state.targetScore) {
-      winnerId = pid;
+    // Immediate cutoff if this player reaches 121+ points! Remaining players and Crib do NOT count.
+    if (updatedScore >= state.targetScore) {
+      return {
+        ...state,
+        phase: 'GAME_OVER',
+        turnStep: 'HAND_OVER',
+        turnNumber: state.turnNumber + 1,
+        runningCount: 0,
+        currentSequence: [],
+        cribZone: {
+          ...state.cribZone,
+          visibility: 'public',
+        },
+        cribBreakdown: null,
+        players: nextPlayers,
+        winnerId: pid,
+        lastActionSummary: `${lastPegActionText} — Show Scores: ${showSummaries.join(' • ')} — ${pid} reaches ${updatedScore} pts and wins immediately!`,
+      };
     }
   }
 
-  // Score Dealer's Crib
+  // Score Dealer's Crib last (only reached if no player won during hand counting)
   const cribBreakdown = evaluateCribbageHand(
     state.cribZone.cards,
     state.starterCard,
@@ -505,9 +524,7 @@ function scoreCribbageShowPhase(
   };
   showSummaries.push(`${dealerId} Crib +${cribBreakdown.total}`);
 
-  if (!winnerId && dealerFinalScore >= state.targetScore) {
-    winnerId = dealerId;
-  }
+  const winnerId = dealerFinalScore >= state.targetScore ? dealerId : null;
 
   return {
     ...state,
