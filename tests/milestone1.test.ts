@@ -519,47 +519,89 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(created.room.selectedGameId).toBe('catan');
     });
 
-    it('initializes Catan for 3-4 players, validates dice rolls, produces resources, and builds roads/settlements', () => {
+    it('initializes Catan for 3-4 players, runs snake-draft setup with high-roll starting player, validates dice rolls, produces resources, and builds roads/settlements', () => {
       const catanEngine = GameRegistry.catan;
 
       // Reject 2-player Catan initialization
       expect(() => catanEngine.initGame(['p1', 'p2'], 101)).toThrow(/3 and 4 players/);
 
-      // Initialize 3-player Catan match
+      // Initialize 3-player Catan match (starts in SETUP_SETTLEMENT_1 with highest dice roller first)
       let state = catanEngine.initGame(['p1', 'p2', 'p3'], 101) as CatanGameState;
       expect(state.gameId).toBe('catan');
       expect(state.hexes).toHaveLength(19);
+      expect(Object.keys(state.board.vertices)).toHaveLength(54);
+      expect(Object.keys(state.board.edges)).toHaveLength(72);
+      expect(state.turnStep).toBe('SETUP_SETTLEMENT_1');
+
+      // Complete Snake Draft: Forward (0 -> 1 -> 2) for 1st Settlement + Road, then Reverse (2 -> 1 -> 0) for 2nd Settlement + Road
+      for (let i = 0; i < state.playerOrder.length; i++) {
+        const pid = state.playerOrder[i]!;
+        state = catanEngine.applyAction(state, pid, {
+          type: 'CATAN_BUILD_SETTLEMENT',
+        }) as CatanGameState;
+        state = catanEngine.applyAction(state, pid, {
+          type: 'CATAN_BUILD_ROAD',
+        }) as CatanGameState;
+      }
+      for (let i = state.playerOrder.length - 1; i >= 0; i--) {
+        const pid = state.playerOrder[i]!;
+        state = catanEngine.applyAction(state, pid, {
+          type: 'CATAN_BUILD_SETTLEMENT',
+        }) as CatanGameState;
+        state = catanEngine.applyAction(state, pid, {
+          type: 'CATAN_BUILD_ROAD',
+        }) as CatanGameState;
+      }
+
+      const startPid = state.playerOrder[0]!;
+      const secondPid = state.playerOrder[1]!;
       expect(state.turnStep).toBe('ROLL_DICE');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe(startPid);
 
       // Cannot build before rolling dice
       expect(
-        catanEngine.validateAction(state, 'p1', { type: 'CATAN_BUILD_ROAD' }).valid
+        catanEngine.validateAction(state, startPid, { type: 'CATAN_BUILD_ROAD' }).valid
       ).toBe(false);
 
-      // Roll dice on p1's turn
+      // Roll dice on startPid's turn
       expect(
-        catanEngine.validateAction(state, 'p1', { type: 'CATAN_ROLL_DICE' }).valid
+        catanEngine.validateAction(state, startPid, { type: 'CATAN_ROLL_DICE' }).valid
       ).toBe(true);
-      state = catanEngine.applyAction(state, 'p1', {
+      state = catanEngine.applyAction(state, startPid, {
         type: 'CATAN_ROLL_DICE',
       }) as CatanGameState;
       expect(state.turnStep).toBe('MAIN_PHASE');
       expect(state.lastDiceRoll).not.toBeNull();
 
-      // Build a road using starting resources (1 BRICK + 1 LUMBER)
+      // Grant 1 WOOD + 1 BRICK so startPid can build a road on their network
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          [startPid]: {
+            ...state.players[startPid]!,
+            resources: {
+              ...state.players[startPid]!.resources,
+              WOOD: state.players[startPid]!.resources.WOOD + 1,
+              BRICK: state.players[startPid]!.resources.BRICK + 1,
+            },
+          },
+        },
+      };
+
       expect(
-        catanEngine.validateAction(state, 'p1', { type: 'CATAN_BUILD_ROAD' }).valid
+        catanEngine.validateAction(state, startPid, { type: 'CATAN_BUILD_ROAD' }).valid
       ).toBe(true);
-      state = catanEngine.applyAction(state, 'p1', {
+      state = catanEngine.applyAction(state, startPid, {
         type: 'CATAN_BUILD_ROAD',
       }) as CatanGameState;
-      expect(state.players['p1']!.roadsBuilt).toBe(3);
+      expect(state.players[startPid]!.roadsBuilt).toBe(3);
 
-      // End p1's turn -> advances to p2 in ROLL_DICE step
-      state = catanEngine.applyAction(state, 'p1', {
+      // End startPid's turn -> advances to secondPid in ROLL_DICE step
+      state = catanEngine.applyAction(state, startPid, {
         type: 'CATAN_END_TURN',
       }) as CatanGameState;
-      expect(state.playerOrder[state.activePlayerIndex]).toBe('p2');
+      expect(state.playerOrder[state.activePlayerIndex]).toBe(secondPid);
       expect(state.turnStep).toBe('ROLL_DICE');
 
       // Sanitized player perspective strips opponent resource hand breakdown
