@@ -114,6 +114,19 @@ export function createStartingPlayerState(
     coins: 0,
     merchantsPlayedThisTurn: 0,
     silverPlayedThisTurn: false,
+    durationCards: [],
+    activeDurations: [],
+    havenSetAside: [],
+    islandMat: [],
+    nativeVillageMat: [],
+    pirateShipTokens: 0,
+    gainedCardsLastTurn: [],
+    gainedCardsThisTurn: [],
+    boughtVictoryThisTurn: false,
+    outpostPlayedThisTurn: false,
+    isOutpostTurn: false,
+    tacticianPending: false,
+    corsairTrashedThisTurn: false,
   };
 
   const drawnResult = drawCardsForPlayer(basePlayer, 5, afterShuffle);
@@ -163,7 +176,8 @@ export function removeCardsFromHand(
 }
 
 /**
- * Returns all cards owned by a player across Deck, Hand, Discard, and In-Play.
+ * Returns all cards owned by a player across Deck, Hand, Discard, In-Play,
+ * Haven Set-Aside, Island Mat, and Native Village Mat.
  */
 export function getAllOwnedCards(player: DominionPlayerState): Card[] {
   return [
@@ -171,6 +185,9 @@ export function getAllOwnedCards(player: DominionPlayerState): Card[] {
     ...player.hand,
     ...player.discard,
     ...player.inPlay,
+    ...(player.havenSetAside ?? []),
+    ...(player.islandMat ?? []),
+    ...(player.nativeVillageMat ?? []),
   ];
 }
 

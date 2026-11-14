@@ -3,6 +3,7 @@ import {
   ALL_BASE_KINGDOM_CARD_IDS,
   DOMINION_CARDS,
   DOMINION_PRESET_GAMES,
+  getAvailableDominionKingdomPool,
 } from '../games/dominion/index.js';
 import {
   PlayerLobbySettings,
@@ -716,6 +717,16 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                   const customSelectedCardIds = selectedExpansions
                     .filter((e) => e.startsWith('card:'))
                     .map((e) => e.slice('card:'.length));
+                  const isSeasideEnabled =
+                    selectedExpansions.includes('seaside');
+                  const isBase1stEnabled =
+                    selectedExpansions.includes('base_1st_edition');
+                  const availablePresets = DOMINION_PRESET_GAMES.filter(
+                    (preset) =>
+                      preset.expansion !== 'seaside' || isSeasideEnabled
+                  );
+                  const availableCardPool =
+                    getAvailableDominionKingdomPool(selectedExpansions);
 
                   return (
                     <div className="space-y-3.5">
@@ -735,6 +746,77 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                           Copper, Estate, Duchy, Province, and Curse.
                         </div>
 
+                        {/* Dominion Expansion Toggles (Seaside & 1st Ed Base Cards) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost) {
+                                onToggleExpansion('seaside');
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between gap-2 ${
+                              isSeasideEnabled
+                                ? 'bg-orange-950/50 border-orange-400 text-orange-100 shadow'
+                                : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            <div>
+                              <div className="font-black text-[11px]">
+                                ⚓ Seaside Expansion (1st &amp; 2nd Ed)
+                              </div>
+                              <div className="text-[9px] opacity-80">
+                                Duration cards, Mats, Coins &amp; 14 Seaside Presets
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase shrink-0 ${
+                                isSeasideEnabled
+                                  ? 'bg-orange-400 text-slate-950'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              {isSeasideEnabled ? '✓ Enabled' : 'Enable'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost) {
+                                onToggleExpansion('base_1st_edition');
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between gap-2 ${
+                              isBase1stEnabled || isSeasideEnabled
+                                ? 'bg-amber-950/50 border-amber-400 text-amber-100 shadow'
+                                : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            <div>
+                              <div className="font-black text-[11px]">
+                                📜 1st Edition Base Cards
+                              </div>
+                              <div className="text-[9px] opacity-80">
+                                Adventurer, Chancellor, Feast, Spy, Thief, Woodcutter
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase shrink-0 ${
+                                isBase1stEnabled || isSeasideEnabled
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              {isBase1stEnabled || isSeasideEnabled
+                                ? '✓ Included'
+                                : 'Enable'}
+                            </span>
+                          </button>
+                        </div>
+
                         {/* 3 Mode Tabs: Pre-Set Game (Default: Base Game), Random 10 Cards, Select 10 Cards */}
                         <div className="grid grid-cols-3 gap-2">
                           <button
@@ -751,7 +833,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                                 : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
                             } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
                           >
-                            📋 Pre-Set Game
+                            📋 Pre-Set Game ({availablePresets.length})
                           </button>
 
                           <button
@@ -793,7 +875,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                       {/* Mode 1: Pre-Set Games */}
                       {activeMode === 'preset' && (
                         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                          {DOMINION_PRESET_GAMES.map((preset) => {
+                          {availablePresets.map((preset) => {
                             const isSelected = activePresetId === preset.id;
                             const cardNames = preset.cards
                               .map((cid) => DOMINION_CARDS[cid]?.name ?? cid)
@@ -817,11 +899,18 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                                 }`}
                               >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-black text-slate-100 text-xs">
-                                    {preset.name}
-                                    {preset.id === 'base_game'
-                                      ? ' (Default)'
-                                      : ''}
+                                  <span className="font-black text-slate-100 text-xs flex items-center gap-1.5">
+                                    <span>
+                                      {preset.name}
+                                      {preset.id === 'base_game'
+                                        ? ' (Default)'
+                                        : ''}
+                                    </span>
+                                    {preset.expansion === 'seaside' && (
+                                      <span className="px-1.5 py-0.2 rounded bg-orange-500/20 border border-orange-400/50 text-orange-300 text-[9px] font-bold">
+                                        ⚓ Seaside
+                                      </span>
+                                    )}
                                   </span>
                                   <span
                                     className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
@@ -849,13 +938,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                             🎲 Random 10 Kingdom Cards
                           </div>
                           <p className="text-[11px] text-slate-300 leading-relaxed">
-                            10 Kingdom cards will be randomly dealt from the 26
-                            available Base Game cards when the game starts:
+                            10 Kingdom cards will be randomly dealt from the{' '}
+                            {availableCardPool.length} available Kingdom cards
+                            when the game starts:
                           </p>
                           <p className="text-[10px] text-slate-400 leading-relaxed">
-                            {ALL_BASE_KINGDOM_CARD_IDS.map(
-                              (cid) => DOMINION_CARDS[cid]?.name ?? cid
-                            ).join(', ')}
+                            {availableCardPool
+                              .map((cid) => DOMINION_CARDS[cid]?.name ?? cid)
+                              .join(', ')}
                           </p>
                         </div>
                       )}
@@ -865,7 +955,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="text-slate-300 font-semibold">
-                              Choose exactly 10 Kingdom cards:
+                              Choose exactly 10 Kingdom cards ({availableCardPool.length} available):
                             </span>
                             <span
                               className={`px-2 py-0.5 rounded-full font-black text-[10px] ${
@@ -879,7 +969,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                           </div>
 
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-64 overflow-y-auto pr-1">
-                            {ALL_BASE_KINGDOM_CARD_IDS.map((cid) => {
+                            {availableCardPool.map((cid) => {
                               const card = DOMINION_CARDS[cid]!;
                               const isPicked =
                                 customSelectedCardIds.includes(cid);

@@ -238,6 +238,18 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [
       {
+        id: 'seaside',
+        name: 'Seaside Expansion (1st & 2nd Edition + 1st Ed Base Cards)',
+        description:
+          'Adds Orange Duration cards, Embargo Coins, Island Mat, Native Village Mat, Pirate Ship Mat with Gold Coins, 35 Seaside Kingdom cards, 6 1st Edition Base cards, and 14 Seaside pre-set games.',
+      },
+      {
+        id: 'base_1st_edition',
+        name: '1st Edition Base Dominion Cards',
+        description:
+          'Adds the 6 classic 1st Edition Base cards: Adventurer, Chancellor, Feast, Spy, Thief, and Woodcutter.',
+      },
+      {
         id: 'dominion_chapel_witch_gardens',
         name: 'Intrigue / Base Extended Kingdom (Chapel, Witch & Gardens)',
         description:

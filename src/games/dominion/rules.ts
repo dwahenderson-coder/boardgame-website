@@ -95,6 +95,26 @@ function finalizeStateIfGameOver(
 }
 
 /**
+ * Returns true if `player` is immune to Attack cards (holds Moat in hand or has Lighthouse in play).
+ */
+function isPlayerImmuneToAttack(player: DominionPlayerState): boolean {
+  const hasMoatInHand = player.hand.some(
+    (c) => c.id === 'moat' || c.customEffectId === 'MOAT'
+  );
+  const hasLighthouseInPlay =
+    player.inPlay.some(
+      (c) => c.id === 'lighthouse' || c.customEffectId === 'LIGHTHOUSE'
+    ) ||
+    (player.activeDurations ?? []).some(
+      (c) => c.id === 'lighthouse' || c.customEffectId === 'LIGHTHOUSE'
+    ) ||
+    (player.durationCards ?? []).some(
+      (c) => c.id === 'lighthouse' || c.customEffectId === 'LIGHTHOUSE'
+    );
+  return hasMoatInHand || hasLighthouseInPlay;
+}
+
+/**
  * Helper to create the next `ATTACK_DEFENSE_OR_DISCARD` interaction for the first
  * opponent in `queue` who still has > 3 cards in hand.
  */
@@ -115,6 +135,34 @@ function buildNextMilitiaInteraction(
         promptType: 'ATTACK_DEFENSE_OR_DISCARD',
         minCount: discardCountRequired,
         maxCount: discardCountRequired,
+        remainingTargetQueue: queue.slice(i + 1),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Helper to create the next `PUT_CARD_ONTO_DECK` interaction for Ghost Ship
+ * for the first opponent in `queue` who has >= 4 cards in hand.
+ */
+function buildNextGhostShipInteraction(
+  players: Readonly<Record<string, DominionPlayerState>>,
+  sourceCard: Card,
+  queue: readonly string[]
+): PendingInteraction | null {
+  for (let i = 0; i < queue.length; i++) {
+    const targetId = queue[i]!;
+    const targetPlayer = players[targetId];
+    if (!targetPlayer) continue;
+    const putBackCount = Math.max(0, targetPlayer.hand.length - 3);
+    if (putBackCount > 0) {
+      return {
+        playerId: targetId,
+        sourceCard,
+        promptType: 'PUT_CARD_ONTO_DECK',
+        minCount: putBackCount,
+        maxCount: putBackCount,
         remainingTargetQueue: queue.slice(i + 1),
       };
     }
@@ -166,6 +214,7 @@ export function initGame(
     activePlayerId: firstPlayerId,
     players,
     supply,
+    embargoTokens: {},
     kingdomCards,
     trash: [],
     pendingInteraction: null,
@@ -217,6 +266,10 @@ export function validateAction(
       case 'DISCARD_FOR_DRAW':
       case 'DISCARD_EXACT_COUNT':
       case 'PUT_CARD_ONTO_DECK':
+      case 'ISLAND_SET_ASIDE':
+      case 'HAVEN_SET_ASIDE':
+      case 'SALVAGER_TRASH':
+      case 'AMBASSADOR_RETURN':
       case 'TRASH_UP_TO_N': {
         const selected = action.selectedCardIds ?? [];
         if (
@@ -235,6 +288,28 @@ export function validateAction(
             reason: checkHand.reason ?? 'Selected card is not in hand.',
           };
         }
+        return { valid: true };
+      }
+
+      case 'EMBARGO_PILE': {
+        const pileId = (
+          action.gainedCardId ??
+          action.selectedCardIds?.[0] ??
+          ''
+        )
+          .trim()
+          .toLowerCase();
+        if (!pileId || state.supply[pileId] === undefined) {
+          return {
+            valid: false,
+            reason: 'Must select a valid Supply pile for Embargo.',
+          };
+        }
+        return { valid: true };
+      }
+
+      case 'NATIVE_VILLAGE_CHOICE':
+      case 'PIRATE_SHIP_CHOICE': {
         return { valid: true };
       }
 
@@ -613,11 +688,285 @@ export function applyAction(
           deck: [...removed.removedCards, ...targetPlayer.deck],
         };
 
+        const queue = pending.remainingTargetQueue ?? [];
+        const nextPending =
+          pending.sourceCard.customEffectId === 'GHOST_SHIP' && queue.length > 0
+            ? buildNextGhostShipInteraction(
+                nextPlayers,
+                pending.sourceCard,
+                queue
+              )
+            : null;
+
+        return {
+          ...state,
+          players: nextPlayers,
+          pendingInteraction: nextPending,
+          lastActionSummary: `${pending.playerId} placed ${removed.removedCards.length} card(s) from hand onto their deck (${pending.sourceCard.name}).`,
+        };
+      }
+
+      case 'ISLAND_SET_ASIDE': {
+        const selected = action.selectedCardIds ?? [];
+        const removed = removeCardsFromHand(targetPlayer.hand, selected);
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+          islandMat: [
+            ...(targetPlayer.islandMat ?? []),
+            ...removed.removedCards,
+          ],
+        };
+
         return {
           ...state,
           players: nextPlayers,
           pendingInteraction: null,
-          lastActionSummary: `${pending.playerId} placed ${removed.removedCards.length} card(s) from hand onto their deck (${pending.sourceCard.name}).`,
+          lastActionSummary: `${pending.playerId} set aside ${
+            removed.removedCards[0]?.name ?? 'a card'
+          } onto their Island Mat.`,
+        };
+      }
+
+      case 'HAVEN_SET_ASIDE': {
+        const selected = action.selectedCardIds ?? [];
+        const removed = removeCardsFromHand(targetPlayer.hand, selected);
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+          havenSetAside: [
+            ...(targetPlayer.havenSetAside ?? []),
+            ...removed.removedCards,
+          ],
+        };
+
+        return {
+          ...state,
+          players: nextPlayers,
+          pendingInteraction: null,
+          lastActionSummary: `${pending.playerId} set aside a card face down under Haven.`,
+        };
+      }
+
+      case 'SALVAGER_TRASH': {
+        const selected = action.selectedCardIds ?? [];
+        const removed = removeCardsFromHand(targetPlayer.hand, selected);
+        const trashedCard = removed.removedCards[0];
+        const coinBonus = trashedCard ? trashedCard.cost : 0;
+        if (trashedCard) {
+          nextTrash = [...nextTrash, trashedCard];
+        }
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+          coins: targetPlayer.coins + coinBonus,
+        };
+
+        return {
+          ...state,
+          players: nextPlayers,
+          trash: nextTrash,
+          pendingInteraction: null,
+          lastActionSummary: trashedCard
+            ? `${pending.playerId} trashed ${trashedCard.name} with Salvager for +${coinBonus} Coin(s).`
+            : `${pending.playerId} resolved Salvager.`,
+        };
+      }
+
+      case 'AMBASSADOR_RETURN': {
+        const selected = action.selectedCardIds ?? [];
+        if (selected.length === 0) {
+          return {
+            ...state,
+            pendingInteraction: null,
+            lastActionSummary: `${pending.playerId} returned 0 cards with Ambassador.`,
+          };
+        }
+        const revealId = selected[0]!.trim().toLowerCase();
+        const sameIdSelected = selected
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) => s === revealId)
+          .slice(0, 2);
+        const removed = removeCardsFromHand(targetPlayer.hand, sameIdSelected);
+        const returnedCard =
+          removed.removedCards[0] ?? getDominionCard(revealId);
+        if (returnedCard && nextSupply[returnedCard.id] !== undefined) {
+          nextSupply[returnedCard.id] =
+            (nextSupply[returnedCard.id] ?? 0) + removed.removedCards.length;
+        }
+        nextPlayers[pending.playerId] = {
+          ...targetPlayer,
+          hand: removed.remainingHand,
+        };
+
+        // Each other non-immune player gains a copy of `returnedCard` from Supply
+        const n = state.playerOrder.length;
+        if (returnedCard) {
+          for (let offset = 1; offset < n; offset++) {
+            const oppId =
+              state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+            const opp = nextPlayers[oppId]!;
+            if (isPlayerImmuneToAttack(opp)) continue;
+            if ((nextSupply[returnedCard.id] ?? 0) > 0) {
+              nextSupply[returnedCard.id] =
+                (nextSupply[returnedCard.id] ?? 1) - 1;
+              nextPlayers[oppId] = {
+                ...opp,
+                discard: [...opp.discard, returnedCard],
+              };
+            }
+          }
+        }
+
+        const updatedState: DominionGameState = {
+          ...state,
+          players: nextPlayers,
+          supply: nextSupply,
+          pendingInteraction: null,
+        };
+        return finalizeStateIfGameOver(
+          updatedState,
+          `${pending.playerId} returned ${removed.removedCards.length} copy(ies) of ${
+            returnedCard?.name ?? revealId
+          } to the Supply with Ambassador.`
+        );
+      }
+
+      case 'EMBARGO_PILE': {
+        const pileId = (
+          action.gainedCardId ??
+          action.selectedCardIds?.[0] ??
+          ''
+        )
+          .trim()
+          .toLowerCase();
+        const nextEmbargo: Record<string, number> = {
+          ...(state.embargoTokens ?? {}),
+          [pileId]: ((state.embargoTokens ?? {})[pileId] ?? 0) + 1,
+        };
+        const pileCard = getDominionCard(pileId);
+        return {
+          ...state,
+          embargoTokens: nextEmbargo,
+          pendingInteraction: null,
+          lastActionSummary: `${pending.playerId} placed an Embargo Coin on the ${
+            pileCard?.name ?? pileId
+          } pile.`,
+        };
+      }
+
+      case 'NATIVE_VILLAGE_CHOICE': {
+        const choice = action.choice ?? 'MAT_PUT';
+        if (choice === 'MAT_TAKE') {
+          const matCards = targetPlayer.nativeVillageMat ?? [];
+          nextPlayers[pending.playerId] = {
+            ...targetPlayer,
+            hand: [...targetPlayer.hand, ...matCards],
+            nativeVillageMat: [],
+          };
+          return {
+            ...state,
+            players: nextPlayers,
+            pendingInteraction: null,
+            lastActionSummary: `${pending.playerId} took ${matCards.length} card(s) from their Native Village Mat into hand.`,
+          };
+        }
+        // MAT_PUT: Put top card of deck face down on Native Village Mat
+        const beforeHandLen = targetPlayer.hand.length;
+        const drawnRes = drawCardsForPlayer(targetPlayer, 1, nextPrng);
+        nextPrng = drawnRes.prng;
+        const topCard = drawnRes.drawn[0];
+        const restoredHand = drawnRes.player.hand.slice(0, beforeHandLen);
+        nextPlayers[pending.playerId] = {
+          ...drawnRes.player,
+          hand: restoredHand,
+          nativeVillageMat: topCard
+            ? [...(targetPlayer.nativeVillageMat ?? []), topCard]
+            : [...(targetPlayer.nativeVillageMat ?? [])],
+        };
+        return {
+          ...state,
+          players: nextPlayers,
+          prng: nextPrng,
+          pendingInteraction: null,
+          lastActionSummary: topCard
+            ? `${pending.playerId} set aside the top card of their deck onto their Native Village Mat.`
+            : `${pending.playerId} chose to set aside onto Native Village Mat (deck & discard empty).`,
+        };
+      }
+
+      case 'PIRATE_SHIP_CHOICE': {
+        const choice = action.choice ?? 'PIRATE_ATTACK';
+        if (choice === 'PIRATE_COINS') {
+          const tokens = targetPlayer.pirateShipTokens ?? 0;
+          nextPlayers[pending.playerId] = {
+            ...targetPlayer,
+            coins: targetPlayer.coins + tokens,
+          };
+          return {
+            ...state,
+            players: nextPlayers,
+            pendingInteraction: null,
+            lastActionSummary: `${pending.playerId} took +${tokens} Coin(s) from their Pirate Ship Mat.`,
+          };
+        }
+        // PIRATE_ATTACK: Each other non-immune player reveals top 2 cards of deck, trashes 1 Treasure, discards rest; if any trashed, +1 Gold Coin token
+        let anyTreasureTrashed = false;
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          const beforeLen = opp.hand.length;
+          const peekRes = drawCardsForPlayer(opp, 2, nextPrng);
+          nextPrng = peekRes.prng;
+          const revealed = peekRes.drawn;
+          const restoredHand = peekRes.player.hand.slice(0, beforeLen);
+          // Trash highest-cost revealed Treasure
+          let bestTreasureIdx = -1;
+          for (let i = 0; i < revealed.length; i++) {
+            if (revealed[i]!.types.includes('TREASURE')) {
+              if (
+                bestTreasureIdx === -1 ||
+                revealed[i]!.cost > revealed[bestTreasureIdx]!.cost
+              ) {
+                bestTreasureIdx = i;
+              }
+            }
+          }
+          const toDiscard: Card[] = [];
+          for (let i = 0; i < revealed.length; i++) {
+            if (i === bestTreasureIdx) {
+              nextTrash = [...nextTrash, revealed[i]!];
+              anyTreasureTrashed = true;
+            } else {
+              toDiscard.push(revealed[i]!);
+            }
+          }
+          nextPlayers[oppId] = {
+            ...peekRes.player,
+            hand: restoredHand,
+            discard: [...peekRes.player.discard, ...toDiscard],
+          };
+        }
+
+        const nextTokens =
+          (targetPlayer.pirateShipTokens ?? 0) + (anyTreasureTrashed ? 1 : 0);
+        nextPlayers[pending.playerId] = {
+          ...nextPlayers[pending.playerId]!,
+          pirateShipTokens: nextTokens,
+        };
+
+        return {
+          ...state,
+          players: nextPlayers,
+          trash: nextTrash,
+          prng: nextPrng,
+          pendingInteraction: null,
+          lastActionSummary: anyTreasureTrashed
+            ? `${pending.playerId} attacked with Pirate Ship, trashed an opponent's Treasure, and added a Gold Coin token to their Pirate Ship Mat (now ${nextTokens})!`
+            : `${pending.playerId} attacked with Pirate Ship (no opponent Treasures revealed).`,
         };
       }
 
@@ -709,11 +1058,31 @@ export function applyAction(
           nextPlayers[pending.playerId] = {
             ...targetPlayer,
             hand: [...targetPlayer.hand, gainedCard],
+            gainedCardsThisTurn: [
+              ...(targetPlayer.gainedCardsThisTurn ?? []),
+              gainedCard,
+            ],
+          };
+        } else if (pending.gainDestination === 'HAVEN') {
+          nextPlayers[pending.playerId] = {
+            ...targetPlayer,
+            havenSetAside: [
+              ...(targetPlayer.havenSetAside ?? []),
+              gainedCard,
+            ],
+            gainedCardsThisTurn: [
+              ...(targetPlayer.gainedCardsThisTurn ?? []),
+              gainedCard,
+            ],
           };
         } else {
           nextPlayers[pending.playerId] = {
             ...targetPlayer,
             discard: [...targetPlayer.discard, gainedCard],
+            gainedCardsThisTurn: [
+              ...(targetPlayer.gainedCardsThisTurn ?? []),
+              gainedCard,
+            ],
           };
         }
 
@@ -831,11 +1200,15 @@ export function applyAction(
     const player = state.players[playerId]!;
     const removed = removeCardsFromHand(player.hand, [action.cardId]);
     const card = removed.removedCards[0]!;
+    const isDurationCard = card.types.includes('DURATION');
 
     let updatedPlayer: DominionPlayerState = {
       ...player,
       hand: removed.remainingHand,
       inPlay: [...player.inPlay, card],
+      durationCards: isDurationCard
+        ? [...(player.durationCards ?? []), card]
+        : [...(player.durationCards ?? [])],
       actions: player.actions - 1 + card.actions,
       buys: player.buys + card.buys,
       coins: player.coins + card.coins,
@@ -862,6 +1235,671 @@ export function applyAction(
     let summaryText = `${playerId} played ${card.name}.`;
 
     switch (card.customEffectId) {
+      // --- 1ST EDITION BASE DOMINION CARDS ---
+      case 'ADVENTURER': {
+        const revealedTreasures: Card[] = [];
+        const otherRevealed: Card[] = [];
+        let safety = 0;
+        let curr = updatedPlayer;
+        while (
+          revealedTreasures.length < 2 &&
+          (curr.deck.length > 0 || curr.discard.length > 0) &&
+          safety < 60
+        ) {
+          const beforeLen = curr.hand.length;
+          const drawOne = drawCardsForPlayer(curr, 1, nextPrng);
+          nextPrng = drawOne.prng;
+          const top = drawOne.drawn[0];
+          const restoredHand = drawOne.player.hand.slice(0, beforeLen);
+          curr = {
+            ...drawOne.player,
+            hand: restoredHand,
+          };
+          if (!top) break;
+          if (top.types.includes('TREASURE')) {
+            revealedTreasures.push(top);
+          } else {
+            otherRevealed.push(top);
+          }
+          safety += 1;
+        }
+        updatedPlayer = {
+          ...curr,
+          hand: [...curr.hand, ...revealedTreasures],
+          discard: [...curr.discard, ...otherRevealed],
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        summaryText += ` Put ${revealedTreasures.length} Treasure(s) into hand and discarded ${otherRevealed.length} other card(s).`;
+        break;
+      }
+
+      case 'CHANCELLOR': {
+        updatedPlayer = {
+          ...updatedPlayer,
+          discard: [...updatedPlayer.discard, ...updatedPlayer.deck],
+          deck: [],
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        summaryText += ' Put deck into discard pile.';
+        break;
+      }
+
+      case 'FEAST': {
+        // Trash Feast from inPlay and gain a card costing up to 5
+        const inPlayWithoutFeast = [...updatedPlayer.inPlay];
+        const feastIdx = inPlayWithoutFeast.findIndex((c) => c.id === 'feast');
+        if (feastIdx !== -1) {
+          const [trashedFeast] = inPlayWithoutFeast.splice(feastIdx, 1);
+          if (trashedFeast) {
+            nextTrash = [...nextTrash, trashedFeast];
+          }
+        }
+        updatedPlayer = {
+          ...updatedPlayer,
+          inPlay: inPlayWithoutFeast,
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        const hasGainable5 = Object.entries(nextSupply).some(([cid, count]) => {
+          const def = getDominionCard(cid);
+          return count > 0 && def !== undefined && def.cost <= 5;
+        });
+        if (hasGainable5) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'GAIN_COSTING_UP_TO',
+            minCount: 1,
+            maxCount: 1,
+            maxCost: 5,
+            gainDestination: 'DISCARD',
+          };
+        }
+        summaryText += ' Trashed Feast to gain a card costing up to 5.';
+        break;
+      }
+
+      case 'SPY': {
+        const n = state.playerOrder.length;
+        for (let offset = 0; offset < n; offset++) {
+          const targetId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const target = nextPlayers[targetId]!;
+          if (offset > 0 && isPlayerImmuneToAttack(target)) {
+            continue;
+          }
+          const beforeLen = target.hand.length;
+          const peekOne = drawCardsForPlayer(target, 1, nextPrng);
+          nextPrng = peekOne.prng;
+          const topCard = peekOne.drawn[0];
+          const restoredHand = peekOne.player.hand.slice(0, beforeLen);
+          if (!topCard) continue;
+          // For self: discard Victory/Curse/Copper, keep Action/Silver/Gold on top; for opponents: discard Action/Gold/Silver, keep Victory/Curse/Copper on top
+          const isJunk =
+            topCard.types.includes('VICTORY') ||
+            topCard.types.includes('CURSE') ||
+            topCard.id === 'copper';
+          const shouldDiscard = offset === 0 ? isJunk : !isJunk;
+          if (shouldDiscard) {
+            nextPlayers[targetId] = {
+              ...peekOne.player,
+              hand: restoredHand,
+              discard: [...peekOne.player.discard, topCard],
+            };
+          } else {
+            nextPlayers[targetId] = {
+              ...peekOne.player,
+              hand: restoredHand,
+              deck: [topCard, ...peekOne.player.deck],
+            };
+          }
+        }
+        break;
+      }
+
+      case 'THIEF': {
+        const n = state.playerOrder.length;
+        const gainedTreasures: Card[] = [];
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          const beforeLen = opp.hand.length;
+          const peekTwo = drawCardsForPlayer(opp, 2, nextPrng);
+          nextPrng = peekTwo.prng;
+          const revealed = peekTwo.drawn;
+          const restoredHand = peekTwo.player.hand.slice(0, beforeLen);
+          let bestTreasureIdx = -1;
+          for (let i = 0; i < revealed.length; i++) {
+            if (revealed[i]!.types.includes('TREASURE')) {
+              if (
+                bestTreasureIdx === -1 ||
+                revealed[i]!.cost > revealed[bestTreasureIdx]!.cost
+              ) {
+                bestTreasureIdx = i;
+              }
+            }
+          }
+          const toDiscard: Card[] = [];
+          for (let i = 0; i < revealed.length; i++) {
+            if (i === bestTreasureIdx) {
+              const stolen = revealed[i]!;
+              if (stolen.id !== 'copper') {
+                gainedTreasures.push(stolen);
+              } else {
+                nextTrash = [...nextTrash, stolen];
+              }
+            } else {
+              toDiscard.push(revealed[i]!);
+            }
+          }
+          nextPlayers[oppId] = {
+            ...peekTwo.player,
+            hand: restoredHand,
+            discard: [...peekTwo.player.discard, ...toDiscard],
+          };
+        }
+        if (gainedTreasures.length > 0) {
+          updatedPlayer = {
+            ...nextPlayers[playerId]!,
+            discard: [
+              ...nextPlayers[playerId]!.discard,
+              ...gainedTreasures,
+            ],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ` Gained ${gainedTreasures.map((c) => c.name).join(', ')}!`;
+        }
+        break;
+      }
+
+      // --- SEASIDE KINGDOM CARDS ---
+      case 'AMBASSADOR': {
+        if (updatedPlayer.hand.length > 0) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'AMBASSADOR_RETURN',
+            minCount: 1,
+            maxCount: Math.min(2, updatedPlayer.hand.length),
+          };
+        }
+        break;
+      }
+
+      case 'BLOCKADE': {
+        const hasGainable4 = Object.entries(nextSupply).some(([cid, count]) => {
+          const def = getDominionCard(cid);
+          return count > 0 && def !== undefined && def.cost <= 4;
+        });
+        if (hasGainable4) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'GAIN_COSTING_UP_TO',
+            minCount: 1,
+            maxCount: 1,
+            maxCost: 4,
+            gainDestination: 'HAVEN',
+          };
+        }
+        break;
+      }
+
+      case 'CUTPURSE': {
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          const hasCopper = opp.hand.some((c) => c.id === 'copper');
+          if (hasCopper) {
+            const remCopper = removeCardsFromHand(opp.hand, ['copper']);
+            nextPlayers[oppId] = {
+              ...opp,
+              hand: remCopper.remainingHand,
+              discard: [...opp.discard, ...remCopper.removedCards],
+            };
+          }
+        }
+        break;
+      }
+
+      case 'EMBARGO': {
+        // Trash Embargo from inPlay and prompt for a Supply pile to add an Embargo token
+        const inPlayWithoutEmbargo = [...updatedPlayer.inPlay];
+        const embIdx = inPlayWithoutEmbargo.findIndex(
+          (c) => c.id === 'embargo'
+        );
+        if (embIdx !== -1) {
+          const [trashedEmbargo] = inPlayWithoutEmbargo.splice(embIdx, 1);
+          if (trashedEmbargo) {
+            nextTrash = [...nextTrash, trashedEmbargo];
+          }
+        }
+        updatedPlayer = {
+          ...updatedPlayer,
+          inPlay: inPlayWithoutEmbargo,
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        pendingInteraction = {
+          playerId,
+          sourceCard: card,
+          promptType: 'EMBARGO_PILE',
+          minCount: 1,
+          maxCount: 1,
+        };
+        break;
+      }
+
+      case 'EXPLORER': {
+        const hasProvince = updatedPlayer.hand.some(
+          (c) => c.id === 'province'
+        );
+        const targetGainId = hasProvince ? 'gold' : 'silver';
+        if ((nextSupply[targetGainId] ?? 0) > 0) {
+          const gained = DOMINION_CARDS[targetGainId]!;
+          nextSupply[targetGainId] = (nextSupply[targetGainId] ?? 1) - 1;
+          updatedPlayer = {
+            ...updatedPlayer,
+            hand: [...updatedPlayer.hand, gained],
+            gainedCardsThisTurn: [
+              ...(updatedPlayer.gainedCardsThisTurn ?? []),
+              gained,
+            ],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += hasProvince
+            ? ' Revealed Province and gained a Gold to hand!'
+            : ' Gained a Silver to hand.';
+        }
+        break;
+      }
+
+      case 'GHOST_SHIP': {
+        const targets: string[] = [];
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          if (opp.hand.length >= 4) {
+            targets.push(oppId);
+          }
+        }
+        pendingInteraction = buildNextGhostShipInteraction(
+          nextPlayers,
+          card,
+          targets
+        );
+        break;
+      }
+
+      case 'HAVEN': {
+        if (updatedPlayer.hand.length > 0) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'HAVEN_SET_ASIDE',
+            minCount: 1,
+            maxCount: 1,
+          };
+        }
+        break;
+      }
+
+      case 'ISLAND': {
+        // Move Island from inPlay onto Island Mat, and prompt to set aside 1 card from hand onto Island Mat
+        const inPlayWithoutIsland = [...updatedPlayer.inPlay];
+        const islIdx = inPlayWithoutIsland.findIndex((c) => c.id === 'island');
+        if (islIdx !== -1) {
+          inPlayWithoutIsland.splice(islIdx, 1);
+        }
+        updatedPlayer = {
+          ...updatedPlayer,
+          inPlay: inPlayWithoutIsland,
+          islandMat: [...(updatedPlayer.islandMat ?? []), card],
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        if (updatedPlayer.hand.length > 0) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'ISLAND_SET_ASIDE',
+            minCount: 1,
+            maxCount: 1,
+          };
+        }
+        summaryText += ' Placed Island onto Island Mat.';
+        break;
+      }
+
+      case 'LOOKOUT': {
+        const beforeLen = updatedPlayer.hand.length;
+        const peekThree = drawCardsForPlayer(updatedPlayer, 3, nextPrng);
+        nextPrng = peekThree.prng;
+        const revealed = [...peekThree.drawn];
+        const restoredHand = peekThree.player.hand.slice(0, beforeLen);
+        // Sort revealed ascending by cost: lowest trashed, middle discarded, highest kept on deck
+        revealed.sort((a, b) => a.cost - b.cost);
+        const trashedOne = revealed[0];
+        const discardedOne = revealed[1];
+        const topOne = revealed[2];
+        if (trashedOne) {
+          nextTrash = [...nextTrash, trashedOne];
+        }
+        updatedPlayer = {
+          ...peekThree.player,
+          hand: restoredHand,
+          discard: discardedOne
+            ? [...peekThree.player.discard, discardedOne]
+            : [...peekThree.player.discard],
+          deck: topOne ? [topOne, ...peekThree.player.deck] : [...peekThree.player.deck],
+        };
+        nextPlayers[playerId] = updatedPlayer;
+        break;
+      }
+
+      case 'NATIVE_VILLAGE': {
+        pendingInteraction = {
+          playerId,
+          sourceCard: card,
+          promptType: 'NATIVE_VILLAGE_CHOICE',
+          minCount: 0,
+          maxCount: 0,
+        };
+        break;
+      }
+
+      case 'NAVIGATOR': {
+        const beforeLen = updatedPlayer.hand.length;
+        const peekFive = drawCardsForPlayer(updatedPlayer, 5, nextPrng);
+        nextPrng = peekFive.prng;
+        const revealed = peekFive.drawn;
+        const restoredHand = peekFive.player.hand.slice(0, beforeLen);
+        const junkCount = revealed.filter(
+          (c) =>
+            c.types.includes('VICTORY') ||
+            c.types.includes('CURSE') ||
+            c.id === 'copper'
+        ).length;
+        if (junkCount >= 3) {
+          updatedPlayer = {
+            ...peekFive.player,
+            hand: restoredHand,
+            discard: [...peekFive.player.discard, ...revealed],
+          };
+          summaryText += ` Discarded all ${revealed.length} looked-at cards.`;
+        } else {
+          const ordered = [...revealed].sort((a, b) => b.cost - a.cost);
+          updatedPlayer = {
+            ...peekFive.player,
+            hand: restoredHand,
+            deck: [...ordered, ...peekFive.player.deck],
+          };
+          summaryText += ` Returned ${revealed.length} cards to top of deck.`;
+        }
+        nextPlayers[playerId] = updatedPlayer;
+        break;
+      }
+
+      case 'OUTPOST': {
+        if (!updatedPlayer.outpostPlayedThisTurn && !updatedPlayer.isOutpostTurn) {
+          updatedPlayer = {
+            ...updatedPlayer,
+            outpostPlayedThisTurn: true,
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ' Will take an extra 3-card turn after this one!';
+        }
+        break;
+      }
+
+      case 'PEARL_DIVER': {
+        if (updatedPlayer.deck.length > 0) {
+          const bottomCard =
+            updatedPlayer.deck[updatedPlayer.deck.length - 1]!;
+          const shouldMoveToTop =
+            bottomCard.types.includes('ACTION') || bottomCard.cost >= 3;
+          if (shouldMoveToTop) {
+            updatedPlayer = {
+              ...updatedPlayer,
+              deck: [
+                bottomCard,
+                ...updatedPlayer.deck.slice(0, updatedPlayer.deck.length - 1),
+              ],
+            };
+            nextPlayers[playerId] = updatedPlayer;
+            summaryText += ` Moved ${bottomCard.name} from bottom to top of deck.`;
+          }
+        }
+        break;
+      }
+
+      case 'PIRATE_SHIP': {
+        pendingInteraction = {
+          playerId,
+          sourceCard: card,
+          promptType: 'PIRATE_SHIP_CHOICE',
+          minCount: 0,
+          maxCount: 0,
+        };
+        break;
+      }
+
+      case 'SALVAGER': {
+        if (updatedPlayer.hand.length > 0) {
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'SALVAGER_TRASH',
+            minCount: 1,
+            maxCount: 1,
+          };
+        }
+        break;
+      }
+
+      case 'SEA_CHART': {
+        const beforeLen = updatedPlayer.hand.length;
+        const peekOne = drawCardsForPlayer(updatedPlayer, 1, nextPrng);
+        nextPrng = peekOne.prng;
+        const topCard = peekOne.drawn[0];
+        const restoredHand = peekOne.player.hand.slice(0, beforeLen);
+        if (topCard) {
+          const hasCopyInPlay = peekOne.player.inPlay.some(
+            (c) => c.id === topCard.id
+          );
+          if (hasCopyInPlay) {
+            updatedPlayer = {
+              ...peekOne.player,
+              hand: [...restoredHand, topCard],
+            };
+            summaryText += ` Revealed ${topCard.name} (copy in play) and put it into hand!`;
+          } else {
+            updatedPlayer = {
+              ...peekOne.player,
+              hand: restoredHand,
+              deck: [topCard, ...peekOne.player.deck],
+            };
+            summaryText += ` Revealed ${topCard.name} and left it on top of deck.`;
+          }
+          nextPlayers[playerId] = updatedPlayer;
+        }
+        break;
+      }
+
+      case 'SEA_HAG': {
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          const beforeLen = opp.hand.length;
+          const peekOne = drawCardsForPlayer(opp, 1, nextPrng);
+          nextPrng = peekOne.prng;
+          const discardedTop = peekOne.drawn[0];
+          const restoredHand = peekOne.player.hand.slice(0, beforeLen);
+          let nextOppDeck = [...peekOne.player.deck];
+          const nextOppDiscard = discardedTop
+            ? [...peekOne.player.discard, discardedTop]
+            : [...peekOne.player.discard];
+          if ((nextSupply['curse'] ?? 0) > 0) {
+            nextSupply['curse'] = (nextSupply['curse'] ?? 1) - 1;
+            nextOppDeck = [DOMINION_CARDS['curse']!, ...nextOppDeck];
+          }
+          nextPlayers[oppId] = {
+            ...peekOne.player,
+            hand: restoredHand,
+            discard: nextOppDiscard,
+            deck: nextOppDeck,
+          };
+        }
+        summaryText += ' Opponents discarded top card and gained a Curse onto deck!';
+        break;
+      }
+
+      case 'SEA_WITCH': {
+        const n = state.playerOrder.length;
+        for (let offset = 1; offset < n; offset++) {
+          const oppId =
+            state.playerOrder[(state.activePlayerIndex + offset) % n]!;
+          const opp = nextPlayers[oppId]!;
+          if (isPlayerImmuneToAttack(opp)) continue;
+          if ((nextSupply['curse'] ?? 0) > 0) {
+            nextSupply['curse'] = (nextSupply['curse'] ?? 1) - 1;
+            nextPlayers[oppId] = {
+              ...opp,
+              discard: [...opp.discard, DOMINION_CARDS['curse']!],
+            };
+          }
+        }
+        break;
+      }
+
+      case 'SMUGGLERS': {
+        const n = state.playerOrder.length;
+        const rightPlayerIndex = (state.activePlayerIndex + n - 1) % n;
+        const rightPlayerId = state.playerOrder[rightPlayerIndex]!;
+        const rightPlayer = nextPlayers[rightPlayerId]!;
+        const eligibleFromRight = (rightPlayer.gainedCardsLastTurn ?? []).filter(
+          (c) => c.cost <= 6 && (nextSupply[c.id] ?? 0) > 0
+        );
+        if (eligibleFromRight.length > 0) {
+          eligibleFromRight.sort((a, b) => b.cost - a.cost);
+          const chosen = eligibleFromRight[0]!;
+          nextSupply[chosen.id] = (nextSupply[chosen.id] ?? 1) - 1;
+          updatedPlayer = {
+            ...updatedPlayer,
+            discard: [...updatedPlayer.discard, chosen],
+            gainedCardsThisTurn: [
+              ...(updatedPlayer.gainedCardsThisTurn ?? []),
+              chosen,
+            ],
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText += ` Smuggled a copy of ${chosen.name}!`;
+        } else {
+          // If right player has no tracked last-turn gains, allow gaining a card costing up to 6
+          const hasGainable6 = Object.entries(nextSupply).some(([cid, count]) => {
+            const def = getDominionCard(cid);
+            return count > 0 && def !== undefined && def.cost <= 6;
+          });
+          if (hasGainable6) {
+            pendingInteraction = {
+              playerId,
+              sourceCard: card,
+              promptType: 'GAIN_COSTING_UP_TO',
+              minCount: 1,
+              maxCount: 1,
+              maxCost: 6,
+              gainDestination: 'DISCARD',
+            };
+          }
+        }
+        break;
+      }
+
+      case 'TACTICIAN': {
+        if (updatedPlayer.hand.length > 0) {
+          updatedPlayer = {
+            ...updatedPlayer,
+            discard: [...updatedPlayer.discard, ...updatedPlayer.hand],
+            hand: [],
+            tacticianPending: true,
+          };
+          nextPlayers[playerId] = updatedPlayer;
+          summaryText +=
+            ' Discarded hand — will gain +5 Cards, +1 Action, +1 Buy at the start of next turn!';
+        }
+        break;
+      }
+
+      case 'TREASURE_MAP': {
+        const secondMapInHand = updatedPlayer.hand.some(
+          (c) => c.id === 'treasure_map'
+        );
+        // Remove played Treasure Map from inPlay into trash
+        const inPlayWithoutMap = [...updatedPlayer.inPlay];
+        const mapIdx = inPlayWithoutMap.findIndex(
+          (c) => c.id === 'treasure_map'
+        );
+        if (mapIdx !== -1) {
+          const [trashedFirst] = inPlayWithoutMap.splice(mapIdx, 1);
+          if (trashedFirst) {
+            nextTrash = [...nextTrash, trashedFirst];
+          }
+        }
+        if (secondMapInHand) {
+          const remSecond = removeCardsFromHand(updatedPlayer.hand, [
+            'treasure_map',
+          ]);
+          nextTrash = [...nextTrash, ...remSecond.removedCards];
+          const goldsToGain = Math.min(4, nextSupply['gold'] ?? 0);
+          nextSupply['gold'] = (nextSupply['gold'] ?? 0) - goldsToGain;
+          const goldCards = Array.from(
+            { length: goldsToGain },
+            () => DOMINION_CARDS['gold']!
+          );
+          updatedPlayer = {
+            ...updatedPlayer,
+            inPlay: inPlayWithoutMap,
+            hand: remSecond.remainingHand,
+            deck: [...goldCards, ...updatedPlayer.deck],
+            gainedCardsThisTurn: [
+              ...(updatedPlayer.gainedCardsThisTurn ?? []),
+              ...goldCards,
+            ],
+          };
+          summaryText += ` Trashed two Treasure Maps and gained ${goldsToGain} Gold(s) onto top of deck!`;
+        } else {
+          updatedPlayer = {
+            ...updatedPlayer,
+            inPlay: inPlayWithoutMap,
+          };
+          summaryText +=
+            ' Trashed 1 Treasure Map (no second Treasure Map in hand).';
+        }
+        nextPlayers[playerId] = updatedPlayer;
+        break;
+      }
+
+      case 'WAREHOUSE': {
+        if (updatedPlayer.hand.length > 0) {
+          const reqDiscard = Math.min(3, updatedPlayer.hand.length);
+          pendingInteraction = {
+            playerId,
+            sourceCard: card,
+            promptType: 'DISCARD_EXACT_COUNT',
+            minCount: reqDiscard,
+            maxCount: reqDiscard,
+          };
+        }
+        break;
+      }
       case 'ARTISAN': {
         const hasGainable = Object.entries(nextSupply).some(([cid, count]) => {
           const def = getDominionCard(cid);
@@ -1342,29 +2380,58 @@ export function applyAction(
     const player = state.players[playerId]!;
     const removed = removeCardsFromHand(player.hand, [action.cardId]);
     const treasure = removed.removedCards[0]!;
+    const isDurationTreasure = treasure.types.includes('DURATION');
 
     const isFirstSilver =
       treasure.id === 'silver' && !player.silverPlayedThisTurn;
     const merchantBonus = isFirstSilver ? player.merchantsPlayedThisTurn : 0;
 
+    // Check if any opponent has an active Corsair in play and this is the first Silver or Gold played this turn
+    const opponentHasCorsair = Object.values(state.players).some(
+      (p) =>
+        p.id !== playerId &&
+        !isPlayerImmuneToAttack(player) &&
+        ((p.durationCards ?? []).some((c) => c.id === 'corsair') ||
+          (p.activeDurations ?? []).some((c) => c.id === 'corsair') ||
+          p.inPlay.some((c) => c.id === 'corsair'))
+    );
+    const trashedByCorsair =
+      opponentHasCorsair &&
+      !player.corsairTrashedThisTurn &&
+      (treasure.id === 'silver' || treasure.id === 'gold');
+
     const updatedPlayer: DominionPlayerState = {
       ...player,
       hand: removed.remainingHand,
-      inPlay: [...player.inPlay, treasure],
+      inPlay: trashedByCorsair
+        ? [...player.inPlay]
+        : [...player.inPlay, treasure],
+      durationCards:
+        isDurationTreasure && !trashedByCorsair
+          ? [...(player.durationCards ?? []), treasure]
+          : [...(player.durationCards ?? [])],
+      buys: player.buys + treasure.buys,
       coins: player.coins + treasure.coins + merchantBonus,
       silverPlayedThisTurn:
         player.silverPlayedThisTurn || treasure.id === 'silver',
+      corsairTrashedThisTurn:
+        Boolean(player.corsairTrashedThisTurn) || trashedByCorsair,
     };
 
     return {
       ...state,
       turnPhase: 'BUY_TREASURES',
       turnStep: 'BUY_TREASURES',
+      trash: trashedByCorsair ? [...state.trash, treasure] : state.trash,
       players: {
         ...state.players,
         [playerId]: updatedPlayer,
       },
-      lastActionSummary: `${playerId} played ${treasure.name} (+${treasure.coins + merchantBonus} Coin${treasure.coins + merchantBonus === 1 ? '' : 's'}).`,
+      lastActionSummary: `${playerId} played ${treasure.name} (+${
+        treasure.coins + merchantBonus
+      } Coin${treasure.coins + merchantBonus === 1 ? '' : 's'}${
+        trashedByCorsair ? ', trashed by Corsair!' : ''
+      }).`,
     };
   }
 
@@ -1394,11 +2461,23 @@ export function applyAction(
 
     const coinsFromTreasures =
       treasuresInHand.reduce((sum, c) => sum + c.coins, 0) + merchantBonus;
+    const buysFromTreasures = treasuresInHand.reduce(
+      (sum, c) => sum + c.buys,
+      0
+    );
+    const durationTreasures = treasuresInHand.filter((c) =>
+      c.types.includes('DURATION')
+    );
 
     const updatedPlayer: DominionPlayerState = {
       ...player,
       hand: nonTreasuresInHand,
       inPlay: [...player.inPlay, ...treasuresInHand],
+      durationCards: [
+        ...(player.durationCards ?? []),
+        ...durationTreasures,
+      ],
+      buys: player.buys + buysFromTreasures,
       coins: player.coins + coinsFromTreasures,
       silverPlayedThisTurn: player.silverPlayedThisTurn || hasSilverInBatch,
     };
@@ -1422,60 +2501,288 @@ export function applyAction(
     const player = state.players[playerId]!;
     const cardDef = getDominionCard(action.cardId)!;
 
-    const updatedPlayer: DominionPlayerState = {
-      ...player,
-      buys: player.buys - 1,
-      coins: player.coins - cardDef.cost,
-      discard: [...player.discard, cardDef],
-    };
-
     const nextSupply: Record<string, number> = {
       ...state.supply,
       [cardDef.id]: (state.supply[cardDef.id] ?? 1) - 1,
     };
 
+    // Check Embargo tokens on the purchased Supply pile
+    const embargoCount = (state.embargoTokens ?? {})[cardDef.id] ?? 0;
+    const cursesToGain = Math.min(embargoCount, nextSupply['curse'] ?? 0);
+    if (cursesToGain > 0) {
+      nextSupply['curse'] = (nextSupply['curse'] ?? 0) - cursesToGain;
+    }
+    const embargoCurses = Array.from(
+      { length: cursesToGain },
+      () => DOMINION_CARDS['curse']!
+    );
+
+    const updatedPlayer: DominionPlayerState = {
+      ...player,
+      buys: player.buys - 1,
+      coins: player.coins - cardDef.cost,
+      discard: [...player.discard, cardDef, ...embargoCurses],
+      gainedCardsThisTurn: [
+        ...(player.gainedCardsThisTurn ?? []),
+        cardDef,
+        ...embargoCurses,
+      ],
+      boughtVictoryThisTurn:
+        Boolean(player.boughtVictoryThisTurn) ||
+        cardDef.types.includes('VICTORY'),
+    };
+
+    const nextPlayers: Record<string, DominionPlayerState> = {
+      ...state.players,
+      [playerId]: updatedPlayer,
+    };
+
+    // Monkey check: if the player to the left of `playerId` has Monkey in play, they draw +1 Card per Monkey
+    let nextPrng = state.prng;
+    const n = state.playerOrder.length;
+    const leftPlayerIdx = (state.activePlayerIndex + 1) % n;
+    const leftPlayerId = state.playerOrder[leftPlayerIdx]!;
+    if (leftPlayerId !== playerId) {
+      const leftPlayer = nextPlayers[leftPlayerId]!;
+      const monkeyCount = leftPlayer.inPlay.filter(
+        (c) => c.id === 'monkey'
+      ).length;
+      if (monkeyCount > 0) {
+        const monkeyDraw = drawCardsForPlayer(
+          leftPlayer,
+          monkeyCount,
+          nextPrng
+        );
+        nextPlayers[leftPlayerId] = monkeyDraw.player;
+        nextPrng = monkeyDraw.prng;
+      }
+    }
+
     const nextState: DominionGameState = {
       ...state,
       turnPhase: 'BUY_CARDS',
       turnStep: 'BUY_CARDS',
-      players: {
-        ...state.players,
-        [playerId]: updatedPlayer,
-      },
+      players: nextPlayers,
       supply: nextSupply,
+      prng: nextPrng,
     };
+
+    const embargoNote =
+      cursesToGain > 0
+        ? ` (gained ${cursesToGain} Curse(s) from Embargo token)`
+        : '';
 
     return finalizeStateIfGameOver(
       nextState,
-      `${playerId} bought ${cardDef.name} (cost ${cardDef.cost}).`
+      `${playerId} bought ${cardDef.name} (cost ${cardDef.cost})${embargoNote}.`
     );
   }
 
   // =========================================================================
-  // 6. CLEANUP / END_TURN
+  // 6. CLEANUP / END_TURN (With Duration Card 2nd-Phase Retention & Resolution)
   // =========================================================================
   if (action.type === 'CLEANUP' || action.type === 'END_TURN') {
     const player = state.players[playerId]!;
 
-    // Move all cards in `inPlay` and remaining `hand` to `discard`
+    // Duration cards played THIS turn (`durationCards`) stay in `inPlay` for the 2nd phase (`activeDurations`).
+    // Cards that were in `activeDurations` (played on the previous turn) have now completed their 2nd phase and are discarded!
+    const durationsPlayedThisTurn = [...(player.durationCards ?? [])];
+    const remainingDurationCounts = new Map<string, number>();
+    for (const dc of durationsPlayedThisTurn) {
+      remainingDurationCounts.set(
+        dc.id,
+        (remainingDurationCounts.get(dc.id) ?? 0) + 1
+      );
+    }
+
+    const keptInPlayDurations: Card[] = [];
+    const discardedFromPlay: Card[] = [];
+    const treasuriesToTopDeck: Card[] = [];
+
+    for (const cardInPlay of player.inPlay) {
+      const countToKeep = remainingDurationCounts.get(cardInPlay.id) ?? 0;
+      if (countToKeep > 0) {
+        keptInPlayDurations.push(cardInPlay);
+        remainingDurationCounts.set(cardInPlay.id, countToKeep - 1);
+      } else if (
+        cardInPlay.id === 'treasury' &&
+        !player.boughtVictoryThisTurn
+      ) {
+        treasuriesToTopDeck.push(cardInPlay);
+      } else {
+        discardedFromPlay.push(cardInPlay);
+      }
+    }
+
+    const takeOutpostExtraTurn =
+      Boolean(player.outpostPlayedThisTurn) && !player.isOutpostTurn;
+    const nextHandDrawCount = takeOutpostExtraTurn ? 3 : 5;
+
     const clearedPlayer: DominionPlayerState = {
       ...player,
+      deck: [...treasuriesToTopDeck, ...player.deck],
       hand: [],
-      inPlay: [],
-      discard: [...player.discard, ...player.inPlay, ...player.hand],
+      inPlay: keptInPlayDurations,
+      durationCards: [],
+      activeDurations: keptInPlayDurations,
+      discard: [...player.discard, ...discardedFromPlay, ...player.hand],
       actions: 1,
       buys: 1,
       coins: 0,
       merchantsPlayedThisTurn: 0,
       silverPlayedThisTurn: false,
+      gainedCardsLastTurn: [...(player.gainedCardsThisTurn ?? [])],
+      gainedCardsThisTurn: [],
+      boughtVictoryThisTurn: false,
+      outpostPlayedThisTurn: false,
+      isOutpostTurn: takeOutpostExtraTurn,
+      corsairTrashedThisTurn: false,
     };
 
-    // Draw a fresh hand of 5 cards (recycling discard via PRNG if deck empties)
-    const drawRes = drawCardsForPlayer(clearedPlayer, 5, state.prng);
+    // Draw a fresh hand (5 cards normally, or 3 cards for an Outpost extra turn)
+    let nextPrng = state.prng;
+    const drawRes = drawCardsForPlayer(
+      clearedPlayer,
+      nextHandDrawCount,
+      nextPrng
+    );
+    nextPrng = drawRes.prng;
 
-    const nextActiveIndex =
-      (state.activePlayerIndex + 1) % state.playerOrder.length;
+    const nextActiveIndex = takeOutpostExtraTurn
+      ? state.activePlayerIndex
+      : (state.activePlayerIndex + 1) % state.playerOrder.length;
     const nextActivePlayerId = state.playerOrder[nextActiveIndex]!;
+
+    const nextPlayers: Record<string, DominionPlayerState> = {
+      ...state.players,
+      [playerId]: drawRes.player,
+    };
+    const nextSupply: Record<string, number> = { ...state.supply };
+
+    // Resolve Start-of-Turn 2nd Phase for `nextActivePlayerId`'s `activeDurations` & `havenSetAside`
+    let startingPlayer = nextPlayers[nextActivePlayerId]!;
+    const activeDurs = startingPlayer.activeDurations ?? [];
+    const setAsideCards = startingPlayer.havenSetAside ?? [];
+    let pendingInteraction: PendingInteraction | null = null;
+
+    if (setAsideCards.length > 0) {
+      startingPlayer = {
+        ...startingPlayer,
+        hand: [...startingPlayer.hand, ...setAsideCards],
+        havenSetAside: [],
+      };
+    }
+
+    if (activeDurs.length > 0) {
+      let bonusCards = 0;
+      let bonusActions = 0;
+      let bonusBuys = 0;
+      let bonusCoins = 0;
+      let discardTwoRequired = 0;
+      let pirateTriggered = false;
+
+      for (const dur of activeDurs) {
+        switch (dur.customEffectId ?? dur.id.toUpperCase()) {
+          case 'ASTROLABE':
+            bonusCoins += 1;
+            bonusBuys += 1;
+            break;
+          case 'CARAVAN':
+          case 'CORSAIR':
+          case 'MONKEY':
+            bonusCards += 1;
+            break;
+          case 'FISHING_VILLAGE':
+            bonusActions += 1;
+            bonusCoins += 1;
+            break;
+          case 'LIGHTHOUSE':
+            bonusCoins += 1;
+            break;
+          case 'MERCHANT_SHIP':
+            bonusCoins += 2;
+            break;
+          case 'PIRATE':
+            pirateTriggered = true;
+            break;
+          case 'SAILOR':
+            bonusCoins += 2;
+            break;
+          case 'SEA_WITCH':
+            bonusCards += 2;
+            discardTwoRequired += 2;
+            break;
+          case 'TACTICIAN':
+            if (startingPlayer.tacticianPending) {
+              bonusCards += 5;
+              bonusActions += 1;
+              bonusBuys += 1;
+            }
+            break;
+          case 'TIDE_POOLS':
+            discardTwoRequired += 2;
+            break;
+          case 'WHARF':
+            bonusCards += 2;
+            bonusBuys += 1;
+            break;
+          default:
+            break;
+        }
+      }
+
+      startingPlayer = {
+        ...startingPlayer,
+        actions: startingPlayer.actions + bonusActions,
+        buys: startingPlayer.buys + bonusBuys,
+        coins: startingPlayer.coins + bonusCoins,
+        tacticianPending: false,
+      };
+
+      if (bonusCards > 0) {
+        const durDraw = drawCardsForPlayer(
+          startingPlayer,
+          bonusCards,
+          nextPrng
+        );
+        startingPlayer = durDraw.player;
+        nextPrng = durDraw.prng;
+      }
+
+      if (pirateTriggered) {
+        const gainTreasureId =
+          (nextSupply['gold'] ?? 0) > 0
+            ? 'gold'
+            : (nextSupply['silver'] ?? 0) > 0
+            ? 'silver'
+            : null;
+        if (gainTreasureId) {
+          const gainedTreasure = DOMINION_CARDS[gainTreasureId]!;
+          nextSupply[gainTreasureId] = (nextSupply[gainTreasureId] ?? 1) - 1;
+          startingPlayer = {
+            ...startingPlayer,
+            hand: [...startingPlayer.hand, gainedTreasure],
+          };
+        }
+      }
+
+      if (discardTwoRequired > 0 && startingPlayer.hand.length > 0) {
+        const req = Math.min(discardTwoRequired, startingPlayer.hand.length);
+        const durSource =
+          activeDurs.find(
+            (d) => d.id === 'tide_pools' || d.id === 'sea_witch'
+          ) ?? activeDurs[0]!;
+        pendingInteraction = {
+          playerId: nextActivePlayerId,
+          sourceCard: durSource,
+          promptType: 'DISCARD_EXACT_COUNT',
+          minCount: req,
+          maxCount: req,
+        };
+      }
+    }
+
+    nextPlayers[nextActivePlayerId] = startingPlayer;
 
     const nextState: DominionGameState = {
       ...state,
@@ -1484,16 +2791,15 @@ export function applyAction(
       turnNumber: state.turnNumber + 1,
       activePlayerIndex: nextActiveIndex,
       activePlayerId: nextActivePlayerId,
-      players: {
-        ...state.players,
-        [playerId]: drawRes.player,
-      },
-      prng: drawRes.prng,
+      players: nextPlayers,
+      supply: nextSupply,
+      pendingInteraction,
+      prng: nextPrng,
     };
 
     return finalizeStateIfGameOver(
       nextState,
-      `${playerId} completed Cleanup and drew 5 cards. Now ${nextActivePlayerId}'s turn.`
+      `${playerId} completed Cleanup and drew ${nextHandDrawCount} cards. Now ${nextActivePlayerId}'s turn.`
     );
   }
 
@@ -1523,6 +2829,12 @@ function sanitizePlayer(
     buys: player.buys,
     coins: player.coins,
     totalVictoryPoints: calculatePlayerVictoryPoints(player),
+    durationCards: [...(player.durationCards ?? [])],
+    activeDurations: [...(player.activeDurations ?? [])],
+    islandMat: [...(player.islandMat ?? [])],
+    nativeVillageMat: isSelf ? [...(player.nativeVillageMat ?? [])] : [],
+    nativeVillageMatCount: (player.nativeVillageMat ?? []).length,
+    pirateShipTokens: player.pirateShipTokens ?? 0,
   };
 }
 
@@ -1530,7 +2842,7 @@ function sanitizePlayer(
  * Generates a player-specific perspective for Dominion:
  * - Conceals the exact identities and order of cards in all draw decks (`deckCount` only).
  * - Conceals the card identities in opponents' hands (`handCount` only, `hand: []`).
- * - Exposes `self.hand`, `inPlay`, `discardTopCard`, `supply`, and `trash`.
+ * - Exposes `self.hand`, `inPlay`, `discardTopCard`, `supply`, `embargoTokens`, `trash`, and player mats.
  */
 export function getPlayerPerspective(
   state: DominionGameState,
@@ -1560,6 +2872,7 @@ export function getPlayerPerspective(
     self: selfSanitized,
     opponents,
     supply: state.supply,
+    embargoTokens: state.embargoTokens ?? {},
     kingdomCards: state.kingdomCards,
     trash: state.trash,
     pendingInteraction: state.pendingInteraction,

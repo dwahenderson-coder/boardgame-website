@@ -526,7 +526,11 @@ describe('Dominion Core Engine (Base Game 2-4P State Machine, Deck Cycling & Car
   describe('7. Pre-Set Games, Random 10 Cards, Custom 10 Cards & Militia Waiting Display', () => {
     it('supports all 26 Base Game Kingdom cards and all 6 Pre-Set games with Base Game as default', () => {
       expect(ALL_BASE_KINGDOM_CARD_IDS).toHaveLength(26);
-      expect(DOMINION_PRESET_GAMES.map((p) => p.name)).toEqual([
+      expect(
+        DOMINION_PRESET_GAMES.filter((p) => p.expansion !== 'seaside').map(
+          (p) => p.name
+        )
+      ).toEqual([
         'Base Game',
         'Size Distortion',
         'Deck Top',
@@ -650,6 +654,234 @@ describe('Dominion Core Engine (Base Game 2-4P State Machine, Deck Cycling & Car
       expect(afterMultiTarget.lastActionSummary).toContain(
         'Waiting for other players to discard.'
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 8. Seaside Expansion (Duration Cards, Mats, Embargo/Gold Coins & 1st Ed Base)
+  // ---------------------------------------------------------------------------
+  describe('8. Seaside Expansion (Duration Cards, Mats, Embargo/Gold Coins & 1st Ed Base)', () => {
+    it('retains DURATION cards in the play area across Cleanup until their 2nd phase completes on the next turn', () => {
+      let state = initGame(['p1', 'p2'], 901, {
+        kingdomCards: resolveDominionKingdomCardsFromExpansions(
+          ['seaside', 'preset:high_seas_1st_edition'],
+          901
+        ),
+      });
+
+      // Put Caravan (+1 Card, +1 Action now; +1 Card at start of next turn) and Fishing Village (+2 Actions, +1 Coin now; +1 Action, +1 Coin next turn) in p1's hand
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            actions: 1,
+            buys: 1,
+            coins: 0,
+            hand: [
+              c('caravan'),
+              c('fishing_village'),
+              c('copper'),
+              c('copper'),
+              c('estate'),
+            ],
+            deck: [
+              c('silver'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('copper'),
+              c('estate'),
+              c('gold'),
+            ],
+          },
+        },
+      };
+
+      expect(c('caravan').types).toContain('DURATION');
+      expect(c('fishing_village').types).toContain('DURATION');
+
+      // 1. Play Caravan (+1 Card, +1 Action)
+      state = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'caravan',
+      });
+      // 2. Play Fishing Village (+2 Actions, +1 Coin)
+      state = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'fishing_village',
+      });
+
+      expect(state.players['p1']!.inPlay.map((card) => card.id)).toEqual([
+        'caravan',
+        'fishing_village',
+      ]);
+      expect(
+        (state.players['p1']!.durationCards ?? []).map((card) => card.id)
+      ).toEqual(['caravan', 'fishing_village']);
+
+      // 3. p1 ends turn (Cleanup): Duration cards MUST remain in p1's inPlay!
+      state = applyAction(state, 'p1', { type: 'CLEANUP' });
+      expect(state.activePlayerId).toBe('p2');
+      expect(state.players['p1']!.inPlay.map((card) => card.id)).toEqual([
+        'caravan',
+        'fishing_village',
+      ]);
+      expect(
+        (state.players['p1']!.activeDurations ?? []).map((card) => card.id)
+      ).toEqual(['caravan', 'fishing_village']);
+
+      // 4. p2 ends turn -> p1's next turn starts!
+      // Caravan (+1 Card) and Fishing Village (+1 Action, +1 Coin) trigger their 2nd phase!
+      state = applyAction(state, 'p2', { type: 'CLEANUP' });
+      expect(state.activePlayerId).toBe('p1');
+      // p1 starts with 5 cards + 1 from Caravan = 6 cards, 1 base Action + 1 from Fishing Village = 2 Actions, +1 Coin from Fishing Village = 1 Coin
+      expect(state.players['p1']!.hand).toHaveLength(6);
+      expect(state.players['p1']!.actions).toBe(2);
+      expect(state.players['p1']!.coins).toBe(1);
+      // Still inPlay during this 2nd turn until Cleanup
+      expect(state.players['p1']!.inPlay.map((card) => card.id)).toEqual([
+        'caravan',
+        'fishing_village',
+      ]);
+
+      // 5. At the end of p1's 2nd turn, the Duration cards have completed their 2nd phase and leave inPlay!
+      state = applyAction(state, 'p1', { type: 'CLEANUP' });
+      expect(state.players['p1']!.inPlay).toHaveLength(0);
+    });
+
+    it('adds Embargo Coins to a Supply pile and grants Curses when buying from an embargoed pile', () => {
+      let state = initGame(['p1', 'p2'], 902, {
+        kingdomCards: resolveDominionKingdomCardsFromExpansions(
+          ['seaside', 'preset:high_seas_1st_edition'],
+          902
+        ),
+      });
+
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            actions: 1,
+            buys: 1,
+            coins: 0,
+            hand: [c('embargo'), c('gold')],
+          },
+        },
+      };
+
+      // Play Embargo (+2 Coins, trashes Embargo, prompts for Supply pile to Embargo)
+      state = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'embargo',
+      });
+      expect(state.players['p1']!.coins).toBe(2);
+      expect(state.trash.some((card) => card.id === 'embargo')).toBe(true);
+      expect(state.pendingInteraction?.promptType).toBe('EMBARGO_PILE');
+
+      // Put Embargo Coin on 'silver' pile
+      state = applyAction(state, 'p1', {
+        type: 'RESOLVE_INTERACTION',
+        selectedCardIds: ['silver'],
+      });
+      expect(state.embargoTokens?.['silver']).toBe(1);
+
+      // Play Gold (+3 Coins -> total 5 Coins) and buy 'silver' (cost 3)
+      state = applyAction(state, 'p1', { type: 'PLAY_ALL_TREASURES' });
+      const initialCurses = state.supply['curse']!;
+      state = applyAction(state, 'p1', {
+        type: 'BUY_CARD',
+        cardId: 'silver',
+      });
+
+      // Buying from the embargoed Silver pile also grants 1 Curse!
+      expect(state.supply['curse']).toBe(initialCurses - 1);
+      expect(
+        state.players['p1']!.discard.some((card) => card.id === 'curse')
+      ).toBe(true);
+    });
+
+    it('counts cards on the Island Mat and Native Village Mat toward endgame Victory Points, and adds Gold Coins to Pirate Ship Mat', () => {
+      let state = initGame(['p1', 'p2'], 903, {
+        kingdomCards: resolveDominionKingdomCardsFromExpansions(
+          ['seaside', 'preset:high_seas_1st_edition'],
+          903
+        ),
+      });
+
+      state = {
+        ...state,
+        players: {
+          ...state.players,
+          p1: {
+            ...state.players['p1']!,
+            actions: 2,
+            hand: [c('island'), c('duchy'), c('pirate_ship')],
+            nativeVillageMat: [c('province')], // 6 VP on Native Village Mat
+          },
+          p2: {
+            ...state.players['p2']!,
+            deck: [c('silver'), c('copper')],
+          },
+        },
+      };
+
+      // Play Island -> sets aside Island (2 VP) and Duchy (3 VP) on Island Mat
+      state = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'island',
+      });
+      expect(state.pendingInteraction?.promptType).toBe('ISLAND_SET_ASIDE');
+      state = applyAction(state, 'p1', {
+        type: 'RESOLVE_INTERACTION',
+        selectedCardIds: ['duchy'],
+      });
+      expect(
+        (state.players['p1']!.islandMat ?? []).map((card) => card.id)
+      ).toEqual(['island', 'duchy']);
+
+      // Play Pirate Ship -> choose attack ('silver' is non-empty selection -> attack mode) -> trashes p2's Treasure and adds 1 Gold Coin to Pirate Ship Mat
+      state = applyAction(state, 'p1', {
+        type: 'PLAY_ACTION_CARD',
+        cardId: 'pirate_ship',
+      });
+      expect(state.pendingInteraction?.promptType).toBe('PIRATE_SHIP_CHOICE');
+      state = applyAction(state, 'p1', {
+        type: 'RESOLVE_INTERACTION',
+        selectedCardIds: ['copper'], // non-empty triggers Pirate Ship Attack
+      });
+      expect(state.players['p1']!.pirateShipTokens).toBe(1);
+
+      // Verify calculatePlayerVictoryPoints counts Island Mat (Island 2 + Duchy 3 = 5 VP) + Native Village Mat (Province = 6 VP) + 3 starting Estates = 14 VP!
+      expect(calculatePlayerVictoryPoints(state.players['p1']!)).toBe(14);
+    });
+
+    it('includes all 6 1st Edition Base cards and all 14 Seaside preset games', () => {
+      const firstEdIds = [
+        'adventurer',
+        'chancellor',
+        'feast',
+        'spy',
+        'thief',
+        'woodcutter',
+      ];
+      for (const cid of firstEdIds) {
+        expect(DOMINION_CARDS[cid]).toBeDefined();
+      }
+
+      const seasidePresets = DOMINION_PRESET_GAMES.filter(
+        (p) => p.expansion === 'seaside'
+      );
+      expect(seasidePresets).toHaveLength(14);
+      for (const preset of seasidePresets) {
+        expect(preset.cards).toHaveLength(10);
+        for (const cid of preset.cards) {
+          expect(DOMINION_CARDS[cid]).toBeDefined();
+        }
+      }
     });
   });
 });
