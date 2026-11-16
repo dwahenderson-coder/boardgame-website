@@ -19,12 +19,85 @@ export interface CribbageBoardProps {
 const PEG_COLORS: readonly {
   readonly fill: string;
   readonly stroke: string;
+  readonly trackBg: string;
+  readonly trackBorder: string;
+  readonly holeRing: string;
   readonly label: string;
 }[] = [
-  { fill: '#ef4444', stroke: '#fecaca', label: 'Red' },
-  { fill: '#3b82f6', stroke: '#bfdbfe', label: 'Blue' },
-  { fill: '#10b981', stroke: '#a7f3d0', label: 'Green' },
-  { fill: '#f59e0b', stroke: '#fde68a', label: 'Gold' },
+  {
+    fill: '#ef4444',
+    stroke: '#fecaca',
+    trackBg: 'rgba(185, 28, 28, 0.36)',
+    trackBorder: 'rgba(248, 113, 113, 0.65)',
+    holeRing: 'rgba(252, 165, 165, 0.55)',
+    label: 'Red',
+  },
+  {
+    fill: '#3b82f6',
+    stroke: '#bfdbfe',
+    trackBg: 'rgba(29, 78, 216, 0.36)',
+    trackBorder: 'rgba(96, 165, 250, 0.65)',
+    holeRing: 'rgba(147, 197, 253, 0.55)',
+    label: 'Blue',
+  },
+  {
+    fill: '#10b981',
+    stroke: '#a7f3d0',
+    trackBg: 'rgba(4, 120, 87, 0.36)',
+    trackBorder: 'rgba(52, 211, 153, 0.65)',
+    holeRing: 'rgba(110, 231, 183, 0.55)',
+    label: 'Green',
+  },
+  {
+    fill: '#f59e0b',
+    stroke: '#fde68a',
+    trackBg: 'rgba(180, 83, 9, 0.38)',
+    trackBorder: 'rgba(251, 191, 36, 0.65)',
+    holeRing: 'rgba(253, 224, 71, 0.55)',
+    label: 'Gold',
+  },
+];
+
+const CRIBBAGE_STREETS: readonly {
+  readonly id: number;
+  readonly title: string;
+  readonly startHole: number;
+  readonly endHole: number;
+  readonly reversed: boolean;
+  readonly badgeText: string;
+}[] = [
+  {
+    id: 1,
+    title: 'Street 1 (1 → 30)',
+    startHole: 1,
+    endHole: 30,
+    reversed: false,
+    badgeText: 'Corner 1 at 30 ⤵',
+  },
+  {
+    id: 2,
+    title: 'Street 2 (60 ← 31)',
+    startHole: 31,
+    endHole: 60,
+    reversed: true,
+    badgeText: '⤵ Corner 2 at 60',
+  },
+  {
+    id: 3,
+    title: 'Street 3 (61 → 90)',
+    startHole: 61,
+    endHole: 90,
+    reversed: false,
+    badgeText: '🦨 Skunk Line at 90 ⤵',
+  },
+  {
+    id: 4,
+    title: 'Street 4 (120 ← 91)',
+    startHole: 91,
+    endHole: 120,
+    reversed: true,
+    badgeText: '🏆 To Winning Peg 121',
+  },
 ];
 
 export const CribbageBoard: React.FC<CribbageBoardProps> = ({
@@ -106,148 +179,219 @@ export const CribbageBoard: React.FC<CribbageBoardProps> = ({
           </span>
         </div>
 
-        {/* Visual Wooden 121-Hole Cribbage Pegging Board */}
+        {/* Visual Wrapped 120-Point + 121 Winning Hole Wooden Cribbage Board (Side-by-Side Off-Color Tracks) */}
         <div
-          className="w-full rounded-2xl border-2 border-amber-700/80 p-3.5 shadow-2xl relative overflow-x-auto"
+          className="w-full rounded-2xl border-4 border-amber-700/90 p-4 shadow-2xl relative space-y-3"
           style={{
             background:
               'linear-gradient(180deg, #5c3415 0%, #78441c 50%, #4b280e 100%)',
           }}
         >
-          <div className="flex items-center justify-between mb-2 text-[11px] font-black text-amber-200 uppercase tracking-wider">
-            <span>🏁 Start (0)</span>
-            <span>Corner 1 (30)</span>
-            <span>Corner 2 (60)</span>
-            <span className="text-rose-300">🦨 Skunk Line (90)</span>
-            <span className="text-emerald-300">🏆 Finish Peg (121)</span>
-          </div>
+          {/* Top Player Legend + Start (0) Holes & Winning 121 Peg Hole */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-950/75 border border-amber-800/80 rounded-xl px-3.5 py-2.5">
+            {/* Left: Start Holes (0) & Player Peg Legend */}
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-[11px] font-black text-amber-200 uppercase tracking-wider">
+                🏁 Start (0):
+              </span>
+              {allPlayersInOrder.map((p, pIdx) => {
+                const pegStyle = PEG_COLORS[pIdx % PEG_COLORS.length]!;
+                const isDealer =
+                  gameState.playerOrder.indexOf(p.id) === gameState.dealerIndex;
+                const clampedScore = Math.min(121, Math.max(0, p.score));
 
-          <div className="space-y-2 min-w-[760px]">
-            {allPlayersInOrder.map((p, pIdx) => {
-              const pegStyle = PEG_COLORS[pIdx % PEG_COLORS.length]!;
-              const isDealer =
-                gameState.playerOrder.indexOf(p.id) === gameState.dealerIndex;
-              const clampedScore = Math.min(121, Math.max(0, p.score));
-
-              return (
-                <div
-                  key={`crib_lane_${p.id}`}
-                  className="rounded-xl bg-amber-950/65 border border-amber-800/70 px-3 py-2 flex flex-col gap-1.5"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-3.5 h-3.5 rounded-full border-2 shadow"
-                        style={{
-                          backgroundColor: pegStyle.fill,
-                          borderColor: pegStyle.stroke,
-                        }}
-                      />
-                      <span className="font-black text-amber-100">
-                        {formatName(p.id)}
-                      </span>
-                      {isDealer && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black">
-                          DEALER • CRIB
-                        </span>
-                      )}
-                      {p.lastActionLabel && (
-                        <span className="text-[11px] text-amber-300/90 font-semibold">
-                          • {p.lastActionLabel}
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono font-black text-emerald-300">
-                      Hole {p.score} / {gameState.targetScore}
-                    </span>
-                  </div>
-
-                  {/* 24 Five-Hole Groups (1..120) + Start (0) + Winning Hole (121) */}
-                  <div className="flex items-center gap-1">
-                    {/* Start Hole 0 */}
+                return (
+                  <div
+                    key={`legend_${p.id}`}
+                    style={{
+                      backgroundColor: pegStyle.trackBg,
+                      borderColor: pegStyle.trackBorder,
+                    }}
+                    className="px-2.5 py-1 rounded-xl border flex items-center gap-2 shadow"
+                  >
+                    {/* Start (0) Peg Hole for this player */}
                     <div
-                      title={`${formatName(p.id)}: Start (0)`}
-                      className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                      title={`${formatName(p.id)} Start Hole (0)`}
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${
                         clampedScore === 0
-                          ? 'scale-125 shadow-lg'
-                          : 'bg-amber-950 border-amber-700/70'
+                          ? 'scale-125 ring-2 ring-white shadow-lg'
+                          : 'bg-stone-950/90'
                       }`}
-                      style={
-                        clampedScore === 0
-                          ? {
-                              backgroundColor: pegStyle.fill,
-                              borderColor: pegStyle.stroke,
-                            }
-                          : undefined
-                      }
+                      style={{
+                        backgroundColor:
+                          clampedScore === 0 ? pegStyle.fill : '#1c1917',
+                        borderColor:
+                          clampedScore === 0
+                            ? pegStyle.stroke
+                            : pegStyle.holeRing,
+                      }}
                     />
+                    <span className="text-xs font-black text-white">
+                      {formatName(p.id)}
+                    </span>
+                    {isDealer && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 text-[9px] font-black">
+                        CRIB
+                      </span>
+                    )}
+                    <span className="font-mono font-black text-xs text-amber-200">
+                      {p.score} / 121
+                    </span>
+                    {p.lastActionLabel && (
+                      <span className="text-[10px] text-amber-100/90 font-semibold">
+                        ({p.lastActionLabel})
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
-                    {/* 24 groups of 5 holes = 120 holes */}
-                    {Array.from({ length: 24 }, (_, groupIdx) => {
-                      const baseHole = groupIdx * 5;
-                      const isCornerGroup =
-                        baseHole + 5 === 30 ||
-                        baseHole + 5 === 60 ||
-                        baseHole + 5 === 90;
-                      return (
-                        <div
-                          key={`grp_${p.id}_${groupIdx}`}
-                          className={`flex items-center gap-[2px] px-1 py-0.5 rounded bg-amber-900/40 ${
-                            isCornerGroup
-                              ? 'border-r-2 border-amber-400/80 pr-1.5'
-                              : 'border border-amber-800/40'
-                          }`}
-                        >
-                          {Array.from({ length: 5 }, (__, hOffset) => {
-                            const holeNum = baseHole + hOffset + 1;
-                            const isCurrentPeg = clampedScore === holeNum;
-                            const isPassed = clampedScore > holeNum;
-                            return (
-                              <div
-                                key={`hole_${p.id}_${holeNum}`}
-                                title={`Hole ${holeNum}`}
-                                className={`w-2 h-2 rounded-full transition-all ${
-                                  isCurrentPeg
-                                    ? 'w-3 h-3 scale-125 ring-2 ring-white shadow-md z-10'
-                                    : isPassed
-                                      ? 'opacity-70'
-                                      : 'bg-stone-950/90 border border-amber-900/80'
-                                }`}
-                                style={
-                                  isCurrentPeg || isPassed
-                                    ? {
-                                        backgroundColor: pegStyle.fill,
-                                      }
-                                    : undefined
-                                }
-                              />
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-
-                    {/* Winning Game Hole 121 */}
+            {/* Right: Dedicated 121 Game-Winning Peg Hole */}
+            <div className="flex items-center gap-2.5 bg-emerald-950/90 border-2 border-emerald-400/80 rounded-xl px-3.5 py-1.5 shadow-lg">
+              <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                🏆 121 Finish Hole:
+              </span>
+              <div className="flex items-center gap-1.5">
+                {allPlayersInOrder.map((p, pIdx) => {
+                  const pegStyle = PEG_COLORS[pIdx % PEG_COLORS.length]!;
+                  const hasWon = p.score >= 121;
+                  return (
                     <div
-                      title="Winning Hole 121"
-                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ml-1 ${
-                        clampedScore >= 121
-                          ? 'scale-125 ring-2 ring-emerald-300 shadow-lg'
-                          : 'bg-emerald-950 border-emerald-500/70'
+                      key={`finish_121_${p.id}`}
+                      title={`Hole 121 (${formatName(p.id)})`}
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                        hasWon
+                          ? 'scale-125 ring-2 ring-white shadow-xl'
+                          : 'opacity-75'
                       }`}
-                      style={
-                        clampedScore >= 121
-                          ? {
-                              backgroundColor: pegStyle.fill,
-                              borderColor: pegStyle.stroke,
-                            }
-                          : undefined
-                      }
+                      style={{
+                        backgroundColor: hasWon ? pegStyle.fill : '#064e3b',
+                        borderColor: hasWon
+                          ? pegStyle.stroke
+                          : pegStyle.trackBorder,
+                      }}
                     >
-                      <span className="text-[7px] font-black text-white">
+                      <span className="text-[9px] font-black text-white">
                         ★
                       </span>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Wrapped Serpentine Streets (30 Holes per Street = 120 Points Total, Tracks Side-by-Side) */}
+          <div className="space-y-2.5">
+            {CRIBBAGE_STREETS.map((street) => {
+              // 6 groups of 5 holes = 30 holes in this street
+              const groupIndices = [0, 1, 2, 3, 4, 5];
+              const orderedGroups = street.reversed
+                ? [...groupIndices].reverse()
+                : groupIndices;
+
+              return (
+                <div
+                  key={`street_${street.id}`}
+                  className="rounded-xl bg-amber-950/70 border-2 border-amber-800/80 p-2.5 space-y-1.5 shadow-inner"
+                >
+                  <div className="flex items-center justify-between text-[11px] font-black text-amber-200 uppercase tracking-wider px-1">
+                    <span>{street.title}</span>
+                    <span
+                      className={
+                        street.id === 3 ? 'text-rose-300' : 'text-amber-300'
+                      }
+                    >
+                      {street.badgeText}
+                    </span>
+                  </div>
+
+                  {/* Side-by-Side Player Tracks Running Parallel Through This 30-Point Street */}
+                  <div className="space-y-1">
+                    {allPlayersInOrder.map((p, pIdx) => {
+                      const pegStyle = PEG_COLORS[pIdx % PEG_COLORS.length]!;
+                      const clampedScore = Math.min(121, Math.max(0, p.score));
+
+                      return (
+                        <div
+                          key={`street_${street.id}_track_${p.id}`}
+                          style={{
+                            backgroundColor: pegStyle.trackBg,
+                            borderColor: pegStyle.trackBorder,
+                          }}
+                          className="w-full rounded-lg border px-2 py-1 flex items-center justify-between gap-2"
+                        >
+                          {/* Track Label Pill */}
+                          <div className="w-28 shrink-0 flex items-center gap-1.5 truncate">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border shrink-0"
+                              style={{
+                                backgroundColor: pegStyle.fill,
+                                borderColor: pegStyle.stroke,
+                              }}
+                            />
+                            <span className="text-[10px] font-black text-white truncate">
+                              {formatName(p.id)}
+                            </span>
+                          </div>
+
+                          {/* 6 Five-Hole Sections Across the Street (30 Holes) */}
+                          <div className="flex-1 grid grid-cols-6 gap-2">
+                            {orderedGroups.map((gOffset) => {
+                              const groupStart =
+                                street.startHole + gOffset * 5;
+                              const holeNumbers = Array.from(
+                                { length: 5 },
+                                (_, i) => groupStart + i
+                              );
+                              const orderedHoles = street.reversed
+                                ? [...holeNumbers].reverse()
+                                : holeNumbers;
+                              const groupEndLabel = groupStart + 4;
+
+                              return (
+                                <div
+                                  key={`s_${street.id}_p_${p.id}_g_${gOffset}`}
+                                  className="flex items-center justify-between bg-black/25 rounded-md px-2 py-1 border border-white/10"
+                                >
+                                  {orderedHoles.map((holeNum) => {
+                                    const isCurrentPeg =
+                                      clampedScore === holeNum;
+                                    const isPassed = clampedScore > holeNum;
+
+                                    return (
+                                      <div
+                                        key={`hole_${p.id}_${holeNum}`}
+                                        title={`${formatName(p.id)} • Hole ${holeNum}`}
+                                        className={`rounded-full transition-all flex items-center justify-center ${
+                                          isCurrentPeg
+                                            ? 'w-4 h-4 scale-125 ring-2 ring-white shadow-lg z-10'
+                                            : 'w-2.5 h-2.5'
+                                        }`}
+                                        style={{
+                                          backgroundColor:
+                                            isCurrentPeg || isPassed
+                                              ? pegStyle.fill
+                                              : '#0c0a09',
+                                          border: isCurrentPeg
+                                            ? `2px solid ${pegStyle.stroke}`
+                                            : `1px solid ${pegStyle.holeRing}`,
+                                          opacity: isPassed ? 0.55 : 1,
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                  <span className="text-[9px] font-mono font-bold text-white/70 ml-1">
+                                    {groupEndLabel}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

@@ -36,7 +36,7 @@ const WEAPON_ICONS: Readonly<Record<ClueWeapon, string>> = {
   Wrench: '🔩',
 };
 
-const CELL_PX = 26;
+const CELL_PX = 52;
 
 export const ClueBoard: React.FC<ClueBoardProps> = ({
   gameState,
@@ -193,7 +193,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
          ===================================================================== */}
       <div className="flex-1 flex flex-col items-center gap-3 min-w-0">
         {/* Top Investigation Status & Action Bar */}
-        <div className="w-full max-w-[920px] bg-slate-900/95 border border-slate-800 rounded-2xl p-3.5 shadow-xl flex flex-col gap-2.5">
+        <div className="w-full max-w-[1280px] bg-slate-900/95 border border-slate-800 rounded-2xl p-3.5 shadow-xl flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider">
@@ -670,7 +670,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                             backgroundColor: startDef.pawnHex,
                             borderColor: startDef.pawnBorderHex,
                           }}
-                          className="w-5 h-5 rounded-full border-2 shadow-md flex items-center justify-center text-[9px] font-black text-slate-950 z-20"
+                          className="w-9 h-9 rounded-full border-2 shadow-lg flex items-center justify-center text-xs font-black text-slate-950 z-20"
                         >
                           {tile.suspect
                             .split(' ')
@@ -760,7 +760,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                       {doorInfo && (
                         <div
                           title={`Door to ${tile.room}`}
-                          className="w-full h-full flex items-center justify-center bg-amber-300/35 border border-dashed border-amber-200 text-[9px] font-black text-amber-100"
+                          className="w-full h-full flex items-center justify-center bg-amber-300/35 border border-dashed border-amber-200 text-sm font-black text-amber-100"
                         >
                           🚪
                         </div>
@@ -814,7 +814,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                             CLUE_START_SQUARES[suspectOnHallway].pawnHex,
                           borderColor: '#0f172a',
                         }}
-                        className="w-5 h-5 rounded-full border-2 shadow-md flex items-center justify-center text-[9px] font-black text-slate-950 z-20"
+                        className="w-9 h-9 rounded-full border-2 shadow-lg flex items-center justify-center text-xs font-black text-slate-950 z-20"
                       >
                         {suspectOnHallway
                           .split(' ')
@@ -822,7 +822,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                           .join('')}
                       </div>
                     ) : isReachableHallway ? (
-                      <span className="text-[9px] font-black text-emerald-950">
+                      <span className="text-xs font-black text-emerald-950">
                         {stepCost}
                       </span>
                     ) : null}
@@ -843,34 +843,34 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                   (CLUE_CENTER_SPACE.yMax - CLUE_CENTER_SPACE.yMin + 1) *
                   CELL_PX,
               }}
-              className="absolute bg-black border-2 border-amber-500/80 flex flex-col items-center justify-between p-2 z-10 overflow-hidden shadow-xl"
+              className="absolute bg-black border-2 border-amber-500/80 flex flex-col items-center justify-between p-4 z-10 overflow-hidden shadow-xl"
             >
               {/* Top of Clue Space: Rolled Dice Display */}
-              <div className="w-full flex flex-col items-center gap-1 pt-0.5">
-                <span className="text-[8px] font-black uppercase tracking-widest text-amber-300/90">
+              <div className="w-full flex flex-col items-center gap-2 pt-1">
+                <span className="text-xs font-black uppercase tracking-widest text-amber-300/90">
                   Dice Roll
                 </span>
                 {gameState.lastDiceRoll ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-white text-slate-950 font-black text-sm flex items-center justify-center shadow border border-slate-300">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white text-slate-950 font-black text-xl flex items-center justify-center shadow-lg border-2 border-slate-300">
                       {gameState.lastDiceRoll[0]}
                     </div>
-                    <div className="w-7 h-7 rounded-lg bg-white text-slate-950 font-black text-sm flex items-center justify-center shadow border border-slate-300">
+                    <div className="w-12 h-12 rounded-xl bg-white text-slate-950 font-black text-xl flex items-center justify-center shadow-lg border-2 border-slate-300">
                       {gameState.lastDiceRoll[1]}
                     </div>
                   </div>
                 ) : (
-                  <div className="text-[9px] text-slate-400 italic">
+                  <div className="text-xs text-slate-400 italic">
                     Ready to Roll
                   </div>
                 )}
               </div>
 
               {/* Bottom of Clue Space: White Magnifying Glass with "Clue" written diagonally */}
-              <div className="relative w-24 h-24 flex items-center justify-center">
+              <div className="relative w-44 h-44 flex items-center justify-center">
                 <svg
                   viewBox="0 0 100 100"
-                  className="w-20 h-20 text-white drop-shadow"
+                  className="w-40 h-40 text-white drop-shadow"
                 >
                   <circle
                     cx="42"
@@ -892,7 +892,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                 </svg>
                 <span
                   style={{ transform: 'rotate(-28deg)' }}
-                  className="absolute font-serif font-black text-xl tracking-wider text-amber-400 drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]"
+                  className="absolute font-serif font-black text-4xl tracking-wider text-amber-400 drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
                 >
                   CLUE
                 </span>
@@ -920,7 +920,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                     }
                   }}
                   style={{ left, top, width, height }}
-                  className={`absolute pointer-events-none flex flex-col items-center justify-center p-1.5 z-10 ${
+                  className={`absolute pointer-events-none flex flex-col items-center justify-center p-2.5 z-10 ${
                     isReachable ? 'pointer-events-auto cursor-pointer' : ''
                   }`}
                 >
@@ -931,11 +931,11 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                       color: roomDef.labelTextColor,
                       borderColor: roomDef.borderColor,
                     }}
-                    className="px-2 py-0.5 rounded border shadow-md text-[10px] font-black tracking-wide uppercase text-center leading-tight"
+                    className="px-3 py-1 rounded-lg border-2 shadow-md text-sm font-black tracking-wide uppercase text-center leading-tight"
                   >
                     {roomDef.room}
                     {isReachable && (
-                      <span className="ml-1 px-1 rounded bg-emerald-400 text-slate-950 text-[8px]">
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 text-[10px]">
                         ENTER
                       </span>
                     )}
@@ -943,14 +943,14 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
 
                   {/* Secret Passage Badge */}
                   {roomDef.secretPassageTo && (
-                    <div className="mt-0.5 px-1.5 py-0.2 rounded bg-black/75 border border-amber-400/60 text-[8px] font-bold text-amber-200">
+                    <div className="mt-1 px-2 py-0.5 rounded bg-black/80 border border-amber-400/60 text-[11px] font-bold text-amber-200">
                       🕳️ → {roomDef.secretPassageTo}
                     </div>
                   )}
 
                   {/* Suspect Pawns inside Room */}
                   {occupants.suspects.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1.5">
                       {occupants.suspects.map((suspect) => {
                         const sDef = CLUE_START_SQUARES[suspect];
                         return (
@@ -961,7 +961,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
                               backgroundColor: sDef.pawnHex,
                               borderColor: '#0f172a',
                             }}
-                            className="w-5 h-5 rounded-full border-2 shadow flex items-center justify-center text-[8px] font-black text-slate-950"
+                            className="w-8 h-8 rounded-full border-2 shadow flex items-center justify-center text-xs font-black text-slate-950"
                           >
                             {suspect
                               .split(' ')
@@ -975,12 +975,12 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
 
                   {/* Weapon Tokens inside Room */}
                   {occupants.weapons.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-center gap-1 mt-0.5">
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1">
                       {occupants.weapons.map((weapon) => (
                         <span
                           key={weapon}
                           title={weapon}
-                          className="px-1 py-0.2 rounded bg-slate-950/85 border border-slate-600 text-[8px] font-bold text-slate-100"
+                          className="px-2 py-0.5 rounded bg-slate-950/90 border border-slate-600 text-[11px] font-bold text-slate-100"
                         >
                           {WEAPON_ICONS[weapon]} {weapon}
                         </span>
@@ -1061,8 +1061,8 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
           )}
         </div>
 
-        {/* 2. Interactive Detective Notepad */}
-        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3.5 shadow-lg flex-1 flex flex-col gap-2.5">
+        {/* 2. Interactive Detective Notepad (Extended — Full View Without Scrolling) */}
+        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3.5 shadow-lg flex flex-col gap-2.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-black uppercase tracking-wider text-amber-300">
               📓 Detective Notepad
@@ -1072,7 +1072,7 @@ export const ClueBoard: React.FC<ClueBoardProps> = ({
             </span>
           </div>
 
-          <div className="space-y-3 overflow-y-auto max-h-[460px] pr-1">
+          <div className="space-y-3">
             {(
               [
                 { title: 'Suspects', items: ALL_CLUE_SUSPECTS },

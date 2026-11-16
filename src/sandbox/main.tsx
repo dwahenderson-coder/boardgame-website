@@ -107,7 +107,12 @@ import {
   getValidPaymentsForRoute,
   ROUTE_COLOR_THEMES,
 } from './mapData.js';
-import { playTurnNotificationChime } from './sound.js';
+import {
+  playErrorBuzzSound,
+  playSoundForAction,
+  playTurnNotificationChime,
+  playVictoryFanfareSound,
+} from './sound.js';
 import { useGameSocket } from './useGameSocket.js';
 import './styles.css';
 
@@ -353,12 +358,24 @@ export const SandboxApp: React.FC = () => {
 
   // Trigger subtle audio chime when the active turn shifts to the local player
   const prevTurnOwnerRef = useRef<string | null>(null);
+  const prevPhaseRef = useRef<string | null>(null);
   useEffect(() => {
     const prevOwner = prevTurnOwnerRef.current;
     prevTurnOwnerRef.current = activePlayerId;
 
+    const prevPhase = prevPhaseRef.current;
+    prevPhaseRef.current = activeSanitized.phase;
+
+    if (!soundEnabled) {
+      return;
+    }
+
+    if (prevPhase !== null && prevPhase !== 'GAME_OVER' && activeSanitized.phase === 'GAME_OVER') {
+      playVictoryFanfareSound();
+      return;
+    }
+
     if (
-      soundEnabled &&
       activeSanitized.phase !== 'INITIAL_TICKET_SELECTION' &&
       activeSanitized.phase !== 'GAME_OVER' &&
       prevOwner !== null &&
@@ -980,6 +997,9 @@ export const SandboxApp: React.FC = () => {
         valid: true,
       };
       setActionLog((prev) => [logEntry, ...prev]);
+      if (soundEnabled) {
+        playSoundForAction(action);
+      }
       mp.sendAction(action);
       if (action.type === 'CLAIM_ROUTE') {
         setSelectedRouteId(null);
@@ -1003,12 +1023,18 @@ export const SandboxApp: React.FC = () => {
     setActionLog((prev) => [logEntry, ...prev]);
 
     if (!check.valid) {
+      if (soundEnabled) {
+        playErrorBuzzSound();
+      }
       setLocalErrorBanner(
         `Invalid Move (${actorId} • ${action.type}): ${check.reason ?? 'Rejected by engine'}`
       );
       return;
     }
 
+    if (soundEnabled) {
+      playSoundForAction(action);
+    }
     setLocalErrorBanner(null);
     const nextState = engine.applyAction(localGameState, actorId, action);
     setLocalGameState(nextState);
