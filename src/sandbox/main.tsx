@@ -15,6 +15,11 @@ import {
   CribbageSanitizedGameState,
 } from '../games/cribbage/index.js';
 import {
+  calculatePlayerVPBreakdown as calculateDiceTownVP,
+  DiceTownGameState,
+  DiceTownSanitizedState,
+} from '../games/dice-town/index.js';
+import {
   calculatePlayerVictoryPoints as calculateDominionVP,
   DominionGameState,
   getAllOwnedCards as getAllDominionCards,
@@ -89,6 +94,7 @@ import { CatanBoard } from './CatanBoard.js';
 import { ClaimRoutePopover } from './ClaimRoutePopover.js';
 import { ClueBoard } from './ClueBoard.js';
 import { CribbageBoard } from './CribbageBoard.js';
+import { DiceTownBoard } from './DiceTownBoard.js';
 import { DominionBoard } from './DominionBoard.js';
 import { EuchreBoard } from './EuchreBoard.js';
 import { GameLobby } from './GameLobby.js';
@@ -275,8 +281,27 @@ export const SandboxApp: React.FC = () => {
           localGameState.turnStep === 'DISPROVING' &&
           localGameState.activeSuggestion?.disproverPlayerId
         ? localGameState.activeSuggestion.disproverPlayerId
-        : localGameState.playerOrder[localGameState.activePlayerIndex] ??
-          localGameState.playerOrder[0]!;
+        : 'gameId' in localGameState && localGameState.gameId === 'dice_town'
+          ? localGameState.subState === 'SHERIFF_TIEBREAKER' &&
+            localGameState.sheriffTiebreaker?.sheriffPlayerId
+            ? localGameState.sheriffTiebreaker.sheriffPlayerId
+            : localGameState.subState === 'GENERAL_STORE_PICK' &&
+                localGameState.generalStorePending?.winnerPlayerId
+              ? localGameState.generalStorePending.winnerPlayerId
+              : localGameState.subState === 'SALOON_STEAL' &&
+                  localGameState.saloonPending?.winnerPlayerId
+                ? localGameState.saloonPending.winnerPlayerId
+                : localGameState.subState === 'DOC_BADLUCK_TARGET' &&
+                    localGameState.docBadluckPending?.playerId
+                  ? localGameState.docBadluckPending.playerId
+                  : localGameState.phase === 'SECRET_SELECTION'
+                    ? (localGameState.playerOrder.find(
+                        (pid) => !localGameState.players[pid]!.hasSubmittedSelection
+                      ) ?? localGameState.playerOrder[0]!)
+                    : localGameState.playerOrder[localGameState.activePlayerIndex] ??
+                      localGameState.playerOrder[0]!
+          : localGameState.playerOrder[localGameState.activePlayerIndex] ??
+            localGameState.playerOrder[0]!;
 
   const localViewedPlayerId =
     viewport === 'GOD_MODE' ? localActivePlayerId : viewport;
@@ -299,6 +324,8 @@ export const SandboxApp: React.FC = () => {
     'gameId' in activeSanitized && activeSanitized.gameId === 'catan';
   const isClueActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'clue';
+  const isDiceTownActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'dice_town';
   const isHoldemActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'holdem';
   const isEuchreActive =
@@ -322,6 +349,9 @@ export const SandboxApp: React.FC = () => {
     : null;
   const clueSanitized = isClueActive
     ? (activeSanitized as ClueSanitizedGameState)
+    : null;
+  const diceTownSanitized = isDiceTownActive
+    ? (activeSanitized as DiceTownSanitizedState)
     : null;
   const holdemSanitized = isHoldemActive
     ? (activeSanitized as HoldemSanitizedGameState)
@@ -587,6 +617,28 @@ export const SandboxApp: React.FC = () => {
           };
         })
         .sort((a, b) => b.totalScore - a.totalScore);
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'dice_town') {
+      const dts = localGameState as DiceTownGameState;
+      return dts.playerOrder
+        .map((pid) => {
+          const p = dts.players[pid]!;
+          const vp = calculateDiceTownVP(p);
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: vp.totalVP,
+            ticketPoints: p.dollars,
+            totalScore: vp.totalVP,
+            trainsRemaining: p.nuggets,
+            tickets: [],
+          };
+        })
+        .sort((a, b) =>
+          b.totalScore !== a.totalScore
+            ? b.totalScore - a.totalScore
+            : b.ticketPoints - a.ticketPoints
+        );
     }
 
     const ts = localGameState as TTRGameState;
@@ -1619,6 +1671,17 @@ export const SandboxApp: React.FC = () => {
             /* Mount <ClueBoard /> when `selectedGameId === 'clue'` */
             <ClueBoard
               gameState={clueSanitized}
+              playerId={viewedPlayerId}
+              playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+              isLocalSandbox={runnerMode === 'LOCAL'}
+              sendAction={(action, actorOverrideId) =>
+                dispatchEngineAction(actorOverrideId ?? viewedPlayerId, action)
+              }
+            />
+          ) : diceTownSanitized ? (
+            /* Mount <DiceTownBoard /> when `selectedGameId === 'dice_town'` */
+            <DiceTownBoard
+              gameState={diceTownSanitized}
               playerId={viewedPlayerId}
               playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
               isLocalSandbox={runnerMode === 'LOCAL'}
