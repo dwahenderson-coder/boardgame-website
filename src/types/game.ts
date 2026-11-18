@@ -6,6 +6,7 @@ export type GameId =
   | 'stockpile'
   | 'power_grid'
   | 'clue'
+  | 'dice_town'
   | 'holdem'
   | 'euchre'
   | 'cribbage'

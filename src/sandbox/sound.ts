@@ -35,7 +35,7 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
     id: 'DICE_ROLL',
     name: 'Dice Roll Clatter',
     description: 'Multi-bounce wooden dice clatter across the board.',
-    gamesUsedIn: ['Catan', 'Clue'],
+    gamesUsedIn: ['Catan', 'Clue', 'Dice Town'],
     optionalFilePath: '/sounds/dice-roll.mp3',
   },
   {
@@ -445,6 +445,7 @@ export function getSoundEffectForAction(
     // Dice Rolls
     case 'CATAN_ROLL_DICE':
     case 'CLUE_ROLL_DICE':
+    case 'DT_ROLL_DICE':
       return 'DICE_ROLL';
 
     // Route & Station Building (Ticket to Ride)
@@ -452,7 +453,7 @@ export function getSoundEffectForAction(
     case 'BUILD_STATION':
       return 'TRAIN_WHISTLE';
 
-    // Wood / Board Building (Catan & Power Grid)
+    // Wood / Board Building & Dice Cup Placement (Catan, Power Grid & Dice Town)
     case 'CATAN_PLACE_INITIAL_SETTLEMENT':
     case 'CATAN_PLACE_INITIAL_ROAD':
     case 'CATAN_BUILD_ROAD':
@@ -461,9 +462,10 @@ export function getSoundEffectForAction(
     case 'CATAN_UPGRADE_CITY':
     case 'CATAN_PLAY_ROAD_BUILDING':
     case 'PG_BUILD_CITY':
+    case 'DT_SELECT_DICE':
       return 'WOOD_BUILD';
 
-    // Coins, Purchases, Bids & Trades
+    // Coins, Purchases, Bids, Trades & Bank Vaults
     case 'BUY_CARD':
     case 'DOMINION_BUY_CARD':
     case 'CATAN_BUY_DEV_CARD':
@@ -480,25 +482,31 @@ export function getSoundEffectForAction(
     case 'PG_BID':
     case 'PG_PLACE_BID':
     case 'PG_BUY_RESOURCES':
+    case 'DT_START_ROUND':
+    case 'DT_REVEAL_DICE':
+    case 'DT_ADVANCE_RESOLUTION':
       return 'COIN_CHINK';
 
-    // Table Knocks / Checks / Go
+    // Table Knocks / Checks / Go / Sheriff Gavel
     case 'KC_KNOCK':
     case 'HOLDEM_CHECK':
     case 'CRIB_SAY_GO':
+    case 'DT_SHERIFF_BREAK_TIE':
       return 'TABLE_KNOCK';
 
-    // Robber / Monsters
+    // Robber / Monsters / Saloon Ambush
     case 'CATAN_MOVE_ROBBER':
     case 'CATAN_PLAY_KNIGHT':
     case 'PLACE_MONSTER':
     case 'MOVE_MONSTER':
+    case 'DT_SALOON_SELECT_OPPONENT':
       return 'ROBBER_THUD';
 
-    // Clue Mystery Actions & Movement
+    // Clue Mystery Actions & Doc Badluck Elixirs
     case 'CLUE_MAKE_SUGGESTION':
     case 'CLUE_MAKE_ACCUSATION':
     case 'CLUE_USE_SECRET_PASSAGE':
+    case 'DT_RESOLVE_DOC_BADLUCK_DEMAND':
       return 'MYSTERY_STING';
     case 'CLUE_MOVE_TO_HALLWAY':
     case 'CLUE_MOVE_TO_ROOM':
@@ -541,6 +549,9 @@ export function getSoundEffectForAction(
     case 'CATAN_STEAL_CARD':
     case 'CATAN_PLAY_VP_CARD':
     case 'CLUE_DISPROVE_SUGGESTION':
+    case 'DT_GENERAL_STORE_PICK_CARD':
+    case 'DT_SALOON_STEAL_CARD':
+    case 'DT_PLAY_CARD':
       return 'CARD_SNAP';
 
     default:

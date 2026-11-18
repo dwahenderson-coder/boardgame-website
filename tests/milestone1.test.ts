@@ -908,7 +908,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
   // ---------------------------------------------------------------------------
   describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
-    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion, clue) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion, clue, dice_town) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
       expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'ttr',
         'catan',
@@ -916,6 +916,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'power_grid',
         'dominion',
         'clue',
+        'dice_town',
       ]);
       expect(CARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'holdem',
@@ -1427,6 +1428,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'power_grid',
         'dominion',
         'clue',
+        'dice_town',
       ]);
       expect(CARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
         'holdem',

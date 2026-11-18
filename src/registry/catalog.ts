@@ -310,6 +310,28 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [],
   },
+  {
+    id: 'dice_town',
+    category: 'board',
+    icon: '🤠',
+    name: 'Dice Town',
+    subtitle: 'Wild West Poker Dice & Town Control',
+    description:
+      'Roll 5 Poker Dice under your cup, pay $1 per extra die kept, and compete for the Gold Mine, Bank, General Store, Saloon, Sheriff’s Office, and Town Hall.',
+    minPlayers: 2,
+    maxPlayers: 5,
+    estimatedMinutes: 40,
+    mechanicsLabel: 'Simultaneous Poker Dice, Sheriff Tie-Breakers & Town Control',
+    badgeColor: 'amber',
+    availableColors: [
+      STANDARD_COLORS['red']!,
+      STANDARD_COLORS['blue']!,
+      STANDARD_COLORS['green']!,
+      STANDARD_COLORS['yellow']!,
+      STANDARD_COLORS['purple']!,
+    ],
+    expansions: [],
+  },
 
   // =========================================================================
   // CARD GAMES

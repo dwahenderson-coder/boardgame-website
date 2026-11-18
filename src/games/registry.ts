@@ -29,6 +29,16 @@ import {
   validateClueAction,
 } from './clue/index.js';
 import {
+  applyDiceTownAction,
+  calculateDiceTownFinalScores,
+  DiceTownAction,
+  DiceTownGameState,
+  DiceTownSanitizedState,
+  getDiceTownPlayerPerspective,
+  initDiceTownGame,
+  validateDiceTownAction,
+} from './dice-town/index.js';
+import {
   applyCribbageAction,
   calculateCribbageFinalScores,
   CribbageAction,
@@ -121,6 +131,7 @@ export type AnyGameState =
   | StockpileGameState
   | PowerGridGameState
   | ClueGameState
+  | DiceTownGameState
   | HoldemGameState
   | EuchreGameState
   | CribbageGameState
@@ -133,6 +144,7 @@ export type AnySanitizedGameState =
   | StockpileSanitizedGameState
   | SanitizedPowerGridState
   | ClueSanitizedGameState
+  | DiceTownSanitizedState
   | HoldemSanitizedGameState
   | EuchreSanitizedGameState
   | CribbageSanitizedGameState
@@ -145,6 +157,7 @@ export type AnyGameAction =
   | StockpileAction
   | PowerGridAction
   | ClueAction
+  | DiceTownAction
   | HoldemAction
   | EuchreAction
   | CribbageAction
@@ -372,5 +385,17 @@ export const GameRegistry: Readonly<
     applyAction: applyClueAction,
     getPlayerPerspective: getCluePlayerPerspective,
     calculateFinalScores: calculateClueFinalScores,
+  },
+  dice_town: {
+    ...findMetadata('dice_town'),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) => initDiceTownGame(playerIds, seed, options),
+    validateAction: validateDiceTownAction,
+    applyAction: applyDiceTownAction,
+    getPlayerPerspective: getDiceTownPlayerPerspective,
+    calculateFinalScores: calculateDiceTownFinalScores,
   },
 };

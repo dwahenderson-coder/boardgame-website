@@ -3,6 +3,10 @@ import { CatanGameState } from '../games/catan/index.js';
 import { ClueGameState } from '../games/clue/index.js';
 import { CribbageGameState } from '../games/cribbage/index.js';
 import {
+  calculatePlayerVPBreakdown,
+  DiceTownGameState,
+} from '../games/dice-town/index.js';
+import {
   calculatePlayerVictoryPoints,
   DominionGameState,
   getAllOwnedCards,
@@ -524,6 +528,32 @@ export class RoomManager {
           };
         })
         .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'dice_town' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'dice_town')
+    ) {
+      const dtState = room.gameState as DiceTownGameState;
+      return dtState.playerOrder
+        .map((playerId) => {
+          const p = dtState.players[playerId]!;
+          const vp = calculatePlayerVPBreakdown(p);
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: vp.totalVP,
+            ticketPoints: p.dollars,
+            totalScore: vp.totalVP,
+            trainsRemaining: p.nuggets,
+            tickets: [],
+          };
+        })
+        .sort((a, b) =>
+          b.totalScore !== a.totalScore
+            ? b.totalScore - a.totalScore
+            : b.ticketPoints - a.ticketPoints
+        );
     }
 
     const state = room.gameState as TTRGameState;
