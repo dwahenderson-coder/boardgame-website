@@ -1,7 +1,6 @@
 import {
   createPRNG,
   nextInt,
-  PRNGState,
   shuffleArray,
 } from '../../common/prng.js';
 import { Deck } from '../../mechanics/deck.js';
@@ -28,6 +27,7 @@ import {
   LocationLeaderSummary,
   PlayerState,
   PokerDie,
+  SaloonStealTargetType,
   SanitizedOpponentState,
   SanitizedPokerDie,
   TownState,
@@ -184,6 +184,61 @@ function refillPropertyRow(
   };
 }
 
+function refillDocBadluckRow(
+  docBadluckDeckState: TownState['docBadluckDeck'],
+  currentFaceUp: readonly DiceTownCard[]
+): {
+  docBadluckDeck: TownState['docBadluckDeck'];
+  faceUpDocBadluck: readonly DiceTownCard[];
+} {
+  const deck = Deck.fromState(docBadluckDeckState);
+  const nextFaceUp = [...currentFaceUp];
+  while (nextFaceUp.length < 2 && deck.totalAvailable > 0) {
+    const drawn = deck.draw(1);
+    if (drawn[0]) {
+      nextFaceUp.push(drawn[0]);
+    } else {
+      break;
+    }
+  }
+  return {
+    docBadluckDeck: deck.toState(),
+    faceUpDocBadluck: nextFaceUp,
+  };
+}
+
+export function getUnprotectedPropertyDeeds(
+  player: PlayerState
+): DiceTownCard[] {
+  return player.propertyDeeds.filter(
+    (d) => !player.protectedDeedIds.includes(d.id)
+  );
+}
+
+/**
+ * Calculates the dollar cost to stage `selectedCount` dice during SECRET_SELECTION:
+ * - On the Final Rolling Round (`finalRollTriggered === true`), keeping all remaining dice costs $0.
+ * - Keeping 0 dice (`selectedCount === 0`) costs $1 (paid to the Stagecoach).
+ * - Keeping 1 die (`selectedCount === 1`) costs $0 (Free).
+ * - Keeping N > 1 dice costs $(N - 1) ($0 if The Brute is played).
+ */
+export function calculateDiceSelectionCost(
+  selectedCount: number,
+  bruteUsed: boolean,
+  finalRollTriggered: boolean
+): number {
+  if (finalRollTriggered) {
+    return 0;
+  }
+  if (selectedCount === 0) {
+    return 1; // Keeping 0 dice pays $1 to the Stagecoach
+  }
+  if (bruteUsed) {
+    return 0;
+  }
+  return Math.max(0, selectedCount - 1);
+}
+
 // ============================================================================
 // 1. Initialization (`initDiceTownGame`)
 // ============================================================================
@@ -207,11 +262,12 @@ export function initDiceTownGame(
 
   // Initialize Property Deed Deck (20 cards) and reveal up to 3 face-up properties
   const propDeck = new Deck<DiceTownCard>(PROPERTY_DEED_CARDS, prng);
-  const initialFaceUp = propDeck.draw(3);
+  const initialFaceUpProperties = propDeck.draw(3);
   prng = propDeck.prngState;
 
-  // Initialize Doc Badluck Deck (7 Elixir cards)
+  // Initialize Doc Badluck Deck (7 Elixir cards) and reveal 2 face-up Doc Badluck cards
   const badluckDeck = new Deck<DiceTownCard>(DOC_BADLUCK_CARDS, prng);
+  const initialFaceUpDocBadluck = badluckDeck.draw(2);
   prng = badluckDeck.prngState;
 
   const players: Record<string, PlayerState> = {};
@@ -241,8 +297,9 @@ export function initDiceTownGame(
     generalStoreDeck: storeDeckState,
     discardPile: storeDeckState.discardPile,
     propertyDeck: propDeck.toState(),
-    faceUpProperties: initialFaceUp,
+    faceUpProperties: initialFaceUpProperties,
     docBadluckDeck: badluckDeck.toState(),
+    faceUpDocBadluck: initialFaceUpDocBadluck,
   };
 
   return {
@@ -256,6 +313,7 @@ export function initDiceTownGame(
     playerOrder: [...playerIds],
     activePlayerIndex: 0,
     sheriffPlayerId: null,
+    finalRollTriggered: false,
     players,
     town,
     currentLocationIndex: 0,
@@ -264,6 +322,7 @@ export function initDiceTownGame(
     sheriffTiebreaker: null,
     generalStorePending: null,
     saloonPending: null,
+    docBadluckPickPending: null,
     docBadluckPending: null,
     docBadluckBonusVisitors: [],
     lastBankRobbery: null,
@@ -344,7 +403,6 @@ export function evaluateLocationContenders(
 
   for (const pid of state.playerOrder) {
     const p = state.players[pid]!;
-    // Count matching faces across all dice (during LOCATION_RESOLUTION all 5 are locked_public)
     const count = p.dice.filter((d) => d.value === targetFace).length;
     if (count > maxCount) {
       maxCount = count;
@@ -421,6 +479,7 @@ export function finalizeDiceTownGameOver(
     sheriffTiebreaker: null,
     generalStorePending: null,
     saloonPending: null,
+    docBadluckPickPending: null,
     docBadluckPending: null,
     finalVPByPlayer,
     winnerId,
@@ -428,185 +487,227 @@ export function finalizeDiceTownGameOver(
   };
 }
 
-function applyDocBadluckQueue(
+/**
+ * Resolves a single chosen Doc Badluck Elixir card for `visitorId`, then continues the visitor queue.
+ */
+function executeDocBadluckElixirCard(
   state: DiceTownGameState,
-  queue: readonly string[],
+  visitorId: string,
+  elixir: DiceTownCard,
+  remainingVisitors: readonly string[],
   logMessages: string[]
 ): DiceTownGameState {
-  let currentState = state;
-  let currentPrng = state.prng;
   const nextPlayers: Record<string, PlayerState> = { ...state.players };
-  let deck = Deck.fromState(state.town.docBadluckDeck);
-  let storeDeck = Deck.fromState(state.town.generalStoreDeck);
+  const deck = Deck.fromState(state.town.docBadluckDeck);
+  const storeDeck = Deck.fromState(state.town.generalStoreDeck);
   let sheriffId = state.sheriffPlayerId;
+  const visitor = nextPlayers[visitorId]!;
 
-  for (let i = 0; i < queue.length; i++) {
-    const visitorId = queue[i]!;
-    const drawn = deck.draw(1);
-    const elixir = drawn[0];
-    if (!elixir) {
+  switch (elixir.effectType) {
+    case 'COLLECT_FROM_ALL_DOLLARS': {
+      let totalCollected = 0;
+      for (const otherId of state.playerOrder) {
+        if (otherId === visitorId) continue;
+        const opp = nextPlayers[otherId]!;
+        const give = Math.min(2, opp.dollars);
+        totalCollected += give;
+        nextPlayers[otherId] = { ...opp, dollars: opp.dollars - give };
+      }
+      nextPlayers[visitorId] = {
+        ...nextPlayers[visitorId]!,
+        dollars: nextPlayers[visitorId]!.dollars + totalCollected,
+      };
+      deck.discard(elixir);
       logMessages.push(
-        `${visitorId} visited Doc Badluck, but the Elixir deck is empty.`
+        `${visitorId} chose ${elixir.displayName} and collected $${totalCollected} from opponents.`
       );
-      continue;
+      break;
     }
 
-    const visitor = nextPlayers[visitorId]!;
-    switch (elixir.effectType) {
-      case 'COLLECT_FROM_ALL_DOLLARS': {
-        let totalCollected = 0;
-        for (const otherId of state.playerOrder) {
-          if (otherId === visitorId) continue;
-          const opp = nextPlayers[otherId]!;
-          const give = Math.min(2, opp.dollars);
-          totalCollected += give;
-          nextPlayers[otherId] = { ...opp, dollars: opp.dollars - give };
-        }
+    case 'COLLECT_FROM_ALL_NUGGETS': {
+      let totalNuggets = 0;
+      for (const otherId of state.playerOrder) {
+        if (otherId === visitorId) continue;
+        const opp = nextPlayers[otherId]!;
+        const give = Math.min(1, opp.nuggets);
+        totalNuggets += give;
+        nextPlayers[otherId] = { ...opp, nuggets: opp.nuggets - give };
+      }
+      nextPlayers[visitorId] = {
+        ...nextPlayers[visitorId]!,
+        nuggets: nextPlayers[visitorId]!.nuggets + totalNuggets,
+      };
+      deck.discard(elixir);
+      logMessages.push(
+        `${visitorId} chose ${elixir.displayName} and collected ${totalNuggets} nugget(s) from opponents.`
+      );
+      break;
+    }
+
+    case 'DRAW_GENERAL_STORE': {
+      const storeDrawn = storeDeck.draw(1);
+      if (storeDrawn[0]) {
         nextPlayers[visitorId] = {
           ...nextPlayers[visitorId]!,
-          dollars: nextPlayers[visitorId]!.dollars + totalCollected,
-        };
-        deck.discard(elixir);
-        logMessages.push(
-          `${visitorId} drew ${elixir.displayName} and collected $${totalCollected} from opponents.`
-        );
-        break;
-      }
-
-      case 'COLLECT_FROM_ALL_NUGGETS': {
-        let totalNuggets = 0;
-        for (const otherId of state.playerOrder) {
-          if (otherId === visitorId) continue;
-          const opp = nextPlayers[otherId]!;
-          const give = Math.min(1, opp.nuggets);
-          totalNuggets += give;
-          nextPlayers[otherId] = { ...opp, nuggets: opp.nuggets - give };
-        }
-        nextPlayers[visitorId] = {
-          ...nextPlayers[visitorId]!,
-          nuggets: nextPlayers[visitorId]!.nuggets + totalNuggets,
-        };
-        deck.discard(elixir);
-        logMessages.push(
-          `${visitorId} drew ${elixir.displayName} and collected ${totalNuggets} nugget(s) from opponents.`
-        );
-        break;
-      }
-
-      case 'DRAW_GENERAL_STORE': {
-        const storeDrawn = storeDeck.draw(1);
-        if (storeDrawn[0]) {
-          nextPlayers[visitorId] = {
-            ...nextPlayers[visitorId]!,
-            handCards: [...nextPlayers[visitorId]!.handCards, storeDrawn[0]],
-          };
-        }
-        deck.discard(elixir);
-        logMessages.push(
-          `${visitorId} drew ${elixir.displayName} and drew 1 General Store card.`
-        );
-        break;
-      }
-
-      case 'CLAIM_SHERIFF': {
-        for (const pid of state.playerOrder) {
-          nextPlayers[pid] = {
-            ...nextPlayers[pid]!,
-            isSheriff: pid === visitorId,
-          };
-        }
-        sheriffId = visitorId;
-        deck.discard(elixir);
-        logMessages.push(
-          `${visitorId} drew ${elixir.displayName} and immediately claimed the Sheriff Badge!`
-        );
-        break;
-      }
-
-      case 'PROTECT_PROPERTY_DEEDS': {
-        const unprotected = visitor.propertyDeeds
-          .filter((d) => !visitor.protectedDeedIds.includes(d.id))
-          .slice(0, 2)
-          .map((d) => d.id);
-        nextPlayers[visitorId] = {
-          ...nextPlayers[visitorId]!,
-          protectedDeedIds: [...visitor.protectedDeedIds, ...unprotected],
-        };
-        deck.discard(elixir);
-        logMessages.push(
-          `${visitorId} drew ${elixir.displayName} and protected ${unprotected.length} Property Deed(s).`
-        );
-        break;
-      }
-
-      case 'DEMAND_GENERAL_STORE_CARD':
-      case 'DEMAND_PROPERTY_DEED': {
-        const wantStore = elixir.effectType === 'DEMAND_GENERAL_STORE_CARD';
-        const eligibleTargets = state.playerOrder.filter((otherId) => {
-          if (otherId === visitorId) return false;
-          const opp = nextPlayers[otherId]!;
-          if (wantStore) return opp.handCards.length > 0;
-          return opp.propertyDeeds.some(
-            (d) => !opp.protectedDeedIds.includes(d.id)
-          );
-        });
-
-        if (eligibleTargets.length === 0) {
-          deck.discard(elixir);
-          logMessages.push(
-            `${visitorId} drew ${elixir.displayName}, but no opponent had an eligible card to give.`
-          );
-          break;
-        }
-
-        // Pause for target selection if interactive, or if only 1 target & 1 card auto-resolve
-        deck.discard(elixir);
-        const updatedStoreState = storeDeck.toState();
-        return {
-          ...currentState,
-          prng: currentPrng,
-          sheriffPlayerId: sheriffId,
-          players: nextPlayers,
-          town: {
-            ...currentState.town,
-            generalStoreDeck: updatedStoreState,
-            discardPile: updatedStoreState.discardPile,
-            docBadluckDeck: deck.toState(),
-          },
-          subState: 'DOC_BADLUCK_TARGET',
-          docBadluckPending: {
-            playerId: visitorId,
-            card: elixir,
-            pendingQueuePlayerIds: queue.slice(i + 1),
-          },
-          lastActionSummary: `${logMessages.join(' ')} ${visitorId} drew ${elixir.displayName} — select an opponent to demand a card from!`.trim(),
+          handCards: [...nextPlayers[visitorId]!.handCards, storeDrawn[0]],
         };
       }
+      deck.discard(elixir);
+      logMessages.push(
+        `${visitorId} chose ${elixir.displayName} and drew 1 General Store card.`
+      );
+      break;
+    }
+
+    case 'CLAIM_SHERIFF': {
+      for (const pid of state.playerOrder) {
+        nextPlayers[pid] = {
+          ...nextPlayers[pid]!,
+          isSheriff: pid === visitorId,
+        };
+      }
+      sheriffId = visitorId;
+      deck.discard(elixir);
+      logMessages.push(
+        `${visitorId} chose ${elixir.displayName} and immediately claimed the Sheriff Badge!`
+      );
+      break;
+    }
+
+    case 'PROTECT_PROPERTY_DEEDS': {
+      const unprotected = visitor.propertyDeeds
+        .filter((d) => !visitor.protectedDeedIds.includes(d.id))
+        .slice(0, 2)
+        .map((d) => d.id);
+      nextPlayers[visitorId] = {
+        ...nextPlayers[visitorId]!,
+        protectedDeedIds: [...visitor.protectedDeedIds, ...unprotected],
+      };
+      deck.discard(elixir);
+      logMessages.push(
+        `${visitorId} chose ${elixir.displayName} and protected ${unprotected.length} Property Deed(s).`
+      );
+      break;
+    }
+
+    case 'DEMAND_GENERAL_STORE_CARD':
+    case 'DEMAND_PROPERTY_DEED': {
+      const wantStore = elixir.effectType === 'DEMAND_GENERAL_STORE_CARD';
+      const eligibleTargets = state.playerOrder.filter((otherId) => {
+        if (otherId === visitorId) return false;
+        const opp = nextPlayers[otherId]!;
+        if (wantStore) return opp.handCards.length > 0;
+        return opp.propertyDeeds.some(
+          (d) => !opp.protectedDeedIds.includes(d.id)
+        );
+      });
+
+      if (eligibleTargets.length === 0) {
+        deck.discard(elixir);
+        logMessages.push(
+          `${visitorId} chose ${elixir.displayName}, but no opponent had an eligible card to give.`
+        );
+        break;
+      }
+
+      deck.discard(elixir);
+      const updatedStoreState = storeDeck.toState();
+      const refilledBadluck = refillDocBadluckRow(
+        deck.toState(),
+        state.town.faceUpDocBadluck
+      );
+      return {
+        ...state,
+        sheriffPlayerId: sheriffId,
+        players: nextPlayers,
+        town: {
+          ...state.town,
+          generalStoreDeck: updatedStoreState,
+          discardPile: updatedStoreState.discardPile,
+          docBadluckDeck: refilledBadluck.docBadluckDeck,
+          faceUpDocBadluck: refilledBadluck.faceUpDocBadluck,
+        },
+        subState: 'DOC_BADLUCK_TARGET',
+        docBadluckPickPending: null,
+        docBadluckPending: {
+          playerId: visitorId,
+          card: elixir,
+          pendingQueuePlayerIds: remainingVisitors,
+        },
+        lastActionSummary: `${logMessages.join(' ')} ${visitorId} chose ${elixir.displayName} — select an opponent to demand a card from!`.trim(),
+      };
     }
   }
 
   const updatedStoreState = storeDeck.toState();
-  currentState = {
-    ...currentState,
-    prng: currentPrng,
+  const refilledBadluck = refillDocBadluckRow(
+    deck.toState(),
+    state.town.faceUpDocBadluck
+  );
+
+  const intermediateState: DiceTownGameState = {
+    ...state,
     sheriffPlayerId: sheriffId,
     players: nextPlayers,
     town: {
-      ...currentState.town,
+      ...state.town,
       generalStoreDeck: updatedStoreState,
       discardPile: updatedStoreState.discardPile,
-      docBadluckDeck: deck.toState(),
+      docBadluckDeck: refilledBadluck.docBadluckDeck,
+      faceUpDocBadluck: refilledBadluck.faceUpDocBadluck,
     },
     subState: 'IDLE',
+    docBadluckPickPending: null,
     docBadluckPending: null,
   };
 
-  return finishLocationAndAdvance(
-    currentState,
-    logMessages.length > 0
-      ? logMessages.join(' ')
-      : 'Doc Badluck resolved (no visitors needed).'
+  return promptNextDocBadluckVisitor(
+    intermediateState,
+    remainingVisitors,
+    logMessages
   );
+}
+
+/**
+ * Prompts the next eligible visitor in `queue` to select between the 2 face-up Doc Badluck cards
+ * or drawing 1 from the deck (`subState: 'DOC_BADLUCK_PICK'`).
+ */
+function promptNextDocBadluckVisitor(
+  state: DiceTownGameState,
+  queue: readonly string[],
+  logMessages: string[]
+): DiceTownGameState {
+  if (queue.length === 0) {
+    return finishLocationAndAdvance(
+      state,
+      logMessages.length > 0
+        ? logMessages.join(' ')
+        : 'Doc Badluck resolved (no visitors needed).'
+    );
+  }
+
+  const hasCardsAvailable =
+    state.town.faceUpDocBadluck.length > 0 ||
+    state.town.docBadluckDeck.drawPile.length > 0 ||
+    state.town.docBadluckDeck.discardPile.length > 0;
+
+  if (!hasCardsAvailable) {
+    return finishLocationAndAdvance(
+      state,
+      `${logMessages.join(' ')} Doc Badluck deck and face-up Elixirs are empty.`.trim()
+    );
+  }
+
+  const visitorId = queue[0]!;
+  return {
+    ...state,
+    subState: 'DOC_BADLUCK_PICK',
+    docBadluckPickPending: {
+      visitorPlayerId: visitorId,
+      remainingVisitorIds: queue.slice(1),
+    },
+    lastActionSummary: `${logMessages.join(' ')} ${visitorId} won 0 locations and visits Doc Badluck — select 1 of the 2 face-up Elixirs or draw 1 from the deck!`.trim(),
+  };
 }
 
 /**
@@ -626,7 +727,7 @@ export function resolveLocationWinner(
         state.players[pid]!.locationsWonThisRound === 0 ||
         state.docBadluckBonusVisitors.includes(pid)
     );
-    return applyDocBadluckQueue(
+    return promptNextDocBadluckVisitor(
       state,
       visitors,
       prefix ? [prefix.trim()] : []
@@ -733,7 +834,6 @@ export function resolveLocationWinner(
         );
       }
 
-      // Multiple cards drawn -> prompt winner to keep 1 and discard the rest
       return {
         ...state,
         players: nextPlayers,
@@ -755,46 +855,79 @@ export function resolveLocationWinner(
 
     case 'SALOON': {
       const queensCount = Math.max(1, countDieFace(winner.dice, 'Q', false));
-      const opponentsWithCards = state.playerOrder.filter(
-        (pid) => pid !== winnerId && state.players[pid]!.handCards.length > 0
-      );
+      const eligibleOpponents = state.playerOrder.filter((pid) => {
+        if (pid === winnerId) return false;
+        const opp = state.players[pid]!;
+        return (
+          opp.handCards.length > 0 ||
+          getUnprotectedPropertyDeeds(opp).length > 0
+        );
+      });
 
-      if (opponentsWithCards.length === 0) {
+      if (eligibleOpponents.length === 0) {
         return finishLocationAndAdvance(
           {
             ...state,
             players: nextPlayers,
             currentLocationWinnerId: winnerId,
           },
-          `${prefix}${winnerId} won Saloon (${queensCount}x Q), but no opponent has any General Store cards in hand.`
+          `${prefix}${winnerId} won Saloon (${queensCount}x Q), but no opponent has any General Store cards or unprotected Property Deeds.`
         );
       }
 
-      // If only 1 opponent has cards, automatically reveal up to X random cards from their hand
-      if (opponentsWithCards.length === 1) {
-        const targetId = opponentsWithCards[0]!;
-        const targetHand = state.players[targetId]!.handCards;
-        const shuffled = shuffleArray(targetHand, state.prng);
-        const candidateCards = shuffled.value.slice(
-          0,
-          Math.min(queensCount, targetHand.length)
-        );
+      // If only 1 opponent is eligible AND they only have 1 category (either only General Store cards or only Property Deeds), auto-reveal!
+      if (eligibleOpponents.length === 1) {
+        const targetId = eligibleOpponents[0]!;
+        const targetOpp = state.players[targetId]!;
+        const hasStore = targetOpp.handCards.length > 0;
+        const unprotectedDeeds = getUnprotectedPropertyDeeds(targetOpp);
+        const hasDeeds = unprotectedDeeds.length > 0;
 
-        return {
-          ...state,
-          prng: shuffled.prng,
-          players: nextPlayers,
-          currentLocationWinnerId: winnerId,
-          subState: 'SALOON_STEAL',
-          saloonPending: {
-            winnerPlayerId: winnerId,
-            queensCount,
-            targetOpponentId: targetId,
-            revealedCandidateCards: candidateCards,
-            remainingSteals: 0,
-          },
-          lastActionSummary: `${prefix}${winnerId} won Saloon (${queensCount}x Q) and is viewing ${candidateCards.length} card(s) from ${targetId}'s hand to steal 1!`,
-        };
+        if (hasStore && !hasDeeds) {
+          const shuffled = shuffleArray(targetOpp.handCards, state.prng);
+          const candidateCards = shuffled.value.slice(
+            0,
+            Math.min(queensCount, targetOpp.handCards.length)
+          );
+          return {
+            ...state,
+            prng: shuffled.prng,
+            players: nextPlayers,
+            currentLocationWinnerId: winnerId,
+            subState: 'SALOON_STEAL',
+            saloonPending: {
+              winnerPlayerId: winnerId,
+              queensCount,
+              targetOpponentId: targetId,
+              stealTargetType: 'general_store',
+              revealedCandidateCards: candidateCards,
+              remainingSteals: 0,
+            },
+            lastActionSummary: `${prefix}${winnerId} won Saloon (${queensCount}x Q) and is viewing ${candidateCards.length} General Store card(s) from ${targetId}'s hand to steal 1!`,
+          };
+        }
+
+        if (hasDeeds && !hasStore) {
+          const candidateDeeds = unprotectedDeeds.slice(
+            0,
+            Math.min(queensCount, unprotectedDeeds.length)
+          );
+          return {
+            ...state,
+            players: nextPlayers,
+            currentLocationWinnerId: winnerId,
+            subState: 'SALOON_STEAL',
+            saloonPending: {
+              winnerPlayerId: winnerId,
+              queensCount,
+              targetOpponentId: targetId,
+              stealTargetType: 'property_deed',
+              revealedCandidateCards: candidateDeeds,
+              remainingSteals: 0,
+            },
+            lastActionSummary: `${prefix}${winnerId} won Saloon (${queensCount}x Q) and is choosing 1 of ${targetId}'s Property Deeds to steal!`,
+          };
+        }
       }
 
       return {
@@ -806,10 +939,11 @@ export function resolveLocationWinner(
           winnerPlayerId: winnerId,
           queensCount,
           targetOpponentId: null,
+          stealTargetType: null,
           revealedCandidateCards: [],
           remainingSteals: 0,
         },
-        lastActionSummary: `${prefix}${winnerId} won Saloon (${queensCount}x Q) — select an opponent to steal 1 card from!`,
+        lastActionSummary: `${prefix}${winnerId} won Saloon (${queensCount}x Q) — select an opponent and choose whether to steal a Property Deed or a General Store card!`,
       };
     }
 
@@ -836,9 +970,10 @@ export function resolveLocationWinner(
       const desiredDeeds = Math.min(3, 1 + acesCount);
 
       let currentFaceUp = [...state.town.faceUpProperties];
-      let propDeck = Deck.fromState(state.town.propertyDeck);
+      const propDeck = Deck.fromState(state.town.propertyDeck);
       const claimedDeeds: DiceTownCard[] = [];
 
+      // Bottom card (index 0) is drawn first by default, plus 1 per Ace
       for (let i = 0; i < desiredDeeds; i++) {
         if (currentFaceUp.length === 0 && propDeck.drawCount > 0) {
           currentFaceUp.push(...propDeck.draw(1));
@@ -874,16 +1009,11 @@ export function resolveLocationWinner(
   }
 }
 
-/**
- * Evaluates `state.currentLocationIndex` in `LOCATION_RESOLUTION_ORDER`.
- * If a tie occurs, transitions to `SHERIFF_TIEBREAKER` (if a Sheriff exists) or skips if no Sheriff exists.
- */
 export function evaluateCurrentLocationStep(
   state: DiceTownGameState,
   summaryPrefix = ''
 ): DiceTownGameState {
   if (state.currentLocationIndex >= LOCATION_RESOLUTION_ORDER.length) {
-    // All locations resolved -> check end game
     if (checkEndGameCondition(state)) {
       return finalizeDiceTownGameOver(state, summaryPrefix || 'Round complete');
     }
@@ -928,7 +1058,6 @@ export function evaluateCurrentLocationStep(
 
   // Tie occurred!
   if (!stateAtLoc.sheriffPlayerId) {
-    // Rulebook: If no Sheriff exists yet, no one wins the tied location!
     return resolveLocationWinner(
       stateAtLoc,
       location,
@@ -937,7 +1066,6 @@ export function evaluateCurrentLocationStep(
     );
   }
 
-  // Transition to SHERIFF_TIEBREAKER interrupt state!
   return {
     ...stateAtLoc,
     subState: 'SHERIFF_TIEBREAKER',
@@ -954,7 +1082,6 @@ function finishLocationAndAdvance(
   state: DiceTownGameState,
   stepSummary: string
 ): DiceTownGameState {
-  // Check if Gold Mine or Property Deeds ran out mid-resolution (Rulebook: Town Hall or Gold Mine emptying triggers end of game after current resolution)
   const nextIndex = state.currentLocationIndex + 1;
   if (nextIndex >= LOCATION_RESOLUTION_ORDER.length) {
     if (checkEndGameCondition(state)) {
@@ -970,6 +1097,7 @@ function finishLocationAndAdvance(
       sheriffTiebreaker: null,
       generalStorePending: null,
       saloonPending: null,
+      docBadluckPickPending: null,
       docBadluckPending: null,
       lastActionSummary: `${stepSummary} — Round ${state.roundNumber} resolution complete!`,
     };
@@ -982,6 +1110,7 @@ function finishLocationAndAdvance(
       currentLocationIndex: nextIndex,
       generalStorePending: null,
       saloonPending: null,
+      docBadluckPickPending: null,
       docBadluckPending: null,
     },
     stepSummary
@@ -1047,20 +1176,40 @@ export function validateDiceTownAction(
       if (player.hasSubmittedSelection) {
         return {
           valid: false,
-          reason: 'You have already submitted your dice selection for this roll.',
+          reason:
+            'You have already submitted your dice selection for this roll.',
         };
       }
 
-      const targetIndices = action.lockAllRemaining
-        ? inCupDice.map((d) => d.index)
-        : [...new Set(action.dieIndices)];
-
-      if (targetIndices.length < 1) {
+      // On the Final Rolling Round, each remaining player must keep ALL remaining dice!
+      if (
+        state.finalRollTriggered &&
+        !action.lockAllRemaining &&
+        action.dieIndices.length > 0 &&
+        action.dieIndices.length < inCupDice.length
+      ) {
         return {
           valid: false,
-          reason: 'You must select at least 1 in_cup die to keep.',
+          reason:
+            'Final Rolling Round: you must keep all of your remaining dice!',
         };
       }
+      if (
+        state.finalRollTriggered &&
+        !action.lockAllRemaining &&
+        action.dieIndices.length === 0
+      ) {
+        return {
+          valid: false,
+          reason:
+            'Final Rolling Round: you cannot keep 0 dice on the final roll (you must keep all remaining dice).',
+        };
+      }
+
+      const targetIndices =
+        action.lockAllRemaining || state.finalRollTriggered
+          ? inCupDice.map((d) => d.index)
+          : [...new Set(action.dieIndices)];
 
       for (const idx of targetIndices) {
         const die = player.dice[idx];
@@ -1072,7 +1221,6 @@ export function validateDiceTownAction(
         }
       }
 
-      const extraDiceCount = Math.max(0, targetIndices.length - 1);
       let bruteUsed = false;
       if (action.playBruteCardId) {
         const card = player.handCards.find(
@@ -1089,10 +1237,23 @@ export function validateDiceTownAction(
         bruteUsed = true;
       }
 
-      if (!bruteUsed && player.dollars < extraDiceCount) {
+      const requiredCost = calculateDiceSelectionCost(
+        targetIndices.length,
+        bruteUsed,
+        state.finalRollTriggered
+      );
+
+      if (player.dollars < requiredCost) {
+        if (targetIndices.length === 0) {
+          return {
+            valid: false,
+            reason:
+              'Keeping 0 dice requires paying $1 to the Stagecoach, but you have $0.',
+          };
+        }
         return {
           valid: false,
-          reason: `Keeping ${targetIndices.length} dice costs $${extraDiceCount} ($1 per extra die beyond the first), but you only have $${player.dollars}.`,
+          reason: `Keeping ${targetIndices.length} dice costs $${requiredCost} ($1 per extra die beyond the first), but you only have $${player.dollars}.`,
         };
       }
 
@@ -1151,7 +1312,9 @@ export function validateDiceTownAction(
           reason: `Only the current Sheriff (${state.sheriffTiebreaker.sheriffPlayerId}) can break ties.`,
         };
       }
-      if (!state.sheriffTiebreaker.tiedPlayerIds.includes(action.chosenWinnerId)) {
+      if (
+        !state.sheriffTiebreaker.tiedPlayerIds.includes(action.chosenWinnerId)
+      ) {
         return {
           valid: false,
           reason: `Chosen player "${action.chosenWinnerId}" is not one of the tied players (${state.sheriffTiebreaker.tiedPlayerIds.join(', ')}).`,
@@ -1211,10 +1374,24 @@ export function validateDiceTownAction(
       if (!target || action.targetPlayerId === playerId) {
         return { valid: false, reason: 'Must target a valid opponent.' };
       }
-      if (target.handCards.length === 0) {
+
+      const desiredType: SaloonStealTargetType =
+        action.stealTargetType ??
+        (target.handCards.length > 0 ? 'general_store' : 'property_deed');
+
+      if (desiredType === 'general_store' && target.handCards.length === 0) {
         return {
           valid: false,
           reason: `${action.targetPlayerId} has no General Store cards in hand.`,
+        };
+      }
+      if (
+        desiredType === 'property_deed' &&
+        getUnprotectedPropertyDeeds(target).length === 0
+      ) {
+        return {
+          valid: false,
+          reason: `${action.targetPlayerId} has no unprotected Property Deeds to steal.`,
         };
       }
       return { valid: true };
@@ -1248,6 +1425,47 @@ export function validateDiceTownAction(
           reason:
             'Chosen card is not among the revealed candidate cards from the opponent.',
         };
+      }
+      return { valid: true };
+    }
+
+    case 'DT_DOC_BADLUCK_PICK_CARD': {
+      if (
+        state.phase !== 'LOCATION_RESOLUTION' ||
+        state.subState !== 'DOC_BADLUCK_PICK' ||
+        !state.docBadluckPickPending
+      ) {
+        return {
+          valid: false,
+          reason: 'No Doc Badluck card selection is currently pending.',
+        };
+      }
+      if (playerId !== state.docBadluckPickPending.visitorPlayerId) {
+        return {
+          valid: false,
+          reason: `Waiting for ${state.docBadluckPickPending.visitorPlayerId} to choose a Doc Badluck card.`,
+        };
+      }
+      if (action.source === 'FACE_UP') {
+        if (
+          !action.cardId ||
+          !state.town.faceUpDocBadluck.some((c) => c.id === action.cardId)
+        ) {
+          return {
+            valid: false,
+            reason:
+              'Selected card is not one of the 2 face-up Doc Badluck cards.',
+          };
+        }
+      } else {
+        const deck = Deck.fromState(state.town.docBadluckDeck);
+        if (deck.totalAvailable === 0) {
+          return {
+            valid: false,
+            reason:
+              'The Doc Badluck draw pile is empty; please select one of the face-up cards.',
+          };
+        }
       }
       return { valid: true };
     }
@@ -1350,6 +1568,7 @@ export function applyDiceTownAction(
       subState: 'IDLE',
       roundNumber: nextRoundNumber,
       turnNumber: state.turnNumber + 1,
+      finalRollTriggered: false,
       players: nextPlayers,
       town: {
         ...state.town,
@@ -1361,6 +1580,7 @@ export function applyDiceTownAction(
       sheriffTiebreaker: null,
       generalStorePending: null,
       saloonPending: null,
+      docBadluckPickPending: null,
       docBadluckPending: null,
       docBadluckBonusVisitors: [],
       lastBankRobbery: null,
@@ -1405,26 +1625,30 @@ export function applyDiceTownAction(
       turnStep: 'SECRET_SELECTION',
       turnNumber: state.turnNumber + 1,
       players: nextPlayers,
-      lastActionSummary:
-        'All in_cup dice rolled privately! Select at least 1 die to keep (extra dice beyond the 1st cost $1 each).',
+      lastActionSummary: state.finalRollTriggered
+        ? '🚨 Final Rolling Round! All remaining in_cup dice rolled — each remaining player keeps all remaining dice!'
+        : 'All in_cup dice rolled privately! Keep 1 die for free, pay $1 per extra die kept, or pay $1 to the Stagecoach to keep 0 dice.',
     };
   }
 
-  // 3. SECRET_SELECTION: Each player stages >= 1 `in_cup` die (`staged_hidden`)
+  // 3. SECRET_SELECTION: Each player stages 0 or more `in_cup` dice (`staged_hidden`)
   if (action.type === 'DT_SELECT_DICE') {
     const p = state.players[playerId]!;
     const inCupDice = p.dice.filter((d) => d.status === 'in_cup');
     const selectedSet = new Set<number>(
-      action.lockAllRemaining
+      action.lockAllRemaining || state.finalRollTriggered
         ? inCupDice.map((d) => d.index)
         : action.dieIndices
     );
 
-    const extraDiceCount = Math.max(0, selectedSet.size - 1);
-    const fee = action.playBruteCardId ? 0 : extraDiceCount;
+    const fee = calculateDiceSelectionCost(
+      selectedSet.size,
+      Boolean(action.playBruteCardId),
+      state.finalRollTriggered
+    );
 
     let updatedHand = [...p.handCards];
-    let storeDeck = Deck.fromState(state.town.generalStoreDeck);
+    const storeDeck = Deck.fromState(state.town.generalStoreDeck);
 
     if (action.playBruteCardId) {
       const card = updatedHand.find((c) => c.id === action.playBruteCardId)!;
@@ -1472,6 +1696,10 @@ export function applyDiceTownAction(
     );
 
     const nextStoreState = storeDeck.toState();
+    const keptZeroNote =
+      selectedSet.size === 0
+        ? `${playerId} kept 0 dice ($1 to Stagecoach)`
+        : `${playerId} staged ${selectedSet.size} die/dice under the cup`;
 
     return {
       ...state,
@@ -1485,47 +1713,60 @@ export function applyDiceTownAction(
         discardPile: nextStoreState.discardPile,
       },
       lastActionSummary: allSubmitted
-        ? 'All players have staged their secret dice! Ready for REVEAL_STEP.'
-        : `${playerId} staged ${selectedSet.size} die/dice under the cup.`,
+        ? `${keptZeroNote}. All players have made their secret selection! Ready for REVEAL_STEP.`
+        : `${keptZeroNote}.`,
     };
   }
 
-  // 4. REVEAL_STEP: Deduct $1 extra-die fees (to general supply, NOT Bank vault) & transition staged_hidden -> locked_public
+  // 4. REVEAL_STEP: Deduct $1 extra-die / 0-die Stagecoach fees & transition staged_hidden -> locked_public
   if (action.type === 'DT_REVEAL_DICE') {
     const nextPlayers: Record<string, PlayerState> = {};
     let anyStillInCup = false;
+    let somePlayerLockedAll5 = false;
+    const newlyLocked5Players: string[] = [];
 
     for (const pid of state.playerOrder) {
       const p = state.players[pid]!;
+      const had5Before = p.dice.every((d) => d.status === 'locked_public');
       const revealedDice: PokerDie[] = p.dice.map((d) =>
         d.status === 'staged_hidden'
           ? { ...d, status: 'locked_public' as const }
           : d
       );
-      if (revealedDice.some((d) => d.status === 'in_cup')) {
+      const hasInCup = revealedDice.some((d) => d.status === 'in_cup');
+      if (hasInCup) {
         anyStillInCup = true;
+      } else {
+        somePlayerLockedAll5 = true;
+        if (!had5Before) {
+          newlyLocked5Players.push(pid);
+        }
       }
       nextPlayers[pid] = {
         ...p,
         dollars: Math.max(0, p.dollars - p.stagedExtraDiceFee),
         dice: revealedDice,
-        hasSubmittedSelection: !revealedDice.some(
-          (d) => d.status === 'in_cup'
-        ),
+        hasSubmittedSelection: !hasInCup,
         stagedExtraDiceFee: 0,
         usedBruteThisStep: false,
       };
     }
 
     if (anyStillInCup) {
+      const nextFinalRollTriggered =
+        state.finalRollTriggered || somePlayerLockedAll5;
+
       return {
         ...state,
         phase: 'SIMULTANEOUS_ROLL',
         turnStep: 'SIMULTANEOUS_ROLL',
         turnNumber: state.turnNumber + 1,
+        finalRollTriggered: nextFinalRollTriggered,
         players: nextPlayers,
         lastActionSummary:
-          'Staged dice revealed and extra-die fees paid to the general supply! Players with remaining dice return to SIMULTANEOUS_ROLL.',
+          nextFinalRollTriggered && !state.finalRollTriggered
+            ? `🚨 ${newlyLocked5Players.join(', ')} locked all 5 dice! Final Rolling Round triggered — each other player gets one more roll and keeps all remaining dice!`
+            : 'Staged dice revealed and Stagecoach fees paid! Players with remaining dice return to SIMULTANEOUS_ROLL.',
       };
     }
 
@@ -1535,6 +1776,7 @@ export function applyDiceTownAction(
       phase: 'LOCATION_RESOLUTION',
       turnStep: 'LOCATION_RESOLUTION',
       turnNumber: state.turnNumber + 1,
+      finalRollTriggered: false,
       players: nextPlayers,
       currentLocationIndex: 0,
     };
@@ -1623,9 +1865,32 @@ export function applyDiceTownAction(
     );
   }
 
-  // 5C. SALOON_SELECT_OPPONENT: Winner picks which opponent to view X random cards from
+  // 5C. SALOON_SELECT_OPPONENT: Winner picks which opponent AND whether to steal a Property Deed or General Store card
   if (action.type === 'DT_SALOON_SELECT_OPPONENT' && state.saloonPending) {
     const target = state.players[action.targetPlayerId]!;
+    const chosenType: SaloonStealTargetType =
+      action.stealTargetType ??
+      (target.handCards.length > 0 ? 'general_store' : 'property_deed');
+
+    if (chosenType === 'property_deed') {
+      const unprotectedDeeds = getUnprotectedPropertyDeeds(target);
+      const revealedDeeds = unprotectedDeeds.slice(
+        0,
+        Math.min(state.saloonPending.queensCount, unprotectedDeeds.length)
+      );
+      return {
+        ...state,
+        turnNumber: state.turnNumber + 1,
+        saloonPending: {
+          ...state.saloonPending,
+          targetOpponentId: action.targetPlayerId,
+          stealTargetType: 'property_deed',
+          revealedCandidateCards: revealedDeeds,
+        },
+        lastActionSummary: `${playerId} targeted ${action.targetPlayerId}'s Property Deeds at the Saloon (${revealedDeeds.length} available to steal).`,
+      };
+    }
+
     const shuffled = shuffleArray(target.handCards, state.prng);
     const revealed = shuffled.value.slice(
       0,
@@ -1639,46 +1904,71 @@ export function applyDiceTownAction(
       saloonPending: {
         ...state.saloonPending,
         targetOpponentId: action.targetPlayerId,
+        stealTargetType: 'general_store',
         revealedCandidateCards: revealed,
       },
-      lastActionSummary: `${playerId} targeted ${action.targetPlayerId} at the Saloon and is viewing ${revealed.length} random card(s) from their hand.`,
+      lastActionSummary: `${playerId} targeted ${action.targetPlayerId}'s General Store hand at the Saloon and is viewing ${revealed.length} random card(s).`,
     };
   }
 
-  // 5D. SALOON_STEAL_CARD: Winner steals 1 card from revealedCandidateCards and returns the rest
+  // 5D. SALOON_STEAL_CARD: Winner steals 1 card (either Property Deed or General Store card)
   if (
     action.type === 'DT_SALOON_STEAL_CARD' &&
     state.saloonPending &&
     state.saloonPending.targetOpponentId
   ) {
-    const { winnerPlayerId, targetOpponentId, remainingSteals, queensCount } =
-      state.saloonPending;
+    const {
+      winnerPlayerId,
+      targetOpponentId,
+      stealTargetType,
+      remainingSteals,
+      queensCount,
+    } = state.saloonPending;
     const winner = state.players[winnerPlayerId]!;
     const target = state.players[targetOpponentId]!;
 
-    const stolenCard = target.handCards.find((c) => c.id === action.cardId)!;
-    const nextTargetHand = target.handCards.filter(
-      (c) => c.id !== action.cardId
-    );
-    const nextWinnerHand = [...winner.handCards, stolenCard];
+    const isDeedSteal =
+      stealTargetType === 'property_deed' ||
+      target.propertyDeeds.some((d) => d.id === action.cardId);
 
-    const nextPlayers: Record<string, PlayerState> = {
-      ...state.players,
-      [winnerPlayerId]: {
+    const nextPlayers: Record<string, PlayerState> = { ...state.players };
+
+    if (isDeedSteal) {
+      const stolenDeed = target.propertyDeeds.find(
+        (d) => d.id === action.cardId
+      )!;
+      nextPlayers[winnerPlayerId] = {
         ...winner,
-        handCards: nextWinnerHand,
-      },
-      [targetOpponentId]: {
+        propertyDeeds: [...winner.propertyDeeds, stolenDeed],
+      };
+      nextPlayers[targetOpponentId] = {
         ...target,
-        handCards: nextTargetHand,
-      },
-    };
+        propertyDeeds: target.propertyDeeds.filter(
+          (d) => d.id !== action.cardId
+        ),
+      };
+    } else {
+      const stolenCard = target.handCards.find((c) => c.id === action.cardId)!;
+      nextPlayers[winnerPlayerId] = {
+        ...winner,
+        handCards: [...winner.handCards, stolenCard],
+      };
+      nextPlayers[targetOpponentId] = {
+        ...target,
+        handCards: target.handCards.filter((c) => c.id !== action.cardId),
+      };
+    }
 
-    const anyOpponentStillHasCards = state.playerOrder.some(
-      (pid) => pid !== winnerPlayerId && nextPlayers[pid]!.handCards.length > 0
-    );
+    const anyOpponentStillHasStealable = state.playerOrder.some((pid) => {
+      if (pid === winnerPlayerId) return false;
+      const opp = nextPlayers[pid]!;
+      return (
+        opp.handCards.length > 0 ||
+        getUnprotectedPropertyDeeds(opp).length > 0
+      );
+    });
 
-    if (remainingSteals > 0 && anyOpponentStillHasCards) {
+    if (remainingSteals > 0 && anyOpponentStillHasStealable) {
       return {
         ...state,
         turnNumber: state.turnNumber + 1,
@@ -1687,10 +1977,13 @@ export function applyDiceTownAction(
           winnerPlayerId,
           queensCount,
           targetOpponentId: null,
+          stealTargetType: null,
           revealedCandidateCards: [],
           remainingSteals: remainingSteals - 1,
         },
-        lastActionSummary: `${winnerPlayerId} stole 1 card from ${targetOpponentId} and is performing a 2nd Saloon steal (The Girls)!`,
+        lastActionSummary: `${winnerPlayerId} stole 1 ${
+          isDeedSteal ? 'Property Deed' : 'General Store card'
+        } from ${targetOpponentId} and is performing a 2nd Saloon steal (The Girls)!`,
       };
     }
 
@@ -1702,11 +1995,68 @@ export function applyDiceTownAction(
         subState: 'IDLE',
         saloonPending: null,
       },
-      `${winnerPlayerId} stole 1 card from ${targetOpponentId}'s hand at the Saloon!`
+      `${winnerPlayerId} stole 1 ${
+        isDeedSteal ? 'Property Deed' : 'General Store card'
+      } from ${targetOpponentId} at the Saloon!`
     );
   }
 
-  // 5E. DOC_BADLUCK_TARGET: Resolve Elixir of Friendship or Elixir of Domination
+  // 5E. DOC_BADLUCK_PICK: Visitor selects between the 2 face-up Doc Badluck cards or drawing 1 from the deck
+  if (
+    action.type === 'DT_DOC_BADLUCK_PICK_CARD' &&
+    state.docBadluckPickPending
+  ) {
+    const { visitorPlayerId, remainingVisitorIds } =
+      state.docBadluckPickPending;
+
+    if (action.source === 'FACE_UP') {
+      const chosenElixir = state.town.faceUpDocBadluck.find(
+        (c) => c.id === action.cardId
+      )!;
+      const remainingFaceUp = state.town.faceUpDocBadluck.filter(
+        (c) => c.id !== action.cardId
+      );
+      const refilled = refillDocBadluckRow(
+        state.town.docBadluckDeck,
+        remainingFaceUp
+      );
+      return executeDocBadluckElixirCard(
+        {
+          ...state,
+          turnNumber: state.turnNumber + 1,
+          town: {
+            ...state.town,
+            docBadluckDeck: refilled.docBadluckDeck,
+            faceUpDocBadluck: refilled.faceUpDocBadluck,
+          },
+        },
+        visitorPlayerId,
+        chosenElixir,
+        remainingVisitorIds,
+        []
+      );
+    } else {
+      const deck = Deck.fromState(state.town.docBadluckDeck);
+      const drawn = deck.draw(1);
+      const chosenElixir = drawn[0]!;
+      return executeDocBadluckElixirCard(
+        {
+          ...state,
+          turnNumber: state.turnNumber + 1,
+          town: {
+            ...state.town,
+            docBadluckDeck: deck.toState(),
+          },
+        },
+        visitorPlayerId,
+        chosenElixir,
+        remainingVisitorIds,
+        []
+      );
+    }
+  }
+
+  // 5F. DOC_BADLUCK_TARGET: Resolve Elixir of Friendship or Elixir of Domination
   if (
     action.type === 'DT_RESOLVE_DOC_BADLUCK_DEMAND' &&
     state.docBadluckPending
@@ -1736,9 +2086,7 @@ export function applyDiceTownAction(
         };
       }
     } else if (card.effectType === 'DEMAND_PROPERTY_DEED') {
-      const stealableDeeds = target.propertyDeeds.filter(
-        (d) => !target.protectedDeedIds.includes(d.id)
-      );
+      const stealableDeeds = getUnprotectedPropertyDeeds(target);
       const givenDeed =
         (action.cardId
           ? stealableDeeds.find((d) => d.id === action.cardId)
@@ -1757,7 +2105,7 @@ export function applyDiceTownAction(
       }
     }
 
-    return applyDocBadluckQueue(
+    return promptNextDocBadluckVisitor(
       {
         ...state,
         turnNumber: state.turnNumber + 1,
@@ -1792,7 +2140,6 @@ export function applyDiceTownAction(
 
     switch (card.effectType) {
       case 'STEAL_DOLLARS': {
-        // Nervous Joe: A player of your choice must give you $4
         const targetId =
           action.targetPlayerId ??
           state.playerOrder.find((id) => id !== playerId)!;
@@ -1821,7 +2168,6 @@ export function applyDiceTownAction(
       }
 
       case 'SET_DIE_FACE': {
-        // Professional Cheater: Turn one of your dice to a face of your choice
         const dieIdx = action.targetDieIndex ?? 0;
         const face = action.targetDieFace ?? 'A';
         nextPlayers[playerId] = {
@@ -1865,7 +2211,6 @@ export function applyDiceTownAction(
       }
 
       case 'DOUBLE_NUGGETS': {
-        // Dynamite: Gain twice as many gold nuggets at Gold Mine
         const ninesCount = countDieFace(p.dice, '9', false);
         const bonusNuggets = Math.min(state.town.goldMineNuggets, ninesCount);
         nextPlayers[playerId] = {
@@ -1888,7 +2233,6 @@ export function applyDiceTownAction(
       }
 
       case 'SPLIT_BANK_HEIST': {
-        // Even Split: Opponent who robbed the Bank gives you half of the stolen bills (rounded down)
         const heist = state.lastBankRobbery;
         let splitAmount = 0;
         if (heist && heist.winnerId !== playerId) {
@@ -1921,7 +2265,6 @@ export function applyDiceTownAction(
       }
 
       case 'DOUBLE_STORE_ACTION': {
-        // Unlimited Credit
         if (state.generalStorePending) {
           return {
             ...state,
@@ -1996,7 +2339,6 @@ export function applyDiceTownAction(
       }
 
       case 'BONUS_BLIND_DEED': {
-        // Corruption: Take the top face-down Property Deed from the deck
         const propDeck = Deck.fromState(state.town.propertyDeck);
         const blindDeed = propDeck.draw(1);
         if (blindDeed[0]) {
@@ -2024,7 +2366,6 @@ export function applyDiceTownAction(
       }
 
       case 'RETAIN_SHERIFF': {
-        // Marshall: Keep the Sheriff Badge
         for (const pid of state.playerOrder) {
           nextPlayers[pid] = {
             ...nextPlayers[pid]!,
@@ -2047,7 +2388,6 @@ export function applyDiceTownAction(
       }
 
       case 'TRIGGER_DOC_BADLUCK': {
-        // Doc Badluck's Elixir: Visit Doc Badluck even if you controlled a town location this round
         return {
           ...state,
           turnNumber: state.turnNumber + 1,
@@ -2066,7 +2406,6 @@ export function applyDiceTownAction(
       }
 
       case 'CANCEL_STORE_CARD': {
-        // Wanted: Nullifies another player's General Store card
         return {
           ...state,
           turnNumber: state.turnNumber + 1,
@@ -2167,6 +2506,11 @@ export function getDiceTownPlayerPerspective(
   ) {
     activePlayerId = state.saloonPending.winnerPlayerId;
   } else if (
+    state.subState === 'DOC_BADLUCK_PICK' &&
+    state.docBadluckPickPending?.visitorPlayerId
+  ) {
+    activePlayerId = state.docBadluckPickPending.visitorPlayerId;
+  } else if (
     state.subState === 'DOC_BADLUCK_TARGET' &&
     state.docBadluckPending?.playerId
   ) {
@@ -2190,9 +2534,10 @@ export function getDiceTownPlayerPerspective(
   const hasBruteInHand = selfPlayer.handCards.some(
     (c) => c.effectType === 'FREE_KEEP_EXTRA_DICE'
   );
-  const maxSelectableDiceCount = hasBruteInHand
-    ? inCupDice.length
-    : Math.min(inCupDice.length, 1 + selfPlayer.dollars);
+  const maxSelectableDiceCount =
+    hasBruteInHand || state.finalRollTriggered
+      ? inCupDice.length
+      : Math.min(inCupDice.length, 1 + selfPlayer.dollars);
 
   const discardLen = state.town.discardPile.length;
 
@@ -2207,6 +2552,7 @@ export function getDiceTownPlayerPerspective(
     activePlayerIndex: state.activePlayerIndex,
     activePlayerId,
     sheriffPlayerId: state.sheriffPlayerId,
+    finalRollTriggered: state.finalRollTriggered,
     self: selfPlayer,
     opponents,
     town: {
@@ -2219,6 +2565,7 @@ export function getDiceTownPlayerPerspective(
       propertyDrawCount: state.town.propertyDeck.drawPile.length,
       faceUpProperties: [...state.town.faceUpProperties],
       docBadluckDrawCount: state.town.docBadluckDeck.drawPile.length,
+      faceUpDocBadluck: [...state.town.faceUpDocBadluck],
     },
     currentLocation: state.currentLocation,
     currentLocationWinnerId: state.currentLocationWinnerId,
@@ -2230,16 +2577,20 @@ export function getDiceTownPlayerPerspective(
       lockedPublicDice,
       hasSubmittedSelection: selfPlayer.hasSubmittedSelection,
       maxSelectableDiceCount,
+      canKeepZeroDice: !state.finalRollTriggered && selfPlayer.dollars >= 1,
+      isFinalRollingRound: state.finalRollTriggered,
     },
     sheriffTiebreakerModal: state.sheriffTiebreaker,
     generalStoreChoiceCards:
       state.generalStorePending?.winnerPlayerId === effectivePid
         ? state.generalStorePending.drawnCards
         : null,
+    saloonPending: state.saloonPending,
     saloonRevealedCards:
       state.saloonPending?.winnerPlayerId === effectivePid
         ? state.saloonPending.revealedCandidateCards
         : null,
+    docBadluckPickPending: state.docBadluckPickPending,
     docBadluckPending: state.docBadluckPending,
     finalVPByPlayer: state.finalVPByPlayer,
     winnerId: state.winnerId,

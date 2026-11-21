@@ -78,6 +78,17 @@ export type TurnStep =
   | 'CHOOSING_TICKETS'
   | 'PLACING_MONSTER';
 
+export interface TunnelRevealSummary {
+  readonly playerId: string;
+  readonly routeId: string;
+  readonly from: string;
+  readonly to: string;
+  readonly claimColor: TrainCardColor;
+  readonly revealedCards: readonly TrainCardColor[];
+  readonly extraRequired: number;
+  readonly succeeded: boolean;
+}
+
 export interface GameState {
   readonly mapId?: TTRMapId;
   readonly phase: GamePhase;
@@ -94,6 +105,7 @@ export interface GameState {
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
   readonly lastActionSummary: string | null;
+  readonly lastTunnelReveal?: TunnelRevealSummary | null;
   readonly alvinAndDexter?: AlvinAndDexterState;
 }
 
@@ -127,6 +139,7 @@ export interface SanitizedGameState {
   readonly turnsRemainingInFinalRound: number;
   readonly turnNumber: number;
   readonly lastActionSummary: string | null;
+  readonly lastTunnelReveal?: TunnelRevealSummary | null;
   readonly alvinAndDexter?: AlvinAndDexterState;
 }
 

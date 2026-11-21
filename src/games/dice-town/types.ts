@@ -92,8 +92,9 @@ export interface TownState {
   readonly generalStoreDeck: DeckState<DiceTownCard>;
   readonly discardPile: readonly DiceTownCard[];
   readonly propertyDeck: DeckState<DiceTownCard>;
-  readonly faceUpProperties: readonly DiceTownCard[]; // up to 3 visible Property Deed cards
+  readonly faceUpProperties: readonly DiceTownCard[]; // up to 3 visible Property Deed cards (index 0 = bottom / drawn next by default)
   readonly docBadluckDeck: DeckState<DiceTownCard>; // 7 Elixir cards
+  readonly faceUpDocBadluck: readonly DiceTownCard[]; // 2 visible face-up Doc Badluck Elixir cards
 }
 
 export interface SanitizedTownState {
@@ -105,6 +106,7 @@ export interface SanitizedTownState {
   readonly propertyDrawCount: number;
   readonly faceUpProperties: readonly DiceTownCard[];
   readonly docBadluckDrawCount: number;
+  readonly faceUpDocBadluck: readonly DiceTownCard[];
 }
 
 export type DiceTownPhase =
@@ -141,7 +143,10 @@ export type DiceTownResolutionSubState =
   | 'SHERIFF_TIEBREAKER'
   | 'GENERAL_STORE_PICK'
   | 'SALOON_STEAL'
+  | 'DOC_BADLUCK_PICK'
   | 'DOC_BADLUCK_TARGET';
+
+export type SaloonStealTargetType = 'general_store' | 'property_deed';
 
 export interface SheriffTiebreakerPrompt {
   readonly location: DiceTownLocation;
@@ -159,8 +164,14 @@ export interface SaloonPendingSteal {
   readonly winnerPlayerId: string;
   readonly queensCount: number;
   readonly targetOpponentId: string | null;
+  readonly stealTargetType: SaloonStealTargetType | null;
   readonly revealedCandidateCards: readonly DiceTownCard[];
   readonly remainingSteals: number;
+}
+
+export interface DocBadluckPickPending {
+  readonly visitorPlayerId: string;
+  readonly remainingVisitorIds: readonly string[];
 }
 
 export interface DocBadluckPendingAction {
@@ -183,6 +194,8 @@ export interface UnderTheCupTrayHook {
   readonly lockedPublicDice: readonly PokerDie[];
   readonly hasSubmittedSelection: boolean;
   readonly maxSelectableDiceCount: number;
+  readonly canKeepZeroDice: boolean;
+  readonly isFinalRollingRound: boolean;
 }
 
 export interface DiceTownVPBreakdown {
@@ -205,6 +218,7 @@ export interface DiceTownGameState {
   readonly playerOrder: readonly string[];
   readonly activePlayerIndex: number;
   readonly sheriffPlayerId: string | null;
+  readonly finalRollTriggered: boolean;
   readonly players: Readonly<Record<string, PlayerState>>;
   readonly town: TownState;
   readonly currentLocationIndex: number;
@@ -213,6 +227,7 @@ export interface DiceTownGameState {
   readonly sheriffTiebreaker: SheriffTiebreakerPrompt | null;
   readonly generalStorePending: GeneralStorePendingDraw | null;
   readonly saloonPending: SaloonPendingSteal | null;
+  readonly docBadluckPickPending: DocBadluckPickPending | null;
   readonly docBadluckPending: DocBadluckPendingAction | null;
   readonly docBadluckBonusVisitors: readonly string[];
   readonly lastBankRobbery: {
@@ -239,6 +254,7 @@ export interface DiceTownSanitizedState {
   readonly activePlayerIndex: number;
   readonly activePlayerId: string;
   readonly sheriffPlayerId: string | null;
+  readonly finalRollTriggered: boolean;
   readonly self: PlayerState;
   readonly opponents: Readonly<Record<string, SanitizedOpponentState>>;
   readonly town: SanitizedTownState;
@@ -253,7 +269,9 @@ export interface DiceTownSanitizedState {
   /** UI Hook 3: Sheriff Tie-Breaker Modal */
   readonly sheriffTiebreakerModal: SheriffTiebreakerPrompt | null;
   readonly generalStoreChoiceCards: readonly DiceTownCard[] | null;
+  readonly saloonPending: SaloonPendingSteal | null;
   readonly saloonRevealedCards: readonly DiceTownCard[] | null;
+  readonly docBadluckPickPending: DocBadluckPickPending | null;
   readonly docBadluckPending: DocBadluckPendingAction | null;
   readonly finalVPByPlayer: Readonly<Record<string, DiceTownVPBreakdown>> | null;
   readonly winnerId: string | null;
@@ -284,10 +302,16 @@ export type DiceTownAction =
   | {
       readonly type: 'DT_SALOON_SELECT_OPPONENT';
       readonly targetPlayerId: string;
+      readonly stealTargetType?: SaloonStealTargetType;
     }
   | {
       readonly type: 'DT_SALOON_STEAL_CARD';
       readonly cardId: string;
+    }
+  | {
+      readonly type: 'DT_DOC_BADLUCK_PICK_CARD';
+      readonly source: 'FACE_UP' | 'DECK';
+      readonly cardId?: string;
     }
   | {
       readonly type: 'DT_PLAY_CARD';

@@ -54,7 +54,8 @@ describe('Dice Town Core Engine (0.00k) — Decks, Simultaneous Dice Cup, Locati
     expect(state.town.faceUpProperties).toHaveLength(3);
     expect(state.town.propertyDeck.drawPile).toHaveLength(17);
     expect(state.town.generalStoreDeck.drawPile).toHaveLength(19);
-    expect(state.town.docBadluckDeck.drawPile).toHaveLength(7);
+    expect(state.town.faceUpDocBadluck).toHaveLength(2);
+    expect(state.town.docBadluckDeck.drawPile).toHaveLength(5);
 
     for (const pid of ['p1', 'p2', 'p3']) {
       const p = state.players[pid]!;
@@ -89,9 +90,27 @@ describe('Dice Town Core Engine (0.00k) — Decks, Simultaneous Dice Cup, Locati
     ).toBe(true);
 
     // 3. SECRET_SELECTION validation:
-    // Must select at least 1 die
+    // Selecting 0 dice (`dieIndices: []`) is valid when the player can pay $1 to the Stagecoach,
+    // and invalid when the player has $0 (unless playing The Brute)!
     expect(
       validateDiceTownAction(state, 'p1', {
+        type: 'DT_SELECT_DICE',
+        dieIndices: [],
+      }).valid
+    ).toBe(true);
+
+    const zeroCashState = {
+      ...state,
+      players: {
+        ...state.players,
+        p1: {
+          ...state.players['p1']!,
+          dollars: 0,
+        },
+      },
+    };
+    expect(
+      validateDiceTownAction(zeroCashState, 'p1', {
         type: 'DT_SELECT_DICE',
         dieIndices: [],
       }).valid
@@ -330,7 +349,7 @@ describe('Dice Town Core Engine (0.00k) — Decks, Simultaneous Dice Cup, Locati
     // Sheriff p1 chooses p2 to win Sheriff's Office ->
     // - p2 becomes the new Sheriff (`isSheriff = true`, `sheriffPlayerId = 'p2'`)!
     // - 6. Town Hall: p1's Two Pair (Jacks & 9s) beats p2's Two Pair (10s & 9s) and p3's High Card -> p1 claims 1 Property Deed and refills faceUpProperties to 3!
-    // - 7. Doc Badluck: p3 won ZERO locations this round (`locationsWonThisRound === 0`), so p3 visits Doc Badluck!
+    // - 7. Doc Badluck: p3 won ZERO locations this round (`locationsWonThisRound === 0`), so p3 visits Doc Badluck and chooses between the 2 face-up cards or drawing 1 from the deck!
     state = applyDiceTownAction(state, 'p1', {
       type: 'DT_SHERIFF_BREAK_TIE',
       chosenWinnerId: 'p2',
@@ -341,6 +360,145 @@ describe('Dice Town Core Engine (0.00k) — Decks, Simultaneous Dice Cup, Locati
     expect(state.players['p1']!.propertyDeeds).toHaveLength(1);
     expect(state.town.faceUpProperties).toHaveLength(3);
     expect(state.players['p3']!.locationsWonThisRound).toBe(0);
+    expect(state.currentLocation).toBe('DOC_BADLUCK');
+    expect(state.subState).toBe('DOC_BADLUCK_PICK');
+    expect(state.docBadluckPickPending?.visitorPlayerId).toBe('p3');
+    expect(state.town.faceUpDocBadluck).toHaveLength(2);
+
+    // p3 picks one of the 2 face-up Doc Badluck cards (refilling faceUpDocBadluck back to 2)
+    const chosenBadluckCard = state.town.faceUpDocBadluck[0]!;
+    state = applyDiceTownAction(state, 'p3', {
+      type: 'DT_DOC_BADLUCK_PICK_CARD',
+      source: 'FACE_UP',
+      cardId: chosenBadluckCard.id,
+    });
+    expect(state.town.faceUpDocBadluck).toHaveLength(2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4b. New 0.00M Rules: Keep 0 Dice ($1 Stagecoach), Final Rolling Round,
+  //     Saloon Property Deed vs General Store Choice, & Doc Badluck Deck Draw
+  // ---------------------------------------------------------------------------
+  it('supports keeping 0 dice ($1 to Stagecoach), triggers a Final Rolling Round when a player locks 5 dice, and allows Saloon to steal Property Deeds or General Store cards', () => {
+    let state = initDiceTownGame(['p1', 'p2'], 2027);
+    state = applyDiceTownAction(state, 'p1', { type: 'DT_START_ROUND' });
+    state = applyDiceTownAction(state, 'p1', { type: 'DT_ROLL_DICE' });
+
+    // p1 chooses to keep 0 dice (`dieIndices: []`) paying $1 to Stagecoach (NOT added to Bank Vault!)
+    // p2 locks all 5 dice at once (`lockAllRemaining: true`, paying $4 extra)
+    state = applyDiceTownAction(state, 'p1', {
+      type: 'DT_SELECT_DICE',
+      dieIndices: [],
+    });
+    expect(state.players['p1']!.stagedExtraDiceFee).toBe(1);
+
+    state = applyDiceTownAction(state, 'p2', {
+      type: 'DT_SELECT_DICE',
+      dieIndices: [],
+      lockAllRemaining: true,
+    });
+    expect(state.phase).toBe('REVEAL_STEP');
+
+    // Reveal dice:
+    // - p1 paid $1 to Stagecoach ($8 -> $7), still has 5 in_cup dice
+    // - p2 paid $4 ($8 -> $4), now has 5 locked_public dice!
+    // - Because p2 locked all 5 dice while p1 still has in_cup dice, `finalRollTriggered` becomes true!
+    state = applyDiceTownAction(state, 'p1', { type: 'DT_REVEAL_DICE' });
+    expect(state.players['p1']!.dollars).toBe(7);
+    expect(state.players['p2']!.dollars).toBe(4);
+    expect(state.town.bankVaultDollars).toBe(4); // Stagecoach $1 goes to supply, not Bank Vault!
+    expect(state.finalRollTriggered).toBe(true);
+    expect(state.phase).toBe('SIMULTANEOUS_ROLL');
+
+    // Final Rolling Round: p1 gets 1 more roll and must keep all remaining in_cup dice ($0 fee)
+    state = applyDiceTownAction(state, 'p1', { type: 'DT_ROLL_DICE' });
+    expect(state.phase).toBe('SECRET_SELECTION');
+    expect(state.players['p2']!.hasSubmittedSelection).toBe(true);
+
+    // In the Final Rolling Round, p1 cannot keep only 1 die when 5 remain
+    expect(
+      validateDiceTownAction(state, 'p1', {
+        type: 'DT_SELECT_DICE',
+        dieIndices: [0],
+      }).valid
+    ).toBe(false);
+
+    // p1 keeps all remaining dice at $0 fee
+    state = applyDiceTownAction(state, 'p1', {
+      type: 'DT_SELECT_DICE',
+      dieIndices: [],
+      lockAllRemaining: true,
+    });
+    expect(state.players['p1']!.stagedExtraDiceFee).toBe(0);
+    expect(state.phase).toBe('REVEAL_STEP');
+
+    // Test Saloon choice between Property Deeds and General Store cards when target opponent has BOTH:
+    const storeCard = GENERAL_STORE_CARDS[0]!;
+    const deedCard = PROPERTY_DEED_CARDS[0]!;
+    state = {
+      ...state,
+      players: {
+        p1: {
+          ...state.players['p1']!,
+          // p1 wins Saloon with two Queens
+          dice: makeLockedDice(['Q', 'Q', '9', '10', 'K']),
+        },
+        p2: {
+          ...state.players['p2']!,
+          dice: makeLockedDice(['9', '10', 'J', 'K', 'A']),
+          handCards: [storeCard],
+          propertyDeeds: [deedCard],
+        },
+      },
+    };
+
+    // Resolve through Gold Mine, Bank, General Store to reach SALOON_STEAL
+    // (Set p1 as Sheriff so ties don't block, or make p1 win Gold Mine and p2 win Bank/General Store)
+    state = {
+      ...state,
+      sheriffPlayerId: 'p1',
+      players: {
+        ...state.players,
+        p1: {
+          ...state.players['p1']!,
+          isSheriff: true,
+          dice: makeLockedDice(['9', '9', 'Q', 'Q', 'K']),
+        },
+        p2: {
+          ...state.players['p2']!,
+          dice: makeLockedDice(['10', '10', 'A', 'A', 'A']),
+        },
+      },
+    };
+
+    state = applyDiceTownAction(state, 'p1', { type: 'DT_REVEAL_DICE' });
+    // Gold Mine: p1 wins (two 9s)
+    // Bank: p2 wins (two 10s)
+    // General Store: 0 Jacks -> nobody wins
+    // Saloon: p1 wins (two Qs)! Since p2 has BOTH a General Store card AND a Property Deed, pauses at SALOON_STEAL with targetOpponentId === null so p1 can choose `'property_deed'` or `'general_store'`!
+    expect(state.currentLocation).toBe('SALOON');
+    expect(state.subState).toBe('SALOON_STEAL');
+    expect(state.saloonPending?.targetOpponentId).toBeNull();
+
+    // p1 chooses to steal a Property Deed (`stealTargetType: 'property_deed'`) from p2!
+    state = applyDiceTownAction(state, 'p1', {
+      type: 'DT_SALOON_SELECT_OPPONENT',
+      targetPlayerId: 'p2',
+      stealTargetType: 'property_deed',
+    });
+    expect(state.saloonPending?.stealTargetType).toBe('property_deed');
+    expect(state.saloonPending?.revealedCandidateCards).toEqual([deedCard]);
+
+    state = applyDiceTownAction(state, 'p1', {
+      type: 'DT_SALOON_STEAL_CARD',
+      cardId: deedCard.id,
+    });
+    expect(
+      state.players['p1']!.propertyDeeds.some((d) => d.id === deedCard.id)
+    ).toBe(true);
+    expect(
+      state.players['p2']!.propertyDeeds.some((d) => d.id === deedCard.id)
+    ).toBe(false);
   });
 
   // ---------------------------------------------------------------------------
@@ -411,6 +569,15 @@ describe('Dice Town Core Engine (0.00k) — Decks, Simultaneous Dice Cup, Locati
     expect(
       getSoundEffectForAction({ type: 'DT_SELECT_DICE', dieIndices: [0] })
     ).toBe('WOOD_BUILD');
+    expect(
+      getSoundEffectForAction({ type: 'DT_SELECT_DICE', dieIndices: [] })
+    ).toBe('STAGECOACH_WHIP');
+    expect(
+      getSoundEffectForAction({
+        type: 'DT_DOC_BADLUCK_PICK_CARD',
+        source: 'DECK',
+      })
+    ).toBe('ELIXIR_BUBBLE');
     expect(getSoundEffectForAction({ type: 'DT_REVEAL_DICE' })).toBe(
       'COIN_CHINK'
     );

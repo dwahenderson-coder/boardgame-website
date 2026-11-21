@@ -238,6 +238,8 @@ export const SandboxApp: React.FC = () => {
   const [buildStationOpen, setBuildStationOpen] = useState<boolean>(false);
   const [selectedStationPaymentIdx, setSelectedStationPaymentIdx] =
     useState<number>(0);
+  const [highlightClaimableRoutes, setHighlightClaimableRoutes] =
+    useState<boolean>(false);
 
   // --- Local Core Engine State ---
   const [localGameState, setLocalGameState] = useState<AnyGameState>(() =>
@@ -291,9 +293,12 @@ export const SandboxApp: React.FC = () => {
               : localGameState.subState === 'SALOON_STEAL' &&
                   localGameState.saloonPending?.winnerPlayerId
                 ? localGameState.saloonPending.winnerPlayerId
-                : localGameState.subState === 'DOC_BADLUCK_TARGET' &&
-                    localGameState.docBadluckPending?.playerId
-                  ? localGameState.docBadluckPending.playerId
+                : localGameState.subState === 'DOC_BADLUCK_PICK' &&
+                    localGameState.docBadluckPickPending?.visitorPlayerId
+                  ? localGameState.docBadluckPickPending.visitorPlayerId
+                  : localGameState.subState === 'DOC_BADLUCK_TARGET' &&
+                      localGameState.docBadluckPending?.playerId
+                    ? localGameState.docBadluckPending.playerId
                   : localGameState.phase === 'SECRET_SELECTION'
                     ? (localGameState.playerOrder.find(
                         (pid) => !localGameState.players[pid]!.hasSubmittedSelection
@@ -1263,6 +1268,35 @@ export const SandboxApp: React.FC = () => {
     stationPaymentOptions.length,
   ]);
 
+  const claimableRouteIds = useMemo<ReadonlySet<string>>(() => {
+    const set = new Set<string>();
+    if (!ttrSanitized || !highlightClaimableRoutes) {
+      return set;
+    }
+    const selfHand = ttrSanitized.self.hand;
+    const selfTrains = ttrSanitized.self.trainsRemaining;
+    for (const r of ttrSanitized.routes) {
+      if (r.ownerId !== null) continue;
+      if (selfTrains < r.length) continue;
+      if (
+        isCityInChaos(ttrSanitized, r.from) ||
+        isCityInChaos(ttrSanitized, r.to)
+      ) {
+        continue;
+      }
+      const validPayments = getValidPaymentsForRoute(
+        r.color,
+        r.length,
+        selfHand,
+        r.ferryLocomotives ?? 0
+      );
+      if (validPayments.length > 0) {
+        set.add(r.id);
+      }
+    }
+    return set;
+  }, [ttrSanitized, highlightClaimableRoutes]);
+
   const togglePendingTicketSelection = (ticketId: string) => {
     setSelectedPendingIds((prev) =>
       prev.includes(ticketId)
@@ -2100,6 +2134,19 @@ export const SandboxApp: React.FC = () => {
                       stations={ttrSanitized.stations ?? {}}
                       selectedRouteId={selectedRouteId}
                       highlightedCities={highlightedCities}
+                      hoveredTicketArc={
+                        hoveredTicket
+                          ? {
+                              from: hoveredTicket.from,
+                              to: hoveredTicket.to,
+                              completed: viewedPlayerGraph.isConnected(
+                                hoveredTicket.from,
+                                hoveredTicket.to
+                              ),
+                            }
+                          : null
+                      }
+                      claimableRouteIds={claimableRouteIds}
                       alvinCity={ttrSanitized.alvinAndDexter?.alvinCity ?? null}
                       dexterCity={
                         ttrSanitized.alvinAndDexter?.dexterCity ?? null
@@ -2154,6 +2201,57 @@ export const SandboxApp: React.FC = () => {
                       );
                     }}
                   />
+
+                  {/* Final Round Railway Banner */}
+                  {ttrSanitized.phase === 'FINAL_ROUND' && (
+                    <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-6 py-2 rounded-2xl bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 border-2 border-yellow-200 text-slate-950 font-black text-sm uppercase tracking-widest shadow-[0_0_24px_rgba(251,191,36,0.55)]">
+                      🚨 FINAL ROUND — LAST TURN! ({ttrSanitized.turnsRemainingInFinalRound} turn(s) remaining)
+                    </div>
+                  )}
+
+                  {/* Europe 3-Card Tunnel Uncover Reveal Drawer */}
+                  {ttrSanitized.lastTunnelReveal && (
+                    <div className="absolute bottom-3 right-3 z-30 w-80 bg-slate-900/95 border-2 border-amber-500/80 rounded-2xl shadow-2xl backdrop-blur-md p-3 text-xs">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                        <span className="font-black text-amber-300 uppercase tracking-wider text-[10px]">
+                          ⛰️ Tunnel Uncover ({ttrSanitized.lastTunnelReveal.from} ↔{' '}
+                          {ttrSanitized.lastTunnelReveal.to})
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-black text-[9px] uppercase ${
+                            ttrSanitized.lastTunnelReveal.succeeded
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          }`}
+                        >
+                          {ttrSanitized.lastTunnelReveal.succeeded
+                            ? `Claimed (+${ttrSanitized.lastTunnelReveal.extraRequired} Extra)`
+                            : `Failed (+${ttrSanitized.lastTunnelReveal.extraRequired} Needed)`}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 mt-2">
+                        {ttrSanitized.lastTunnelReveal.revealedCards.map(
+                          (c, idx) => {
+                            const isMatch =
+                              c === 'LOCOMOTIVE' ||
+                              c === ttrSanitized.lastTunnelReveal!.claimColor;
+                            return (
+                              <div
+                                key={`${c}_${idx}`}
+                                className={`rounded-xl p-1 border ${
+                                  isMatch
+                                    ? 'border-amber-400 bg-amber-500/20 ring-1 ring-amber-400'
+                                    : 'border-slate-800 bg-slate-950/60 opacity-75'
+                                }`}
+                              >
+                                <TrainCardVisual color={c} variant="market" />
+                              </div>
+                            );
+                          }
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Alvin & Dexter Initial Placement Banner */}
                   {ttrSanitized.phase === 'MONSTER_PLACEMENT' &&
@@ -2597,15 +2695,33 @@ export const SandboxApp: React.FC = () => {
                         )}
                       </div>
 
-                      {runnerMode === 'LOCAL' && viewport === 'GOD_MODE' && (
+                      <div className="flex items-center gap-1.5">
                         <button
-                          onClick={handleGodModeGrantCards}
-                          className="text-[10px] px-2 py-0.5 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 font-semibold transition"
-                          title="Sandbox helper: add +1 of every train card color to active player's hand"
+                          type="button"
+                          onClick={() =>
+                            setHighlightClaimableRoutes((prev) => !prev)
+                          }
+                          className={`text-[10px] px-2.5 py-0.5 rounded border font-bold transition cursor-pointer ${
+                            highlightClaimableRoutes
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow'
+                              : 'bg-slate-900 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'
+                          }`}
+                          title="Highlight all unclaimed routes on the map that you can currently afford"
                         >
-                          +1 All Cards (God Cheat)
+                          {highlightClaimableRoutes
+                            ? `✨ Showing Claimable (${claimableRouteIds.size})`
+                            : '✨ Show Claimable Routes'}
                         </button>
-                      )}
+                        {runnerMode === 'LOCAL' && viewport === 'GOD_MODE' && (
+                          <button
+                            onClick={handleGodModeGrantCards}
+                            className="text-[10px] px-2 py-0.5 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 font-semibold transition"
+                            title="Sandbox helper: add +1 of every train card color to active player's hand"
+                          >
+                            +1 All Cards (God Cheat)
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* 9 Illustrated Train Car Card Stacks */}

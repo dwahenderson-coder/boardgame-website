@@ -12,6 +12,10 @@ export type SoundEffectId =
   | 'ROBBER_THUD'
   | 'MYSTERY_STING'
   | 'FOOTSTEP_TAP'
+  | 'STAGECOACH_WHIP'
+  | 'ELIXIR_BUBBLE'
+  | 'FINAL_ROUND_BELL'
+  | 'TUNNEL_RUMBLE'
   | 'ERROR_BUZZ'
   | 'VICTORY_FANFARE';
 
@@ -51,6 +55,7 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
       "Texas Hold'em",
       'Catan',
       'Clue',
+      'Dice Town',
     ],
     optionalFilePath: '/sounds/card-snap.mp3',
   },
@@ -71,36 +76,36 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
   {
     id: 'WOOD_BUILD',
     name: 'Wooden Piece Placement',
-    description: 'Solid wooden double-tap when placing roads, settlements, cities, or generators.',
-    gamesUsedIn: ['Catan', 'Power Grid'],
+    description: 'Solid wooden double-tap when placing roads, settlements, cities, generators, or staging dice under the cup.',
+    gamesUsedIn: ['Catan', 'Power Grid', 'Dice Town'],
     optionalFilePath: '/sounds/wood-build.mp3',
   },
   {
     id: 'COIN_CHINK',
     name: 'Coin & Chip Clink',
-    description: 'Metallic high-pitched ring for purchases, trades, poker bets, and auction bids.',
-    gamesUsedIn: ['Dominion', 'Catan', "Texas Hold'em", 'Stockpile', 'Power Grid'],
+    description: 'Metallic high-pitched ring for purchases, trades, poker bets, auction bids, and Bank Vault dollars.',
+    gamesUsedIn: ['Dominion', 'Catan', "Texas Hold'em", 'Stockpile', 'Power Grid', 'Dice Town'],
     optionalFilePath: '/sounds/coin-chink.mp3',
   },
   {
     id: 'TABLE_KNOCK',
-    name: 'Wooden Table Knock',
-    description: 'Resonant double-knock on felt/wood for Knocking, Checking, or saying Go.',
-    gamesUsedIn: ['Kings Corners', "Texas Hold'em", 'Cribbage'],
+    name: 'Wooden Table Knock / Sheriff Gavel',
+    description: 'Resonant double-knock on felt/wood for Knocking, Checking, saying Go, or breaking a Sheriff tie.',
+    gamesUsedIn: ['Kings Corners', "Texas Hold'em", 'Cribbage', 'Dice Town'],
     optionalFilePath: '/sounds/table-knock.mp3',
   },
   {
     id: 'ROBBER_THUD',
-    name: 'Robber / Monster Thud',
-    description: 'Deep low-frequency thud when moving the Robber, playing a Knight, or moving Alvin & Dexter.',
-    gamesUsedIn: ['Catan', 'Ticket to Ride'],
+    name: 'Robber / Monster / Saloon Ambush Thud',
+    description: 'Deep low-frequency thud when moving the Robber, playing a Knight, moving Alvin & Dexter, or targeting an opponent at the Saloon.',
+    gamesUsedIn: ['Catan', 'Ticket to Ride', 'Dice Town'],
     optionalFilePath: '/sounds/robber-thud.mp3',
   },
   {
     id: 'MYSTERY_STING',
-    name: 'Detective Mystery Sting',
-    description: 'Suspenseful minor chord when making a Suggestion, Accusation, or taking a Secret Passage.',
-    gamesUsedIn: ['Clue'],
+    name: 'Detective Mystery / Badluck Demand Sting',
+    description: 'Suspenseful minor chord when making a Suggestion, Accusation, Secret Passage, or Doc Badluck demand.',
+    gamesUsedIn: ['Clue', 'Dice Town'],
     optionalFilePath: '/sounds/mystery-sting.mp3',
   },
   {
@@ -109,6 +114,34 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
     description: 'Soft marble tile step when moving through Clue hallways and rooms.',
     gamesUsedIn: ['Clue'],
     optionalFilePath: '/sounds/footstep-tap.mp3',
+  },
+  {
+    id: 'STAGECOACH_WHIP',
+    name: 'Stagecoach Whip Crack',
+    description: 'Sharp western whip snap + coin clink when keeping 0 dice and paying $1 to the Stagecoach.',
+    gamesUsedIn: ['Dice Town'],
+    optionalFilePath: '/sounds/stagecoach-whip.mp3',
+  },
+  {
+    id: 'ELIXIR_BUBBLE',
+    name: 'Doc Badluck Elixir Bubble & Pop',
+    description: 'Alchemical glass cork pop and rising tonic bubbles when choosing a Doc Badluck Elixir card.',
+    gamesUsedIn: ['Dice Town'],
+    optionalFilePath: '/sounds/elixir-bubble.mp3',
+  },
+  {
+    id: 'FINAL_ROUND_BELL',
+    name: 'Final Round Town / Railway Bell',
+    description: 'Urgent double brass bell ring when the Final Rolling Round in Dice Town or Final Round in Ticket to Ride begins.',
+    gamesUsedIn: ['Dice Town', 'Ticket to Ride'],
+    optionalFilePath: '/sounds/final-round-bell.mp3',
+  },
+  {
+    id: 'TUNNEL_RUMBLE',
+    name: 'Mountain Tunnel Reveal Rumble',
+    description: 'Deep echoing stone rumble + 3-card flip cadence when uncovering cards for a Europe Mountain Tunnel.',
+    gamesUsedIn: ['Ticket to Ride'],
+    optionalFilePath: '/sounds/tunnel-rumble.mp3',
   },
   {
     id: 'ERROR_BUZZ',
@@ -360,7 +393,64 @@ export function playFootstepTapSound(): void {
 }
 
 /**
- * 12. Invalid Move Error Buzz
+ * 12. Stagecoach Whip Crack (Keeping 0 dice in Dice Town for $1)
+ */
+export function playStagecoachWhipSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playNoiseBurst(ctx, now, 0.04, 3200, 0.2);
+  playTone(ctx, 900, now, 0.06, 'sawtooth', 0.1, 220);
+  playTone(ctx, 1950, now + 0.07, 0.12, 'sine', 0.08);
+}
+
+/**
+ * 13. Doc Badluck Elixir Bubble & Pop
+ */
+export function playElixirBubbleSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const bubbleFreqs = [340, 460, 620, 820];
+  bubbleFreqs.forEach((freq, idx) => {
+    playTone(
+      ctx,
+      freq,
+      now + idx * 0.045,
+      0.065,
+      'sine',
+      0.11,
+      freq * 1.35
+    );
+  });
+}
+
+/**
+ * 14. Final Round Town / Railway Brass Bell
+ */
+export function playFinalRoundBellSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playTone(ctx, 1174.66, now, 0.24, 'triangle', 0.14);
+  playTone(ctx, 1174.66, now + 0.16, 0.34, 'triangle', 0.15);
+}
+
+/**
+ * 15. Mountain Tunnel Reveal Rumble
+ */
+export function playTunnelRumbleSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playTone(ctx, 95, now, 0.26, 'sawtooth', 0.1, 55);
+  playNoiseBurst(ctx, now + 0.04, 0.04, 1900, 0.13);
+  playNoiseBurst(ctx, now + 0.11, 0.04, 2100, 0.13);
+  playNoiseBurst(ctx, now + 0.18, 0.04, 2300, 0.13);
+}
+
+/**
+ * 16. Invalid Move Error Buzz
  */
 export function playErrorBuzzSound(): void {
   const ctx = getAudioContext();
@@ -371,7 +461,7 @@ export function playErrorBuzzSound(): void {
 }
 
 /**
- * 13. Victory Fanfare (C5 -> E5 -> G5 -> C6)
+ * 17. Victory Fanfare (C5 -> E5 -> G5 -> C6)
  */
 export function playVictoryFanfareSound(): void {
   const ctx = getAudioContext();
@@ -425,6 +515,18 @@ export function playSoundEffect(id: SoundEffectId): void {
     case 'FOOTSTEP_TAP':
       playFootstepTapSound();
       break;
+    case 'STAGECOACH_WHIP':
+      playStagecoachWhipSound();
+      break;
+    case 'ELIXIR_BUBBLE':
+      playElixirBubbleSound();
+      break;
+    case 'FINAL_ROUND_BELL':
+      playFinalRoundBellSound();
+      break;
+    case 'TUNNEL_RUMBLE':
+      playTunnelRumbleSound();
+      break;
     case 'ERROR_BUZZ':
       playErrorBuzzSound();
       break;
@@ -462,8 +564,25 @@ export function getSoundEffectForAction(
     case 'CATAN_UPGRADE_CITY':
     case 'CATAN_PLAY_ROAD_BUILDING':
     case 'PG_BUILD_CITY':
-    case 'DT_SELECT_DICE':
       return 'WOOD_BUILD';
+
+    case 'DT_SELECT_DICE': {
+      const dtSelect = action as {
+        readonly dieIndices?: readonly number[];
+        readonly lockAllRemaining?: boolean;
+      };
+      if (
+        !dtSelect.lockAllRemaining &&
+        Array.isArray(dtSelect.dieIndices) &&
+        dtSelect.dieIndices.length === 0
+      ) {
+        return 'STAGECOACH_WHIP';
+      }
+      return 'WOOD_BUILD';
+    }
+
+    case 'DT_DOC_BADLUCK_PICK_CARD':
+      return 'ELIXIR_BUBBLE';
 
     // Coins, Purchases, Bids, Trades & Bank Vaults
     case 'BUY_CARD':

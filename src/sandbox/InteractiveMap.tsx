@@ -17,6 +17,12 @@ interface InteractiveMapProps {
   readonly stations?: Readonly<Record<string, string>>;
   readonly selectedRouteId: string | null;
   readonly highlightedCities: ReadonlySet<string>;
+  readonly hoveredTicketArc?: {
+    readonly from: string;
+    readonly to: string;
+    readonly completed?: boolean;
+  } | null;
+  readonly claimableRouteIds?: ReadonlySet<string>;
   readonly alvinCity?: string | null;
   readonly dexterCity?: string | null;
   readonly selectableMonsterCities?: ReadonlySet<string>;
@@ -109,6 +115,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   stations = {},
   selectedRouteId,
   highlightedCities,
+  hoveredTicketArc = null,
+  claimableRouteIds,
   alvinCity = null,
   dexterCity = null,
   selectableMonsterCities,
@@ -117,6 +125,31 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   onSelectCity,
 }) => {
   const [hoveredRouteId, setHoveredRouteId] = useState<string | null>(null);
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+  const [isDraggingMap, setIsDraggingMap] = useState<boolean>(false);
+  const [dragOrigin, setDragOrigin] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+
+  const handleZoomDelta = (delta: number) => {
+    setZoomScale((prev) => {
+      const next = Math.min(2.5, Math.max(1, Number((prev + delta).toFixed(2))));
+      if (next === 1) {
+        setPanOffset({ x: 0, y: 0 });
+      }
+      return next;
+    });
+  };
+
+  const handleResetZoom = () => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
 
   const activeCoordinates =
     mapId === 'EUROPE' ? EUROPE_CITY_COORDINATES : CITY_COORDINATES;
@@ -200,6 +233,32 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   return (
     <div
       className="relative w-full h-full flex items-center justify-center overflow-hidden select-none"
+      onWheel={(e) => {
+        if (e.deltaY < 0) {
+          handleZoomDelta(0.15);
+        } else if (e.deltaY > 0) {
+          handleZoomDelta(-0.15);
+        }
+      }}
+      onMouseDown={(e) => {
+        if (zoomScale > 1 && e.button === 0) {
+          setIsDraggingMap(true);
+          setDragOrigin({
+            x: e.clientX - panOffset.x,
+            y: e.clientY - panOffset.y,
+          });
+        }
+      }}
+      onMouseMove={(e) => {
+        if (isDraggingMap) {
+          setPanOffset({
+            x: e.clientX - dragOrigin.x,
+            y: e.clientY - dragOrigin.y,
+          });
+        }
+      }}
+      onMouseUp={() => setIsDraggingMap(false)}
+      onMouseLeave={() => setIsDraggingMap(false)}
       style={{
         backgroundColor: '#dcc7a1',
         backgroundImage: [
@@ -212,7 +271,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     >
       <svg
         viewBox="-42 -42 1084 684"
-        className="w-full h-full max-h-full object-contain drop-shadow-2xl"
+        style={{
+          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
+          transformOrigin: 'center center',
+          transition: isDraggingMap ? 'none' : 'transform 140ms ease-out',
+        }}
+        className={`w-full h-full max-h-full object-contain drop-shadow-2xl ${
+          zoomScale > 1
+            ? isDraggingMap
+              ? 'cursor-grabbing'
+              : 'cursor-grab'
+            : ''
+        }`}
       >
         <defs>
           {/* Warm sandy parchment sea / surround gradient */}
@@ -688,15 +758,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </g>
 
         {/* =================================================================
-            3. RENDER RAILROAD ROUTES (EDGES)
+            3. RENDER RAILROAD ROUTES (BEVELED 3D TRAIN CAR BLOCKS & TRACKS)
            ================================================================= */}
         <g>
           {geometries.map((geo) => {
-            const { route, x1, y1, x2, y2, midX, midY } = geo;
+            const { route, x1, y1, x2, y2, midX, midY, angleDeg } = geo;
             const theme = ROUTE_COLOR_THEMES[route.color];
             const isClaimed = route.ownerId !== null;
             const isSelected = route.id === selectedRouteId;
             const isHovered = route.id === hoveredRouteId;
+            const isClaimableHighlight =
+              !isClaimed && (claimableRouteIds?.has(route.id) ?? false);
             const ownerPalette = isClaimed
               ? getPlayerPalette(route.ownerId!, playerOrder, playerColors)
               : null;
@@ -716,11 +788,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               const pad = 0.06 / route.length;
               const t1 = tStart + pad;
               const t2 = tEnd - pad;
+              const segX1 = sx1 + (sx2 - sx1) * t1;
+              const segY1 = sy1 + (sy2 - sy1) * t1;
+              const segX2 = sx1 + (sx2 - sx1) * t2;
+              const segY2 = sy1 + (sy2 - sy1) * t2;
               return {
-                x1: sx1 + (sx2 - sx1) * t1,
-                y1: sy1 + (sy2 - sy1) * t1,
-                x2: sx1 + (sx2 - sx1) * t2,
-                y2: sy1 + (sy2 - sy1) * t2,
+                x1: segX1,
+                y1: segY1,
+                x2: segX2,
+                y2: segY2,
+                midX: (segX1 + segX2) / 2,
+                midY: (segY1 + segY2) / 2,
+                len: Math.max(8, Math.hypot(segX2 - segX1, segY2 - segY1)),
               };
             });
 
@@ -747,6 +826,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   strokeLinecap="round"
                 />
 
+                {/* Claimable Route Filter Glow Halo */}
+                {isClaimableHighlight && !isSelected && !isHovered && (
+                  <line
+                    x1={sx1}
+                    y1={sy1}
+                    x2={sx2}
+                    y2={sy2}
+                    stroke="#10b981"
+                    strokeWidth="13.5"
+                    strokeOpacity="0.45"
+                    strokeLinecap="round"
+                  />
+                )}
+
                 {/* Selection / Hover Halo */}
                 {(isSelected || isHovered) && (
                   <line
@@ -755,32 +848,34 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                     x2={sx2}
                     y2={sy2}
                     stroke={isSelected ? '#fbbf24' : '#38bdf8'}
-                    strokeWidth="14"
-                    strokeOpacity={isSelected ? 0.7 : 0.4}
+                    strokeWidth="14.5"
+                    strokeOpacity={isSelected ? 0.78 : 0.45}
                     strokeLinecap="round"
                   />
                 )}
 
-                {/* Underlying rail bed & wooden railroad ties */}
+                {/* Europe Mountain Tunnel Outer Spiked Collar */}
                 {route.isTunnel && (
                   <line
                     x1={sx1}
                     y1={sy1}
                     x2={sx2}
                     y2={sy2}
-                    stroke="#f59e0b"
+                    stroke="#020617"
                     strokeWidth="12.5"
-                    strokeDasharray="3 3"
-                    strokeOpacity="0.85"
+                    strokeDasharray="2.5 2.5"
+                    strokeOpacity="0.9"
                   />
                 )}
+
+                {/* Underlying rail bed & wooden railroad ties */}
                 <line
                   x1={sx1}
                   y1={sy1}
                   x2={sx2}
                   y2={sy2}
                   stroke="#090d16"
-                  strokeWidth="10"
+                  strokeWidth="9.5"
                   strokeLinecap="round"
                 />
                 <line
@@ -789,112 +884,189 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   x2={sx2}
                   y2={sy2}
                   stroke="#475569"
-                  strokeWidth="9.5"
-                  strokeDasharray="2 4"
+                  strokeWidth="9"
+                  strokeDasharray="1.8 3.6"
                   strokeOpacity="0.55"
                 />
 
-                {/* Individual Train Car Slots / Claimed Plastic Train Cars */}
+                {/* Rectangular Beveled Train Car Slots / Sculpted 3D Claimed Plastic Train Cars */}
                 {segments.map((seg, idx) => {
                   const isFerryLocoSlot =
                     !isClaimed && idx < (route.ferryLocomotives ?? 0);
-                  const segMidX = (seg.x1 + seg.x2) / 2;
-                  const segMidY = (seg.y1 + seg.y2) / 2;
+                  const w = seg.len;
+                  const h = isClaimed ? 8.4 : 7.2;
+
                   return (
-                    <g key={idx}>
-                      {/* Outer border of car slot */}
-                      <line
-                        x1={seg.x1}
-                        y1={seg.y1}
-                        x2={seg.x2}
-                        y2={seg.y2}
-                        stroke={
-                          isClaimed
-                            ? ownerPalette!.strokeHex
-                            : isFerryLocoSlot
-                            ? '#fde047'
-                            : theme.strokeHex
-                        }
-                        strokeWidth={isClaimed ? '9' : '7.5'}
-                        strokeLinecap="butt"
-                      />
-                      {/* Inner fill of car slot */}
-                      <line
-                        x1={seg.x1}
-                        y1={seg.y1}
-                        x2={seg.x2}
-                        y2={seg.y2}
-                        stroke={
+                    <g
+                      key={idx}
+                      transform={`translate(${seg.midX}, ${seg.midY}) rotate(${angleDeg})`}
+                    >
+                      {/* Tunnel spiked outline per car block */}
+                      {route.isTunnel && !isClaimed && (
+                        <rect
+                          x={-w / 2 - 1}
+                          y={-h / 2 - 1}
+                          width={w + 2}
+                          height={h + 2}
+                          rx="1.5"
+                          fill="none"
+                          stroke="#fbbf24"
+                          strokeWidth="1.2"
+                          strokeDasharray="2 1.5"
+                        />
+                      )}
+
+                      {/* Car Block Base Rectangle */}
+                      <rect
+                        x={-w / 2}
+                        y={-h / 2}
+                        width={w}
+                        height={h}
+                        rx={isClaimed ? '2.2' : '1.4'}
+                        fill={
                           isClaimed
                             ? ownerPalette!.fillHex
                             : isFerryLocoSlot
-                            ? '#a855f7'
-                            : theme.hex
+                              ? '#581c87'
+                              : theme.hex
                         }
-                        strokeWidth={isClaimed ? '6.5' : '5.2'}
-                        strokeOpacity={isClaimed ? 1 : 0.9}
-                        strokeLinecap="butt"
+                        stroke={
+                          isClaimed
+                            ? '#020617'
+                            : isFerryLocoSlot
+                              ? '#fde047'
+                              : theme.strokeHex
+                        }
+                        strokeWidth={isClaimed ? '1.3' : '1.15'}
                       />
-                      {/* Ferry Locomotive Emblem */}
+
+                      {/* Inner 3D Bevel Frame */}
+                      <rect
+                        x={-w / 2 + 1.1}
+                        y={-h / 2 + 1.1}
+                        width={Math.max(2, w - 2.2)}
+                        height={Math.max(2, h - 2.2)}
+                        rx="1"
+                        fill="none"
+                        stroke={
+                          isClaimed ? ownerPalette!.strokeHex : '#ffffff'
+                        }
+                        strokeOpacity={isClaimed ? '0.65' : '0.28'}
+                        strokeWidth="0.7"
+                      />
+
+                      {/* Ferry Locomotive Icon inside Ferry Slot */}
                       {isFerryLocoSlot && (
-                        <circle
-                          cx={segMidX}
-                          cy={segMidY}
-                          r="2.4"
-                          fill="#fde047"
-                          stroke="#020617"
-                          strokeWidth="0.8"
-                        />
+                        <g>
+                          <rect
+                            x="-3.2"
+                            y="-2"
+                            width="6.4"
+                            height="4"
+                            rx="1"
+                            fill="#fde047"
+                            stroke="#020617"
+                            strokeWidth="0.6"
+                          />
+                          <circle cx="-1.5" cy="1.8" r="0.9" fill="#020617" />
+                          <circle cx="1.5" cy="1.8" r="0.9" fill="#020617" />
+                        </g>
                       )}
-                      {/* 3D roof highlight on claimed plastic train cars */}
+
+                      {/* 3D Sculpted Plastic Train Car Roof Vents & Couplers when Claimed */}
                       {isClaimed && (
-                        <line
-                          x1={seg.x1}
-                          y1={seg.y1}
-                          x2={seg.x2}
-                          y2={seg.y2}
-                          stroke="#ffffff"
-                          strokeWidth="1.5"
-                          strokeOpacity="0.55"
-                          strokeLinecap="round"
-                        />
+                        <>
+                          <line
+                            x1={-w / 2 + 2.2}
+                            y1="-0.8"
+                            x2={w / 2 - 2.2}
+                            y2="-0.8"
+                            stroke="#ffffff"
+                            strokeWidth="1.3"
+                            strokeOpacity="0.65"
+                            strokeLinecap="round"
+                          />
+                          <circle
+                            cx="0"
+                            cy="0"
+                            r="1.3"
+                            fill="#020617"
+                            fillOpacity="0.45"
+                          />
+                        </>
                       )}
                     </g>
                   );
                 })}
 
-                {/* Route Length & Owner Badge at Midpoint */}
-                <g transform={`translate(${midX}, ${midY})`}>
-                  <circle
-                    r={isClaimed ? 8.5 : 7}
-                    fill={isClaimed ? ownerPalette!.fillHex : '#0f172a'}
-                    stroke={
-                      isSelected
-                        ? '#fbbf24'
-                        : isClaimed
-                        ? ownerPalette!.strokeHex
-                        : theme.strokeHex
-                    }
-                    strokeWidth={isSelected || isClaimed ? 2 : 1.2}
-                  />
-                  <text
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill={isClaimed ? '#020617' : '#e2e8f0'}
-                    fontSize="8.5"
-                    fontWeight="800"
-                  >
-                    {isClaimed
-                      ? (playerNames[route.ownerId!] ?? route.ownerId!)
-                          .slice(0, 2)
-                          .toUpperCase()
-                      : route.length}
-                  </text>
-                </g>
+                {/* Decluttered Midpoint Badge: Only shown on Claimed routes or when Hovered / Selected */}
+                {(isClaimed || isSelected || isHovered) && (
+                  <g transform={`translate(${midX}, ${midY})`}>
+                    <circle
+                      r={isClaimed ? 8.5 : 8}
+                      fill={isClaimed ? ownerPalette!.fillHex : '#0f172a'}
+                      stroke={
+                        isSelected
+                          ? '#fbbf24'
+                          : isClaimed
+                            ? ownerPalette!.strokeHex
+                            : '#38bdf8'
+                      }
+                      strokeWidth="2"
+                    />
+                    <text
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill={isClaimed ? '#020617' : '#fde047'}
+                      fontSize="8.5"
+                      fontWeight="900"
+                    >
+                      {isClaimed
+                        ? (playerNames[route.ownerId!] ?? route.ownerId!)
+                            .slice(0, 2)
+                            .toUpperCase()
+                        : route.length}
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
         </g>
+
+        {/* =================================================================
+            3B. DESTINATION TICKET CURVED PATH PREVIEW ARC (WHEN HOVERED)
+           ================================================================= */}
+        {hoveredTicketArc &&
+          activeCoordinates[hoveredTicketArc.from] &&
+          activeCoordinates[hoveredTicketArc.to] &&
+          (() => {
+            const c1 = activeCoordinates[hoveredTicketArc.from]!;
+            const c2 = activeCoordinates[hoveredTicketArc.to]!;
+            const mx = (c1.x + c2.x) / 2;
+            const my = (c1.y + c2.y) / 2 - 48;
+            const arcColor = hoveredTicketArc.completed ? '#34d399' : '#fbbf24';
+            return (
+              <g className="pointer-events-none">
+                <path
+                  d={`M ${c1.x},${c1.y} Q ${mx},${my} ${c2.x},${c2.y}`}
+                  fill="none"
+                  stroke="#020617"
+                  strokeWidth="6.5"
+                  strokeOpacity="0.65"
+                  strokeLinecap="round"
+                />
+                <path
+                  d={`M ${c1.x},${c1.y} Q ${mx},${my} ${c2.x},${c2.y}`}
+                  fill="none"
+                  stroke={arcColor}
+                  strokeWidth="3.5"
+                  strokeDasharray="7 5"
+                  strokeLinecap="round"
+                />
+              </g>
+            );
+          })()}
 
         {/* =================================================================
             4. RENDER CITIES (NODES), STATIONS & ALVIN / DEXTER MONSTERS
@@ -1182,6 +1354,40 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           })}
         </g>
       </svg>
+
+      {/* Floating Zoom & Pan Controls */}
+      <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5 bg-slate-900/95 border border-slate-700 rounded-xl px-2.5 py-1.5 shadow-xl text-xs">
+        <button
+          type="button"
+          onClick={() => handleZoomDelta(-0.2)}
+          disabled={zoomScale <= 1}
+          className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-black flex items-center justify-center cursor-pointer"
+          title="Zoom Out"
+        >
+          −
+        </button>
+        <span className="font-mono font-bold text-[11px] text-amber-300 px-1.5">
+          {Math.round(zoomScale * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={() => handleZoomDelta(0.2)}
+          disabled={zoomScale >= 2.5}
+          className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-black flex items-center justify-center cursor-pointer"
+          title="Zoom In"
+        >
+          +
+        </button>
+        {zoomScale > 1 && (
+          <button
+            type="button"
+            onClick={handleResetZoom}
+            className="ml-1 px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-bold text-[10px] cursor-pointer"
+          >
+            Reset
+          </button>
+        )}
+      </div>
 
       {/* Floating Route Hover Tooltip */}
       {hoveredGeometry && (

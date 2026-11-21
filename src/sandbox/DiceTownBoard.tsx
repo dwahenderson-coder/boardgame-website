@@ -67,7 +67,7 @@ const LOCATION_META: Readonly<
     icon: '💃',
     dieBadge: 'Q',
     ruleText:
-      'Target 1 opponent, view 1 random card from their hand per [Q], and steal 1.',
+      'Target 1 opponent and choose to steal 1 Property Deed OR view 1 random General Store card per [Q] and steal 1.',
     accentClass: 'border-rose-500/60 bg-rose-950/35',
   },
   SHERIFF_OFFICE: {
@@ -87,7 +87,7 @@ const LOCATION_META: Readonly<
     icon: '🏛️',
     dieBadge: 'A / Poker',
     ruleText:
-      'Claim the 1st face-up Property Deed + 1 extra face-up Deed per [A] (up to 3).',
+      'Claim the highlighted bottom face-up Property Deed + 1 extra face-up Deed per [A] (up to 3).',
     accentClass: 'border-purple-500/60 bg-purple-950/35',
   },
   DOC_BADLUCK: {
@@ -97,7 +97,7 @@ const LOCATION_META: Readonly<
     icon: '🧪',
     dieBadge: '0 Wins',
     ruleText:
-      'Any player who won ZERO Town locations this round draws 1 Doc Badluck Elixir.',
+      'Any player who won ZERO locations chooses between the 2 face-up Doc Badluck cards or drawing 1 from the deck.',
     accentClass: 'border-teal-500/60 bg-teal-950/35',
   },
 };
@@ -130,7 +130,11 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
   // Reset local selection when roll or round changes
   useEffect(() => {
     if (inCupDice.length > 0 && !self.hasSubmittedSelection) {
-      setSelectedDieIndices([inCupDice[0]!.index]);
+      if (gameState.finalRollTriggered) {
+        setSelectedDieIndices(inCupDice.map((d) => d.index));
+      } else {
+        setSelectedDieIndices([inCupDice[0]!.index]);
+      }
       setCheaterDieIdx(inCupDice[0]!.index);
     } else {
       setSelectedDieIndices([]);
@@ -142,6 +146,7 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
     gameState.roundNumber,
     gameState.turnNumber,
     gameState.phase,
+    gameState.finalRollTriggered,
     self.id,
     self.hasSubmittedSelection,
     inCupDice.length,
@@ -151,6 +156,7 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
     playerNames[id] ? `${playerNames[id]} (${id})` : id;
 
   const toggleDieIndex = (dieIdx: number) => {
+    if (gameState.finalRollTriggered) return;
     setSelectedDieIndices((prev) => {
       if (prev.includes(dieIdx)) {
         return prev.filter((i) => i !== dieIdx);
@@ -162,10 +168,16 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
     }
   };
 
-  const extraDiceCount = Math.max(0, selectedDieIndices.length - 1);
-  const effectiveExtraFee = useBruteCardId ? 0 : extraDiceCount;
-  const canAffordSelection =
-    selectedDieIndices.length >= 1 && self.dollars >= effectiveExtraFee;
+  const effectiveExtraFee = gameState.finalRollTriggered
+    ? 0
+    : useBruteCardId
+      ? 0
+      : selectedDieIndices.length === 0
+        ? 1
+        : Math.max(0, selectedDieIndices.length - 1);
+  const canAffordSelection = gameState.finalRollTriggered
+    ? true
+    : self.dollars >= effectiveExtraFee;
 
   const bruteCardInHand = self.handCards.find(
     (c) => c.effectType === 'FREE_KEEP_EXTRA_DICE'
@@ -250,6 +262,22 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
             📜 {gameState.lastActionSummary}
           </div>
         )}
+
+        {/* Final Rolling Round Alert Banner */}
+        {gameState.finalRollTriggered &&
+          (gameState.phase === 'SIMULTANEOUS_ROLL' ||
+            gameState.phase === 'SECRET_SELECTION' ||
+            gameState.phase === 'REVEAL_STEP') && (
+            <div className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-amber-500/95 border-2 border-yellow-200 text-stone-950 font-black text-xs shadow-lg flex items-center justify-between gap-2 animate-pulse">
+              <span>
+                🚨 FINAL ROLLING ROUND! A player locked all 5 dice — each other
+                player gets one final roll and keeps all remaining dice ($0 fee)!
+              </span>
+              <span className="px-2.5 py-0.5 rounded-lg bg-stone-950 text-amber-300 text-[10px] font-black uppercase">
+                Final Roll
+              </span>
+            </div>
+          )}
 
         {/* ===================================================================
             INTERACTIVE RESOLUTION INTERRUPT BANNERS (Sheriff Tie-Breaker, Store Pick, Saloon Steal, Doc Badluck)
@@ -369,7 +397,7 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
           <div className="p-4 rounded-xl bg-rose-950/80 border-2 border-rose-400 shadow-lg flex flex-col gap-2.5">
             <span className="text-sm font-black text-rose-300 uppercase tracking-wider">
               💃 Golden Saloon — {formatName(gameState.activePlayerId)} Steals a
-              Card!
+              Property Deed or General Store Card!
             </span>
             {gameState.saloonRevealedCards &&
             gameState.saloonRevealedCards.length > 0 ? (
@@ -389,48 +417,177 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
                     }
                     className="p-3 rounded-xl bg-stone-950 hover:bg-stone-900 border-2 border-rose-400/70 text-left flex flex-col justify-between gap-1.5 cursor-pointer"
                   >
-                    <span className="font-black text-xs text-white">
-                      {card.displayName}
-                    </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-black text-xs text-white">
+                        {card.displayName}
+                      </span>
+                      {card.vp > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-amber-400 text-stone-950 text-[10px] font-black">
+                          +{card.vp} VP
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-stone-300">
                       {card.description}
                     </p>
                     <span className="text-[10px] font-black text-rose-300 uppercase">
-                      → Click to Steal This Card
+                      → Click to Steal This{' '}
+                      {card.deck === 'property_deed'
+                        ? 'Property Deed'
+                        : 'General Store Card'}
                     </span>
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-2">
                 <span className="text-xs text-rose-200">
-                  Select an opponent with General Store cards to view and steal
-                  from:
+                  Choose an opponent and whether to steal one of their{' '}
+                  <strong>General Store Hand Cards</strong> or{' '}
+                  <strong>Property Deeds</strong>:
                 </span>
-                {gameState.playerOrder
-                  .filter((pid) => pid !== gameState.activePlayerId)
-                  .map((oppId) => (
-                    <button
-                      key={oppId}
-                      type="button"
-                      onClick={() =>
-                        sendAction(
-                          {
-                            type: 'DT_SALOON_SELECT_OPPONENT',
-                            targetPlayerId: oppId,
-                          },
-                          gameState.activePlayerId
-                        )
-                      }
-                      className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-black text-xs cursor-pointer"
-                    >
-                      Target {formatName(oppId)}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  {gameState.playerOrder
+                    .filter((pid) => pid !== gameState.activePlayerId)
+                    .map((oppId) => {
+                      const isOppSelf = oppId === self.id;
+                      const oppView = gameState.opponents[oppId];
+                      const handCount = isOppSelf
+                        ? self.handCards.length
+                        : oppView?.handCardCount ?? 0;
+                      const unprotectedDeedsCount = isOppSelf
+                        ? self.propertyDeeds.filter(
+                            (d) => !self.protectedDeedIds.includes(d.id)
+                          ).length
+                        : (oppView?.propertyDeeds ?? []).filter(
+                            (d) =>
+                              !(oppView?.protectedDeedIds ?? []).includes(d.id)
+                          ).length;
+
+                      return (
+                        <React.Fragment key={oppId}>
+                          {handCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                sendAction(
+                                  {
+                                    type: 'DT_SALOON_SELECT_OPPONENT',
+                                    targetPlayerId: oppId,
+                                    stealTargetType: 'general_store',
+                                  },
+                                  gameState.activePlayerId
+                                )
+                              }
+                              className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-black text-xs cursor-pointer"
+                            >
+                              🃏 Steal General Store Card from{' '}
+                              {formatName(oppId)} ({handCount})
+                            </button>
+                          )}
+                          {unprotectedDeedsCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                sendAction(
+                                  {
+                                    type: 'DT_SALOON_SELECT_OPPONENT',
+                                    targetPlayerId: oppId,
+                                    stealTargetType: 'property_deed',
+                                  },
+                                  gameState.activePlayerId
+                                )
+                              }
+                              className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs cursor-pointer"
+                            >
+                              📜 Steal Property Deed from {formatName(oppId)} (
+                              {unprotectedDeedsCount})
+                            </button>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                </div>
               </div>
             )}
           </div>
         )}
+
+        {gameState.subState === 'DOC_BADLUCK_PICK' &&
+          gameState.docBadluckPickPending && (
+            <div className="p-4 rounded-xl bg-teal-950/85 border-2 border-teal-400 shadow-lg flex flex-col gap-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="text-sm font-black text-teal-300 uppercase tracking-wider">
+                  🧪 Doc Badluck&apos;s Wagon —{' '}
+                  {formatName(gameState.docBadluckPickPending.visitorPlayerId)}{' '}
+                  Won 0 Locations!
+                </span>
+                <span className="text-xs font-bold text-teal-200">
+                  Select 1 of the 2 Face-Up Cards OR Draw 1 Blind from the Deck (
+                  {gameState.town.docBadluckDrawCount} left)
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {gameState.town.faceUpDocBadluck.map((card, idx) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() =>
+                      sendAction(
+                        {
+                          type: 'DT_DOC_BADLUCK_PICK_CARD',
+                          source: 'FACE_UP',
+                          cardId: card.id,
+                        },
+                        gameState.docBadluckPickPending!.visitorPlayerId
+                      )
+                    }
+                    className="p-3 rounded-xl bg-stone-950 hover:bg-stone-900 border-2 border-teal-400/80 text-left flex flex-col justify-between gap-1.5 cursor-pointer transition"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-black text-xs text-white">
+                        🧪 Face-Up #{idx + 1}: {card.displayName}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-300">
+                      {card.description}
+                    </p>
+                    <span className="text-[10px] font-black text-teal-300 uppercase">
+                      → Take This Face-Up Elixir
+                    </span>
+                  </button>
+                ))}
+
+                {gameState.town.docBadluckDrawCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      sendAction(
+                        {
+                          type: 'DT_DOC_BADLUCK_PICK_CARD',
+                          source: 'DECK',
+                        },
+                        gameState.docBadluckPickPending!.visitorPlayerId
+                      )
+                    }
+                    className="p-3 rounded-xl bg-teal-900/40 hover:bg-teal-900/70 border-2 border-dashed border-teal-300 text-left flex flex-col justify-between gap-1.5 cursor-pointer transition"
+                  >
+                    <span className="font-black text-xs text-teal-200">
+                      🎴 Draw 1 Blind from Doc Badluck Deck
+                    </span>
+                    <p className="text-[11px] text-stone-300">
+                      Skip the 2 face-up elixirs and draw the top mystery card
+                      from the Doc Badluck deck ({gameState.town.docBadluckDrawCount}{' '}
+                      remaining).
+                    </p>
+                    <span className="text-[10px] font-black text-teal-300 uppercase">
+                      → Draw Blind Card from Deck
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
         {gameState.subState === 'DOC_BADLUCK_TARGET' &&
           gameState.docBadluckPending && (
@@ -549,7 +706,7 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-stone-300">Target Pool:</span>
                       <span className="font-mono font-bold text-rose-300">
-                        Opponents&apos; Hand Cards
+                        Deeds or Store Cards
                       </span>
                     </div>
                   )}
@@ -570,35 +727,93 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-stone-300">
-                          Face-Up Deeds ({gameState.town.propertyDrawCount} in
+                          3 Face-Up Deeds ({gameState.town.propertyDrawCount} in
                           deck):
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex flex-col gap-1.5">
                         {gameState.town.faceUpProperties.length === 0 ? (
                           <span className="text-[11px] text-stone-400 italic">
                             All Property Deeds claimed!
                           </span>
                         ) : (
-                          gameState.town.faceUpProperties.map((deed, idx) => (
-                            <span
-                              key={deed.id}
-                              className="px-2 py-0.5 rounded bg-purple-950 border border-purple-400/60 text-purple-200 font-black text-[11px]"
-                            >
-                              #{idx + 1}: +{deed.vp} VP
-                            </span>
-                          ))
+                          [...gameState.town.faceUpProperties]
+                            .map((deed, idx) => ({ deed, idx }))
+                            .reverse()
+                            .map(({ deed, idx }) => {
+                              const isBottomDefault = idx === 0;
+                              return (
+                                <div
+                                  key={deed.id}
+                                  className={`px-2.5 py-1.5 rounded-lg border flex items-center justify-between text-[11px] transition ${
+                                    isBottomDefault
+                                      ? 'bg-gradient-to-r from-amber-950/90 via-purple-950 to-amber-950/90 border-2 border-amber-400 text-amber-200 shadow-md ring-1 ring-amber-400/50'
+                                      : 'bg-purple-950/70 border-purple-500/40 text-purple-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-black">
+                                      {isBottomDefault
+                                        ? '★ Bottom Deed #1'
+                                        : idx === 1
+                                          ? 'Middle Deed #2 (+1 Ace)'
+                                          : 'Top Deed #3 (+2 Aces)'}
+                                    </span>
+                                    {isBottomDefault && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-400 text-stone-950 text-[9px] font-black uppercase">
+                                        Drawn by Default
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="font-mono font-black text-xs text-white">
+                                    +{deed.vp} VP
+                                  </span>
+                                </div>
+                              );
+                            })
                         )}
                       </div>
                     </div>
                   )}
 
                   {loc === 'DOC_BADLUCK' && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-stone-300">Elixir Deck:</span>
-                      <span className="font-mono font-bold text-teal-300">
-                        🧪 {gameState.town.docBadluckDrawCount} Elixirs
-                      </span>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-stone-300">
+                          2 Face-Up + Deck ({gameState.town.docBadluckDrawCount}
+                          ):
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        {gameState.town.faceUpDocBadluck.length === 0 ? (
+                          <span className="text-[11px] text-stone-400 italic">
+                            No face-up Doc Badluck cards left.
+                          </span>
+                        ) : (
+                          gameState.town.faceUpDocBadluck.map((card, idx) => (
+                            <div
+                              key={card.id}
+                              className="px-2 py-1 rounded-lg bg-teal-950/80 border border-teal-400/60 flex flex-col gap-0.5"
+                              title={card.description}
+                            >
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="font-black text-teal-200">
+                                  🧪 Face-Up #{idx + 1}: {card.displayName}
+                                </span>
+                              </div>
+                              <span className="text-[9px] text-stone-300 leading-tight">
+                                {card.description}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                        <div className="px-2 py-1 rounded-lg bg-stone-950/80 border border-dashed border-teal-500/50 flex items-center justify-between text-[10px] text-teal-300">
+                          <span className="font-bold">🎴 Or Draw Blind:</span>
+                          <span className="font-mono font-black">
+                            {gameState.town.docBadluckDrawCount} in Deck
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -653,7 +868,9 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
             {gameState.phase === 'SECRET_SELECTION'
               ? self.hasSubmittedSelection
                 ? '✓ You have staged your dice for this roll. Waiting for other players (or click Reveal when all are ready).'
-                : 'Click at least 1 rolled die below to stage under your cup. The 1st die is FREE; each additional die kept costs $1.'
+                : gameState.finalRollTriggered
+                  ? '🚨 FINAL ROLLING ROUND: An opponent locked all 5 dice! You must lock ALL of your remaining rolled dice below ($0 fee).'
+                  : 'Click dice below to keep: 1st die is FREE, each extra die costs $1, OR keep 0 dice by paying $1 to the Stagecoach.'
               : gameState.phase === 'SIMULTANEOUS_ROLL'
                 ? 'Click "Shake Dice Cups & Roll Remaining Dice" above to roll your in-cup dice!'
                 : 'Your 5 Poker Dice are shown below.'}
@@ -773,53 +990,100 @@ export const DiceTownBoard: React.FC<DiceTownBoardProps> = ({
           !self.hasSubmittedSelection &&
           inCupDice.length > 0 && (
             <div className="flex flex-col gap-2 shrink-0">
-              <button
-                type="button"
-                disabled={!canAffordSelection}
-                onClick={() =>
-                  sendAction({
-                    type: 'DT_SELECT_DICE',
-                    dieIndices: selectedDieIndices,
-                    ...(useBruteCardId
-                      ? { playBruteCardId: useBruteCardId }
-                      : {}),
-                    ...(useCheaterCardId &&
-                    cheaterDieIdx !== null &&
-                    selectedDieIndices.includes(cheaterDieIdx)
-                      ? {
-                          cheaterCardId: useCheaterCardId,
-                          cheaterDieIndex: cheaterDieIdx,
-                          cheaterTargetFace: cheaterFace,
-                        }
-                      : {}),
-                  })
-                }
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-black text-xs shadow-lg cursor-pointer disabled:cursor-not-allowed"
-              >
-                🥤 Stage {selectedDieIndices.length} Selected Die/Dice (Cost: $
-                {effectiveExtraFee})
-              </button>
-
-              {inCupDice.length > 1 &&
-                self.dollars >= (useBruteCardId ? 0 : inCupDice.length - 1) && (
+              {gameState.finalRollTriggered ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    sendAction({
+                      type: 'DT_SELECT_DICE',
+                      dieIndices: inCupDice.map((d) => d.index),
+                      lockAllRemaining: true,
+                      ...(useCheaterCardId && cheaterDieIdx !== null
+                        ? {
+                            cheaterCardId: useCheaterCardId,
+                            cheaterDieIndex: cheaterDieIdx,
+                            cheaterTargetFace: cheaterFace,
+                          }
+                        : {}),
+                    })
+                  }
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs shadow-lg cursor-pointer"
+                >
+                  🚨 Final Roll: Keep All {inCupDice.length} Remaining Dice ($0)
+                </button>
+              ) : (
+                <>
                   <button
                     type="button"
+                    disabled={!canAffordSelection}
                     onClick={() =>
                       sendAction({
                         type: 'DT_SELECT_DICE',
-                        dieIndices: [],
-                        lockAllRemaining: true,
+                        dieIndices: selectedDieIndices,
                         ...(useBruteCardId
                           ? { playBruteCardId: useBruteCardId }
                           : {}),
+                        ...(useCheaterCardId &&
+                        cheaterDieIdx !== null &&
+                        selectedDieIndices.includes(cheaterDieIdx)
+                          ? {
+                              cheaterCardId: useCheaterCardId,
+                              cheaterDieIndex: cheaterDieIdx,
+                              cheaterTargetFace: cheaterFace,
+                            }
+                          : {}),
                       })
                     }
-                    className="px-4 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 border border-amber-500/40 text-amber-200 font-bold text-[11px] cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-black text-xs shadow-lg cursor-pointer disabled:cursor-not-allowed"
                   >
-                    🔒 Lock All {inCupDice.length} Remaining ($
-                    {useBruteCardId ? 0 : inCupDice.length - 1})
+                    {selectedDieIndices.length === 0
+                      ? `🐎 Keep 0 Dice — Pay $${effectiveExtraFee} to Stagecoach`
+                      : `🥤 Stage ${selectedDieIndices.length} Selected Die/Dice (Cost: $${effectiveExtraFee})`}
                   </button>
-                )}
+
+                  {selectedDieIndices.length > 0 &&
+                    self.dollars >= (useBruteCardId ? 0 : 1) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          sendAction({
+                            type: 'DT_SELECT_DICE',
+                            dieIndices: [],
+                            ...(useBruteCardId
+                              ? { playBruteCardId: useBruteCardId }
+                              : {}),
+                          })
+                        }
+                        className="px-4 py-1.5 rounded-xl bg-stone-950 hover:bg-stone-800 border border-orange-400/50 text-orange-300 font-bold text-[11px] cursor-pointer"
+                      >
+                        🐎 Keep 0 Dice Instead (Pay $
+                        {useBruteCardId ? 0 : 1} to Stagecoach)
+                      </button>
+                    )}
+
+                  {inCupDice.length > 1 &&
+                    self.dollars >=
+                      (useBruteCardId ? 0 : inCupDice.length - 1) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          sendAction({
+                            type: 'DT_SELECT_DICE',
+                            dieIndices: [],
+                            lockAllRemaining: true,
+                            ...(useBruteCardId
+                              ? { playBruteCardId: useBruteCardId }
+                              : {}),
+                          })
+                        }
+                        className="px-4 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 border border-amber-500/40 text-amber-200 font-bold text-[11px] cursor-pointer"
+                      >
+                        🔒 Lock All {inCupDice.length} Remaining ($
+                        {useBruteCardId ? 0 : inCupDice.length - 1})
+                      </button>
+                    )}
+                </>
+              )}
             </div>
           )}
       </div>

@@ -1278,6 +1278,7 @@ export function applyAction(
       }
 
       let tunnelSummaryNote = '';
+      let tunnelRevealSummary: GameState['lastTunnelReveal'] = null;
       if (route.isTunnel) {
         const tunnelCards = trainDeck.draw(3, true);
         trainDeck.discard(tunnelCards);
@@ -1308,6 +1309,16 @@ export function applyAction(
               },
               faceUpCards: nextFaceUpAfterFail,
               trainDeck: trainDeck.toState(),
+              lastTunnelReveal: {
+                playerId,
+                routeId: route.id,
+                from: route.from,
+                to: route.to,
+                claimColor,
+                revealedCards: tunnelCards,
+                extraRequired,
+                succeeded: false,
+              },
               lastActionSummary: `${playerId} attempted tunnel ${route.from} ↔ ${route.to}, flipped [${tunnelCards.join(', ')}] (+${extraRequired} extra card(s) required), and could not pay the tunnel tax!`,
             };
             return advanceTurn(failedState);
@@ -1334,6 +1345,17 @@ export function applyAction(
             tunnelCards.length > 0 ? tunnelCards.join(', ') : 'none'
           } -> +0 extra]`;
         }
+
+        tunnelRevealSummary = {
+          playerId,
+          routeId: route.id,
+          from: route.from,
+          to: route.to,
+          claimColor,
+          revealedCards: tunnelCards,
+          extraRequired,
+          succeeded: true,
+        };
       }
 
       trainDeck.discard(discardedCards);
@@ -1361,6 +1383,7 @@ export function applyAction(
         routes: updatedRoutes,
         faceUpCards: nextFaceUp,
         trainDeck: trainDeck.toState(),
+        lastTunnelReveal: tunnelRevealSummary,
         lastActionSummary: `${playerId} claimed route ${route.from} ↔ ${route.to} (${route.length} cars, +${routePoints} pts)${tunnelSummaryNote}.`,
       };
 
@@ -1580,6 +1603,9 @@ export function getPlayerPerspective(
     turnsRemainingInFinalRound: state.turnsRemainingInFinalRound,
     turnNumber: state.turnNumber,
     lastActionSummary: state.lastActionSummary,
+    ...(state.lastTunnelReveal !== undefined
+      ? { lastTunnelReveal: state.lastTunnelReveal }
+      : {}),
     ...(state.mapId !== undefined ? { mapId: state.mapId } : {}),
     ...(state.stations !== undefined
       ? { stations: { ...state.stations } }
