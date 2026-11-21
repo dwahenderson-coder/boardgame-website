@@ -14,7 +14,10 @@ import { RoomManager } from '../src/server/rooms.js';
 import {
   BOARD_GAMES_CATALOG,
   CARD_GAMES_CATALOG,
+  GAME_CATALOG,
   GAME_CATALOG_BY_ID,
+  PLAYTEST_GAMES_CATALOG,
+  POLISHED_GAMES_CATALOG,
 } from '../src/registry/catalog.js';
 import {
   getEffectivePlayerBounds,
@@ -1436,6 +1439,13 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'cribbage',
         'kings_corners',
       ]);
+
+      // All 11 games are currently marked as 'playtesting'
+      expect(GAME_CATALOG.every((g) => g.releaseStage === 'playtesting')).toBe(
+        true
+      );
+      expect(PLAYTEST_GAMES_CATALOG).toHaveLength(11);
+      expect(POLISHED_GAMES_CATALOG).toHaveLength(0);
 
       // Catan base bounds (3-4 players) vs 5-6 Player Extension override (3-6 players)
       const catanDef = GAME_CATALOG_BY_ID.catan;

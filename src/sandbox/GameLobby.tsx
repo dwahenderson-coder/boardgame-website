@@ -66,6 +66,9 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   const [localCategoryTab, setLocalCategoryTab] = useState<GameCategorySlug>(
     category ?? 'board'
   );
+  const [stageFilter, setStageFilter] = useState<
+    'ALL' | 'POLISHED' | 'PLAYTEST'
+  >('ALL');
 
   const isHost = Boolean(playerId && playerId === hostPlayerId);
   const activeCategory: GameCategorySlug = category ?? localCategoryTab;
@@ -208,6 +211,117 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   const gamesForActiveCategory =
     activeCategory === 'board' ? BOARD_GAMES_CATALOG : CARD_GAMES_CATALOG;
 
+  const polishedGamesInCategory = useMemo(
+    () =>
+      gamesForActiveCategory.filter((g) => g.releaseStage === 'polished'),
+    [gamesForActiveCategory]
+  );
+
+  const playtestGamesInCategory = useMemo(
+    () =>
+      gamesForActiveCategory.filter((g) => g.releaseStage !== 'polished'),
+    [gamesForActiveCategory]
+  );
+
+  const renderGameCard = (game: GameDefinition) => {
+    const isHighlighted = selectedGameId === game.id;
+    const isPlaytest = game.releaseStage !== 'polished';
+
+    return (
+      <div
+        key={game.id}
+        onClick={() => {
+          if (isHost) {
+            onSelectGame(game.id);
+          }
+        }}
+        className={`p-4 rounded-2xl border-2 transition flex flex-col justify-between ${
+          isHighlighted
+            ? 'bg-slate-950/90 border-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+            : 'bg-slate-950/70 border-slate-800'
+        } ${
+          isHost
+            ? 'cursor-pointer hover:border-emerald-400 hover:bg-slate-950'
+            : 'cursor-default'
+        }`}
+      >
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl">{game.icon}</span>
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="text-base font-black text-slate-100">
+                    {game.name}
+                  </h3>
+                  {isPlaytest ? (
+                    <span className="px-2 py-0.2 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-black text-[9px] uppercase tracking-wider">
+                      🧪 Playtest
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.2 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-black text-[9px] uppercase tracking-wider">
+                      ✨ Polished
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 font-medium">
+                  {game.subtitle}
+                </div>
+              </div>
+            </div>
+            {isHost ? (
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] uppercase shrink-0">
+                Configure →
+              </span>
+            ) : (
+              isHighlighted && (
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px]">
+                  Host Viewing
+                </span>
+              )
+            )}
+          </div>
+
+          <p className="mt-2.5 text-slate-300 text-[11px] leading-relaxed">
+            {game.description}
+          </p>
+        </div>
+
+        <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-semibold text-[10px]">
+              👥 {game.minPlayers}–{game.maxPlayers} Players
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-semibold text-[10px]">
+              ⏱ ~{game.estimatedMinutes}m
+            </span>
+            {game.expansions.length > 0 && (
+              <span className="px-2 py-0.5 rounded bg-purple-500/15 border border-purple-500/40 text-purple-300 font-semibold text-[10px]">
+                +{game.expansions.length} Expansion
+                {game.expansions.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+
+          {/* Available player color swatches preview */}
+          <div className="flex items-center gap-1">
+            {game.availableColors.map((c) => (
+              <span
+                key={c.id}
+                title={c.name}
+                className="w-3.5 h-3.5 rounded-full border"
+                style={{
+                  backgroundColor: c.hex,
+                  borderColor: c.strokeHex,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-6 text-xs my-auto">
       {/* ===================================================================
@@ -348,101 +462,93 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               </button>
             </div>
 
-            <span className="text-[11px] text-slate-400">
-              {isHost
-                ? '👑 Host Controls: Click any game card below to configure rules & colors'
-                : `🔒 Guest View: Waiting for Host (${hostPlayerName}) to select a game`}
-            </span>
+            {/* Release Stage Filter Pills: All vs Polished vs Playtest */}
+            <div className="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setStageFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition ${
+                  stageFilter === 'ALL'
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All Stages ({gamesForActiveCategory.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStageFilter('POLISHED')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition ${
+                  stageFilter === 'POLISHED'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ✨ Polished ({polishedGamesInCategory.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStageFilter('PLAYTEST')}
+                className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition ${
+                  stageFilter === 'PLAYTEST'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🧪 Playtest ({playtestGamesInCategory.length})
+              </button>
+            </div>
           </div>
 
-          {/* Responsive Game Card Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {gamesForActiveCategory.map((game) => {
-              const isHighlighted = selectedGameId === game.id;
-              return (
-                <div
-                  key={game.id}
-                  onClick={() => {
-                    if (isHost) {
-                      onSelectGame(game.id);
-                    }
-                  }}
-                  className={`p-4 rounded-2xl border-2 transition flex flex-col justify-between ${
-                    isHighlighted
-                      ? 'bg-slate-950/90 border-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
-                      : 'bg-slate-950/70 border-slate-800'
-                  } ${
-                    isHost
-                      ? 'cursor-pointer hover:border-emerald-400 hover:bg-slate-950'
-                      : 'cursor-default'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-2xl">{game.icon}</span>
-                        <div>
-                          <h3 className="text-base font-black text-slate-100">
-                            {game.name}
-                          </h3>
-                          <div className="text-[11px] text-slate-400 font-medium">
-                            {game.subtitle}
-                          </div>
-                        </div>
-                      </div>
-                      {isHost ? (
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] uppercase shrink-0">
-                          Configure →
-                        </span>
-                      ) : (
-                        isHighlighted && (
-                          <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px]">
-                            Host Viewing
-                          </span>
-                        )
-                      )}
-                    </div>
-
-                    <p className="mt-2.5 text-slate-300 text-[11px] leading-relaxed">
-                      {game.description}
-                    </p>
-                  </div>
-
-                  <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-semibold text-[10px]">
-                        👥 {game.minPlayers}–{game.maxPlayers} Players
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-semibold text-[10px]">
-                        ⏱ ~{game.estimatedMinutes}m
-                      </span>
-                      {game.expansions.length > 0 && (
-                        <span className="px-2 py-0.5 rounded bg-purple-500/15 border border-purple-500/40 text-purple-300 font-semibold text-[10px]">
-                          +{game.expansions.length} Expansion
-                          {game.expansions.length === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Available player color swatches preview */}
-                    <div className="flex items-center gap-1">
-                      {game.availableColors.map((c) => (
-                        <span
-                          key={c.id}
-                          title={c.name}
-                          className="w-3.5 h-3.5 rounded-full border"
-                          style={{
-                            backgroundColor: c.hex,
-                            borderColor: c.strokeHex,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
+          {/* 1A. Polished & Released Games Section */}
+          {(stageFilter === 'ALL' || stageFilter === 'POLISHED') && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
+                  ✨ Polished & Released Games ({polishedGamesInCategory.length})
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  Production Ready
+                </span>
+              </div>
+              {polishedGamesInCategory.length === 0 ? (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-slate-400 text-center text-[11px]">
+                  All titles in this category are currently assigned to{' '}
+                  <strong className="text-cyan-300">
+                    🧪 Playtesting & Under Development
+                  </strong>{' '}
+                  below.
                 </div>
-              );
-            })}
-          </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {polishedGamesInCategory.map((game) => renderGameCard(game))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 1B. Playtesting & Under Development Section */}
+          {(stageFilter === 'ALL' || stageFilter === 'PLAYTEST') && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between border-b border-cyan-500/30 pb-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-cyan-300">
+                  🧪 Under Development & Playtesting ({playtestGamesInCategory.length})
+                </span>
+                <span className="text-[10px] text-cyan-200/80 font-semibold">
+                  Active Playtest Builds
+                </span>
+              </div>
+              {playtestGamesInCategory.length === 0 ? (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-slate-400 text-center text-[11px]">
+                  No games are currently in Playtesting for this category.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {playtestGamesInCategory.map((game) => renderGameCard(game))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Connected Players Preview Strip in Step 1 */}
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between flex-wrap gap-2">
@@ -483,6 +589,15 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                   <h3 className="text-lg font-black text-slate-100">
                     {stagedGame.name}
                   </h3>
+                  {stagedGame.releaseStage !== 'polished' ? (
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-black text-[10px] uppercase">
+                      🧪 Playtest Build
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-black text-[10px] uppercase">
+                      ✨ Polished
+                    </span>
+                  )}
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] uppercase">
                     {stagedGame.category === 'board'
                       ? '🎲 Board Game'

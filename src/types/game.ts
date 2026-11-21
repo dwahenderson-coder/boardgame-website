@@ -1,5 +1,7 @@
 export type GameCategorySlug = 'board' | 'card';
 
+export type GameReleaseStage = 'polished' | 'playtesting' | 'in_development';
+
 export type GameId =
   | 'ttr'
   | 'catan'
@@ -48,6 +50,7 @@ export interface GameSetupOptions {
 export interface GameDefinition {
   readonly id: GameId;
   readonly category: GameCategorySlug;
+  readonly releaseStage: GameReleaseStage;
   readonly icon: string;
   readonly name: string;
   readonly subtitle: string;

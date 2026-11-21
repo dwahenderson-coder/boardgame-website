@@ -1640,6 +1640,11 @@ export const SandboxApp: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0">
+              {GameRegistry[activeGameId].releaseStage !== 'polished' && (
+                <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-sans font-black text-[10px] uppercase tracking-wider">
+                  🧪 Playtest Build
+                </span>
+              )}
               {runnerMode === 'MULTIPLAYER' &&
                 mp.selectedExpansions.length > 0 && (
                   <span className="px-2 py-0.5 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 font-sans font-bold text-[10px]">
@@ -2831,11 +2836,20 @@ export const SandboxApp: React.FC = () => {
                       />
                     </div>
 
-                    {/* Categorized Game Selection on Entry View (Board Games vs Card Games) */}
+                    {/* Categorized Game Selection on Entry View (Board Games vs Card Games — Playtest Stage) */}
                     <div className="space-y-3">
+                      <div className="flex items-center justify-between bg-cyan-950/40 border border-cyan-500/40 rounded-xl px-3 py-2">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-cyan-300">
+                          🧪 Playtesting & Under Development Catalog
+                        </span>
+                        <span className="text-[10px] font-bold text-cyan-200/80">
+                          {GAME_METADATA_LIST.length} Active Playtest Titles
+                        </span>
+                      </div>
+
                       <div>
                         <label className="block text-emerald-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
-                          🎲 Board Games
+                          🎲 Board Games (Playtest)
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           {BOARD_GAME_METADATA_LIST.map((game) => {
@@ -2852,15 +2866,22 @@ export const SandboxApp: React.FC = () => {
                                 }`}
                               >
                                 <div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-black text-sm text-slate-100">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-black text-sm text-slate-100 truncate">
                                       {game.icon} {game.title}
                                     </span>
-                                    {isSelected && (
-                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
-                                        Selected
-                                      </span>
-                                    )}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {game.releaseStage !== 'polished' && (
+                                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 text-[9px] font-black uppercase">
+                                          🧪 Playtest
+                                        </span>
+                                      )}
+                                      {isSelected && (
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                                          Selected
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="text-[11px] text-amber-300 font-semibold mt-1">
                                     {game.minPlayers}–{game.maxPlayers} Players
@@ -2878,7 +2899,7 @@ export const SandboxApp: React.FC = () => {
 
                       <div>
                         <label className="block text-amber-300 font-bold uppercase tracking-wider text-[11px] mb-1.5">
-                          🃏 Card Games
+                          🃏 Card Games (Playtest)
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           {CARD_GAME_METADATA_LIST.map((game) => {
@@ -2895,15 +2916,22 @@ export const SandboxApp: React.FC = () => {
                                 }`}
                               >
                                 <div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-black text-sm text-slate-100">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-black text-sm text-slate-100 truncate">
                                       {game.icon} {game.title}
                                     </span>
-                                    {isSelected && (
-                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
-                                        Selected
-                                      </span>
-                                    )}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {game.releaseStage !== 'polished' && (
+                                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 text-[9px] font-black uppercase">
+                                          🧪 Playtest
+                                        </span>
+                                      )}
+                                      {isSelected && (
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                                          Selected
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="text-[11px] text-amber-300 font-semibold mt-1">
                                     {game.minPlayers}–{game.maxPlayers} Players

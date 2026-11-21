@@ -6,6 +6,7 @@ import {
   GameColorDefinition,
   GameExpansion,
   GameId,
+  GameReleaseStage,
   GameSetupOptions,
 } from '../types/game.js';
 import {
@@ -121,7 +122,13 @@ import {
   ValidationResult,
 } from './ticket-to-ride/index.js';
 
-export type { GameColorDefinition, GameExpansion, GameId, GameSetupOptions };
+export type {
+  GameColorDefinition,
+  GameExpansion,
+  GameId,
+  GameReleaseStage,
+  GameSetupOptions,
+};
 
 export type GameCategory = 'BOARD' | 'CARD';
 
@@ -167,6 +174,7 @@ export type AnyGameAction =
 export interface GameMetadata {
   readonly id: GameId;
   readonly category: GameCategory;
+  readonly releaseStage: GameReleaseStage;
   readonly icon: string;
   readonly title: string;
   readonly name: string;
@@ -213,6 +221,7 @@ export const GAME_METADATA_LIST: readonly GameMetadata[] = GAME_CATALOG.map(
   (def) => ({
     id: def.id,
     category: def.category === 'board' ? 'BOARD' : 'CARD',
+    releaseStage: def.releaseStage,
     icon: def.icon,
     title: def.name,
     name: def.name,
@@ -235,6 +244,12 @@ export const BOARD_GAME_METADATA_LIST: readonly GameMetadata[] =
 export const CARD_GAME_METADATA_LIST: readonly GameMetadata[] =
   GAME_METADATA_LIST.filter((g) => g.category === 'CARD');
 
+export const POLISHED_GAME_METADATA_LIST: readonly GameMetadata[] =
+  GAME_METADATA_LIST.filter((g) => g.releaseStage === 'polished');
+
+export const PLAYTEST_GAME_METADATA_LIST: readonly GameMetadata[] =
+  GAME_METADATA_LIST.filter((g) => g.releaseStage !== 'polished');
+
 function findMetadata(id: GameId): GameMetadata {
   const found = GAME_METADATA_LIST.find((g) => g.id === id);
   if (!found) {
@@ -242,6 +257,7 @@ function findMetadata(id: GameId): GameMetadata {
     return {
       id: def.id,
       category: def.category === 'board' ? 'BOARD' : 'CARD',
+      releaseStage: def.releaseStage,
       icon: def.icon,
       title: def.name,
       name: def.name,

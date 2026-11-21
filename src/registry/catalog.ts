@@ -68,6 +68,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'ttr',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '🚂',
     name: 'Ticket to Ride',
     subtitle: 'Cross-Country Rail Adventure',
@@ -111,6 +112,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'catan',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '🏝️',
     name: 'Catan',
     subtitle: 'Settlers of the Hex Island',
@@ -155,6 +157,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'stockpile',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '📈',
     name: 'Stockpile',
     subtitle: 'Insider Trading & Market Manipulation',
@@ -184,6 +187,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'power_grid',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '⚡',
     name: 'Power Grid',
     subtitle: 'Industrial Power Plant Auctions & Grid Expansion',
@@ -220,6 +224,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'dominion',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '🏰',
     name: 'Dominion',
     subtitle: 'Classic Deck-Building Kingdom Engine',
@@ -260,6 +265,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'clue',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '🔎',
     name: 'Clue',
     subtitle: 'Classic Mansion Murder Mystery Deduction',
@@ -313,6 +319,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'dice_town',
     category: 'board',
+    releaseStage: 'playtesting',
     icon: '🤠',
     name: 'Dice Town',
     subtitle: 'Wild West Poker Dice & Town Control',
@@ -339,6 +346,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'holdem',
     category: 'card',
+    releaseStage: 'playtesting',
     icon: '🃏',
     name: "Texas Hold'em",
     subtitle: 'No-Limit Casino Poker',
@@ -369,6 +377,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'euchre',
     category: 'card',
+    releaseStage: 'playtesting',
     icon: '♠️',
     name: 'Euchre',
     subtitle: 'Classic 24-Card Bower Trick-Taking',
@@ -403,6 +412,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'cribbage',
     category: 'card',
+    releaseStage: 'playtesting',
     icon: '🪵',
     name: 'Cribbage',
     subtitle: '121-Point Pegging & Hand Counting',
@@ -431,6 +441,7 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
   {
     id: 'kings_corners',
     category: 'card',
+    releaseStage: 'playtesting',
     icon: '👑',
     name: 'Kings Corners',
     subtitle: '4-Card Memory, Knocking & Quarters Pot',
@@ -471,6 +482,12 @@ export const BOARD_GAMES_CATALOG: readonly GameDefinition[] =
 
 export const CARD_GAMES_CATALOG: readonly GameDefinition[] =
   GAME_CATALOG.filter((g) => g.category === 'card');
+
+export const POLISHED_GAMES_CATALOG: readonly GameDefinition[] =
+  GAME_CATALOG.filter((g) => g.releaseStage === 'polished');
+
+export const PLAYTEST_GAMES_CATALOG: readonly GameDefinition[] =
+  GAME_CATALOG.filter((g) => g.releaseStage !== 'polished');
 
 export function getGameColorById(
   gameId: GameId,
