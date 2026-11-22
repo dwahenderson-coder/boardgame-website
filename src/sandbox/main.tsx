@@ -2541,66 +2541,29 @@ export const SandboxApp: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="mt-3 space-y-2">
+                      <div className="mt-3 space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                         {ttrSanitized.self.pendingTickets.map((tkt) => {
                           const isChecked = selectedPendingIds.includes(tkt.id);
                           const isAlreadyConnected =
                             viewedPlayerGraph.isConnected(tkt.from, tkt.to);
+                          const { points: effectivePoints, isChaosHalved } =
+                            getEffectiveTicketPoints(tkt, ttrSanitized);
                           return (
-                            <label
+                            <DestinationTicketCardVisual
                               key={tkt.id}
+                              ticket={tkt}
+                              mapId={ttrSanitized.mapId}
+                              completed={isAlreadyConnected}
+                              isChaosHalved={isChaosHalved}
+                              effectivePoints={effectivePoints}
+                              selectable
+                              selected={isChecked}
+                              onToggleSelect={() =>
+                                togglePendingTicketSelection(tkt.id)
+                              }
                               onMouseEnter={() => setHoveredTicket(tkt)}
                               onMouseLeave={() => setHoveredTicket(null)}
-                              className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition ${
-                                isChecked
-                                  ? 'bg-amber-500/15 border-amber-400 text-slate-100'
-                                  : 'bg-rose-950/30 border-rose-500/40 text-slate-400 hover:border-rose-400/60'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() =>
-                                    togglePendingTicketSelection(tkt.id)
-                                  }
-                                  className="w-4 h-4 accent-amber-400 rounded"
-                                />
-                                <div>
-                                  <div className="font-bold text-sm flex items-center gap-2">
-                                    <span
-                                      className={
-                                        isChecked
-                                          ? ''
-                                          : 'line-through text-slate-500'
-                                      }
-                                    >
-                                      {tkt.from} → {tkt.to}
-                                    </span>
-                                    <span
-                                      className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                                        isChecked
-                                          ? 'bg-emerald-500/20 text-emerald-300'
-                                          : 'bg-rose-500/20 text-rose-300'
-                                      }`}
-                                    >
-                                      {isChecked ? 'Keep' : 'Discard'}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 font-mono">
-                                    {tkt.id} • Hover to highlight cities on map
-                                    {isAlreadyConnected && (
-                                      <span className="text-emerald-400 font-sans font-semibold ml-1">
-                                        • Connected!
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <span className="px-2.5 py-1 rounded-lg bg-slate-800 font-mono font-bold text-amber-300 text-xs shrink-0">
-                                +{tkt.points} pts
-                              </span>
-                            </label>
+                            />
                           );
                         })}
                       </div>
@@ -2866,7 +2829,7 @@ export const SandboxApp: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto space-y-1.5 my-1.5 pr-1">
+                    <div className="flex-1 overflow-y-auto space-y-2 my-1.5 pr-1">
                       {ttrSanitized.self.tickets.map((tkt) => {
                         const completed = viewedPlayerGraph.isConnected(
                           tkt.from,
@@ -2878,9 +2841,11 @@ export const SandboxApp: React.FC = () => {
                           <DestinationTicketCardVisual
                             key={tkt.id}
                             ticket={tkt}
+                            mapId={ttrSanitized.mapId}
                             completed={completed}
                             isChaosHalved={isChaosHalved}
                             effectivePoints={effectivePoints}
+                            compact
                             onMouseEnter={() => setHoveredTicket(tkt)}
                             onMouseLeave={() => setHoveredTicket(null)}
                           />
@@ -3405,42 +3370,24 @@ export const SandboxApp: React.FC = () => {
 
                         {/* Revealed Destination Tickets (for TTR) */}
                         {standing.tickets.length > 0 && (
-                          <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap gap-2">
+                          <div className="mt-3 pt-2.5 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {standing.tickets.map(
                               ({
                                 ticket,
                                 completed,
                                 effectivePoints,
                                 isChaosHalved,
-                              }) => {
-                                const pts = effectivePoints ?? ticket.points;
-                                return (
-                                  <div
-                                    key={ticket.id}
-                                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-2 ${
-                                      completed
-                                        ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
-                                        : 'bg-rose-950/60 border-rose-500/50 text-rose-200'
-                                    }`}
-                                  >
-                                    <span>{completed ? '✓' : '✗'}</span>
-                                    <span>
-                                      {ticket.from} → {ticket.to}
-                                    </span>
-                                    {isChaosHalved && (
-                                      <span
-                                        className="px-1 py-0.2 rounded bg-purple-950/90 border border-purple-500/50 text-purple-200 text-[9px] font-bold"
-                                        title={`City in Chaos: Halved from ${ticket.points} to ${pts} (rounded down)`}
-                                      >
-                                        🛸🦖 Chaos ½ ({ticket.points}→{pts})
-                                      </span>
-                                    )}
-                                    <span className="font-mono font-bold">
-                                      {completed ? `+${pts}` : `-${pts}`}
-                                    </span>
-                                  </div>
-                                );
-                              }
+                              }) => (
+                                <DestinationTicketCardVisual
+                                  key={ticket.id}
+                                  ticket={ticket}
+                                  mapId={ttrSanitized?.mapId ?? 'USA'}
+                                  completed={completed}
+                                  isChaosHalved={isChaosHalved}
+                                  effectivePoints={effectivePoints}
+                                  compact
+                                />
+                              )
                             )}
                           </div>
                         )}

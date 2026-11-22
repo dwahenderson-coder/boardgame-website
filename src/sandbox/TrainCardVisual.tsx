@@ -1,6 +1,14 @@
 import React from 'react';
-import { DestinationTicket, TrainCardColor } from '../games/ticket-to-ride/types.js';
-import { ROUTE_COLOR_THEMES } from './mapData.js';
+import {
+  DestinationTicket,
+  TrainCardColor,
+  TTRMapId,
+} from '../games/ticket-to-ride/types.js';
+import {
+  CITY_COORDINATES,
+  EUROPE_CITY_COORDINATES,
+  ROUTE_COLOR_THEMES,
+} from './mapData.js';
 
 interface TrainCarArtworkProps {
   readonly color: TrainCardColor;
@@ -363,81 +371,327 @@ export const TrainCardDeckVisual: React.FC<TrainCardDeckVisualProps> = ({
 
 interface DestinationTicketCardVisualProps {
   readonly ticket: DestinationTicket;
+  readonly mapId?: TTRMapId | undefined;
   readonly completed: boolean;
-  readonly isChaosHalved?: boolean;
-  readonly effectivePoints?: number;
-  readonly onMouseEnter: () => void;
-  readonly onMouseLeave: () => void;
+  readonly isChaosHalved?: boolean | undefined;
+  readonly effectivePoints?: number | undefined;
+  readonly selectable?: boolean | undefined;
+  readonly selected?: boolean | undefined;
+  readonly onToggleSelect?: (() => void) | undefined;
+  readonly compact?: boolean | undefined;
+  readonly onMouseEnter?: (() => void) | undefined;
+  readonly onMouseLeave?: (() => void) | undefined;
 }
 
+const USA_MINI_SILHOUETTE =
+  'M 55,15 L 495,15 L 525,52 L 595,62 L 645,25 L 955,25 L 985,85 L 965,150 L 940,175 L 905,235 L 875,310 L 855,390 L 865,455 L 868,568 L 832,575 L 800,505 L 725,510 L 665,555 L 555,565 L 495,588 L 350,545 L 225,500 L 125,480 L 68,375 L 82,205 L 102,135 L 88,65 Z';
+
+const EUROPE_MINI_MAIN_SILHOUETTE =
+  'M 42,485 L 75,405 L 155,395 L 135,260 L 228,235 L 295,205 L 320,165 L 415,175 L 430,105 L 475,135 L 555,155 L 630,105 L 725,52 L 960,45 L 965,545 L 690,558 L 695,485 L 645,480 L 615,545 L 580,505 L 550,435 L 495,380 L 455,385 L 515,480 L 485,515 L 420,465 L 395,395 L 310,420 L 225,495 L 105,565 L 45,515 Z';
+
+const EUROPE_MINI_UK_SILHOUETTE =
+  'M 175,55 L 225,55 L 258,165 L 245,202 L 185,195 L 178,125 Z';
+
+const EUROPE_MINI_SCANDINAVIA_SILHOUETTE =
+  'M 435,28 L 585,25 L 560,92 L 485,105 L 445,75 Z';
+
 /**
- * Punched vintage railroad Destination Ticket card component.
+ * Physical-style Ticket to Ride Destination Ticket card with an embedded
+ * USA or Europe board mini-map showing where the two cities are located,
+ * a connecting route arc, and a brass point value medallion.
  */
-export const DestinationTicketCardVisual: React.FC<DestinationTicketCardVisualProps> = ({
+export const DestinationTicketCardVisual: React.FC<
+  DestinationTicketCardVisualProps
+> = ({
   ticket,
+  mapId = 'USA',
   completed,
   isChaosHalved = false,
   effectivePoints,
+  selectable = false,
+  selected = true,
+  onToggleSelect,
+  compact = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
   const displayPts = effectivePoints ?? ticket.points;
+  const isLongRoute = ticket.isLongRoute === true;
+
+  const coordsMap =
+    mapId === 'EUROPE' ? EUROPE_CITY_COORDINATES : CITY_COORDINATES;
+  const fromCoord = coordsMap[ticket.from] ?? { x: 240, y: 300 };
+  const toCoord = coordsMap[ticket.to] ?? { x: 760, y: 300 };
+
+  const dx = toCoord.x - fromCoord.x;
+  const dy = toCoord.y - fromCoord.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const midX = (fromCoord.x + toCoord.x) / 2;
+  const midY = (fromCoord.y + toCoord.y) / 2;
+  const curveOffset = Math.min(95, dist * 0.2);
+  const ctrlX = midX - (dy / dist) * curveOffset;
+  const ctrlY = midY + (dx / dist) * curveOffset;
+  const arcPath = `M ${fromCoord.x} ${fromCoord.y} Q ${ctrlX} ${ctrlY} ${toCoord.x} ${toCoord.y}`;
+
+  const allCityPoints = Object.entries(coordsMap);
+
+  const isDiscardedState = selectable && !selected;
 
   return (
     <div
+      role={selectable ? 'button' : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onClick={selectable ? onToggleSelect : undefined}
+      onKeyDown={
+        selectable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onToggleSelect?.();
+              }
+            }
+          : undefined
+      }
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`relative rounded-xl border-2 px-3 py-2 transition cursor-default select-none shadow-sm ${
-        completed
-          ? 'bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/80 border-emerald-400/80 text-emerald-100'
-          : isChaosHalved
-          ? 'bg-gradient-to-r from-purple-950/50 via-slate-900 to-orange-950/40 border-purple-400/70 text-slate-100'
-          : 'bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/30 border-amber-500/40 hover:border-amber-400/80 text-slate-100'
+      className={`relative rounded-xl border-2 p-2 transition select-none shadow-md ${
+        selectable ? 'cursor-pointer' : 'cursor-default'
+      } ${
+        isDiscardedState
+          ? 'bg-rose-950/35 border-rose-500/50 opacity-75 hover:opacity-95'
+          : completed
+            ? 'bg-gradient-to-br from-emerald-950/90 via-slate-900 to-emerald-950/85 border-emerald-400/90 text-emerald-100'
+            : isLongRoute
+              ? 'bg-gradient-to-br from-sky-950/90 via-slate-900 to-amber-950/50 border-sky-400/80 hover:border-amber-300 text-slate-100'
+              : 'bg-gradient-to-br from-amber-950/65 via-slate-900 to-amber-950/55 border-amber-500/60 hover:border-amber-300 text-slate-100'
       }`}
     >
       {/* Ticket punch notches on left & right edges */}
-      <span className="pointer-events-none absolute -left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-950 border-r border-amber-500/40" />
-      <span className="pointer-events-none absolute -right-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-950 border-l border-amber-500/40" />
+      <span className="pointer-events-none absolute -left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-950 border-r border-amber-500/50" />
+      <span className="pointer-events-none absolute -right-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-950 border-l border-amber-500/50" />
 
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-xs font-extrabold tracking-tight">
-            <span className="truncate text-amber-100">{ticket.from}</span>
-            <span className="text-amber-400 shrink-0 font-mono">•••▸</span>
-            <span className="truncate text-amber-100">{ticket.to}</span>
-          </div>
-          <div className="flex items-center gap-2 mt-0.5 text-[10px]">
-            {completed ? (
-              <span className="font-bold text-emerald-400">
-                ✓ COMPLETED ROUTE
-              </span>
-            ) : (
-              <span className="text-slate-400">
-                Hover to locate terminals on map
-              </span>
-            )}
-            {isChaosHalved && (
-              <span className="px-1.5 py-0.2 rounded bg-purple-500/30 border border-purple-400/60 text-purple-200 font-bold text-[9px]">
-                ⚠️ Chaos ½ ({ticket.points}→{displayPts})
-              </span>
-            )}
+      {/* Top Physical Ticket Banner: City A -> City B + Keep/Status Badge */}
+      <div className="flex items-center justify-between gap-1.5 pb-1.5 border-b border-amber-500/25">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => {}}
+              onClick={(e) => e.stopPropagation()}
+              className="w-3.5 h-3.5 accent-amber-400 rounded shrink-0 pointer-events-none"
+            />
+          )}
+          <div
+            className={`flex items-center gap-1 text-[11px] font-black tracking-tight min-w-0 ${
+              isDiscardedState ? 'line-through text-slate-400' : 'text-amber-100'
+            }`}
+          >
+            <span className="truncate">{ticket.from}</span>
+            <span className="text-amber-400 shrink-0 font-mono">➔</span>
+            <span className="truncate">{ticket.to}</span>
           </div>
         </div>
 
-        {/* Brass Point Value Medallion */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isLongRoute && (
+            <span className="px-1.5 py-0.2 rounded bg-sky-500/25 border border-sky-400/60 text-sky-200 text-[8px] font-black uppercase">
+              Long Route
+            </span>
+          )}
+          {selectable ? (
+            <span
+              className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                selected
+                  ? 'bg-emerald-500/25 border border-emerald-400/60 text-emerald-300'
+                  : 'bg-rose-500/25 border border-rose-400/60 text-rose-300'
+              }`}
+            >
+              {selected ? 'Keep' : 'Discard'}
+            </span>
+          ) : completed ? (
+            <span className="px-1.5 py-0.2 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-300 text-[8.5px] font-black uppercase">
+              ✓ Done
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Center Section: Physical Mini-Map Card Illustration + Point Value Medallion */}
+      <div className="mt-1.5 flex items-center gap-2">
+        {/* Embedded SVG Mini-Map showing USA/Europe board, all city dots, and highlighted terminal pins */}
         <div
-          className={`w-8 h-8 rounded-full border-2 flex flex-col items-center justify-center font-mono shrink-0 shadow ${
+          className={`relative flex-1 rounded-lg overflow-hidden border ${
             completed
-              ? 'bg-emerald-500 border-emerald-200 text-slate-950'
-              : isChaosHalved
-              ? 'bg-purple-500/25 border-purple-400 text-purple-200'
-              : 'bg-amber-500/20 border-amber-400/80 text-amber-300'
-          }`}
+              ? 'border-emerald-400/60'
+              : isLongRoute
+                ? 'border-sky-400/50'
+                : 'border-amber-500/50'
+          } ${compact ? 'h-14' : 'h-16'} bg-[#2b4c65] shadow-inner`}
         >
-          <span className="text-xs font-black leading-none">
-            {completed ? `+${displayPts}` : displayPts}
-          </span>
-          <span className="text-[7px] font-bold uppercase leading-none">pts</span>
+          <svg
+            viewBox="0 0 1000 600"
+            preserveAspectRatio="xMidYMid meet"
+            className="w-full h-full block"
+          >
+            {/* Vintage Ocean Background */}
+            <rect x="0" y="0" width="1000" height="600" fill="#234257" />
+
+            {/* Continent Silhouette (USA or Europe) in Warm Parchment */}
+            {mapId === 'EUROPE' ? (
+              <g>
+                <path
+                  d={EUROPE_MINI_MAIN_SILHOUETTE}
+                  fill="#e7d6b5"
+                  stroke="#78350f"
+                  strokeWidth="8"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={EUROPE_MINI_UK_SILHOUETTE}
+                  fill="#e7d6b5"
+                  stroke="#78350f"
+                  strokeWidth="8"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={EUROPE_MINI_SCANDINAVIA_SILHOUETTE}
+                  fill="#e7d6b5"
+                  stroke="#78350f"
+                  strokeWidth="8"
+                  strokeLinejoin="round"
+                />
+              </g>
+            ) : (
+              <path
+                d={USA_MINI_SILHOUETTE}
+                fill="#e7d6b5"
+                stroke="#78350f"
+                strokeWidth="8"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Subtle background reference dots for all other board cities */}
+            {allCityPoints.map(([cityName, pt]) => {
+              if (cityName === ticket.from || cityName === ticket.to) {
+                return null;
+              }
+              return (
+                <circle
+                  key={cityName}
+                  cx={pt.x}
+                  cy={pt.y}
+                  r="7"
+                  fill="#78350f"
+                  opacity="0.32"
+                />
+              );
+            })}
+
+            {/* Route Arc Shadow */}
+            <path
+              d={arcPath}
+              fill="none"
+              stroke="#0f172a"
+              strokeWidth="22"
+              strokeLinecap="round"
+              opacity="0.45"
+            />
+
+            {/* Highlighted Dashed Route Line Connecting ticket.from -> ticket.to */}
+            <path
+              d={arcPath}
+              fill="none"
+              stroke={completed ? '#10b981' : '#dc2626'}
+              strokeWidth="15"
+              strokeDasharray="24 14"
+              strokeLinecap="round"
+            />
+
+            {/* Endpoint City Rings & Pins */}
+            {[
+              { name: ticket.from, pt: fromCoord },
+              { name: ticket.to, pt: toCoord },
+            ].map((endpoint) => {
+              const labelAbove = endpoint.pt.y > 125;
+              const clampedX = Math.max(125, Math.min(875, endpoint.pt.x));
+              const labelY = labelAbove
+                ? endpoint.pt.y - 36
+                : endpoint.pt.y + 56;
+              return (
+                <g key={endpoint.name}>
+                  {/* Outer glowing bullseye ring */}
+                  <circle
+                    cx={endpoint.pt.x}
+                    cy={endpoint.pt.y}
+                    r="34"
+                    fill={completed ? '#10b981' : '#ef4444'}
+                    opacity="0.28"
+                  />
+                  {/* Solid city marker pin */}
+                  <circle
+                    cx={endpoint.pt.x}
+                    cy={endpoint.pt.y}
+                    r="21"
+                    fill={completed ? '#10b981' : '#dc2626'}
+                    stroke="#fef3c7"
+                    strokeWidth="7"
+                  />
+                  <circle
+                    cx={endpoint.pt.x}
+                    cy={endpoint.pt.y}
+                    r="7"
+                    fill="#fef3c7"
+                  />
+                  {/* High-contrast mini city nameplate on the ticket map */}
+                  <text
+                    x={clampedX}
+                    y={labelY}
+                    textAnchor="middle"
+                    fill="#1e293b"
+                    stroke="#fef3c7"
+                    strokeWidth="14"
+                    paintOrder="stroke"
+                    fontSize="44"
+                    fontWeight="900"
+                  >
+                    {endpoint.name}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Right Side: Brass Point Value Medallion & Chaos Indicator */}
+        <div className="flex flex-col items-center justify-center gap-1 shrink-0">
+          <div
+            className={`w-10 h-10 rounded-full border-2 flex flex-col items-center justify-center font-mono shadow-md ${
+              completed
+                ? 'bg-emerald-500 border-emerald-200 text-slate-950'
+                : isChaosHalved
+                  ? 'bg-purple-500/30 border-purple-300 text-purple-100'
+                  : 'bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 border-amber-100 text-slate-950'
+            }`}
+            title={`Ticket Value: ${displayPts} points`}
+          >
+            <span className="text-xs font-black leading-none">
+              {completed ? `+${displayPts}` : displayPts}
+            </span>
+            <span className="text-[7px] font-black uppercase leading-none mt-0.5">
+              PTS
+            </span>
+          </div>
+
+          {isChaosHalved && (
+            <span
+              className="px-1 py-0.2 rounded bg-purple-950 border border-purple-400/70 text-purple-200 font-bold text-[8px]"
+              title={`City in Chaos: Halved from ${ticket.points} to ${displayPts}`}
+            >
+              ½ ({ticket.points}→{displayPts})
+            </span>
+          )}
         </div>
       </div>
     </div>
