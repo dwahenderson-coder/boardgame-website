@@ -177,6 +177,12 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [
       {
+        id: 'advanced_board',
+        name: 'Advanced Board (Asymmetric Company Tracks)',
+        description:
+          'Flips the Stock Tracker to the Advanced side with unique company volatility tracks, Stanford Steel upward $1,000 dividend spaces, and custom split/start positions.',
+      },
+      {
         id: 'continuing_corruption',
         name: 'Continuing Corruption',
         description:

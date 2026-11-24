@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  getCompanyTrack,
   SHARE_UNIT_DOLLARS,
   STOCKPILE_BID_TRACK,
   STOCKPILE_COMPANIES,
@@ -316,93 +317,170 @@ export const StockpileBoard: React.FC<StockpileBoardProps> = ({
         <div className="lg:col-span-8 rounded-2xl bg-slate-900/80 border border-slate-800 p-4 shadow-xl">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-200">
-                📊 Stock Market Tracker ($1K – $10K per Share)
-              </h3>
-              <p className="text-xs text-slate-400">
-                Reach <span className="text-rose-400 font-semibold">$0 (Bankruptcy)</span>: wipes shares to 0 & resets to $5. Reach{' '}
-                <span className="text-emerald-400 font-semibold">$11 (Stock Split)</span>: doubles all shares & resets to $6!
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-200">
+                  📊 Stock Market Tracker
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 font-black text-[10px] uppercase">
+                  {state.boardMode === 'ADVANCED'
+                    ? '🚀 Advanced Board'
+                    : '📈 Basic Board'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {state.boardMode === 'ADVANCED' ? (
+                  <>
+                    Each company has a custom volatility track.{' '}
+                    <strong className="text-slate-200">Stanford Steel</strong>{' '}
+                    spaces with <strong className="text-emerald-300">$</strong>{' '}
+                    pay a $1,000 dividend per $ passed or landed on when moving{' '}
+                    <strong>UP</strong> only!
+                  </>
+                ) : (
+                  <>
+                    Reach{' '}
+                    <span className="text-rose-400 font-semibold">
+                      Bankruptcy
+                    </span>
+                    : wipes shares to 0 &amp; resets to $5. Reach{' '}
+                    <span className="text-emerald-400 font-semibold">
+                      Stock Split
+                    </span>
+                    : doubles all shares &amp; resets to $6!
+                  </>
+                )}
               </p>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-800 text-[11px] text-slate-400 font-mono">
-                  <th className="py-1.5 pr-3">Company</th>
-                  <th className="px-1.5 py-1.5 text-center text-rose-400 bg-rose-950/30 rounded-tl">
-                    $0 💥
-                  </th>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((val) => (
-                    <th key={val} className="px-1.5 py-1.5 text-center">
-                      ${val}K
-                    </th>
-                  ))}
-                  <th className="px-1.5 py-1.5 text-center text-emerald-400 bg-emerald-950/30 rounded-tr">
-                    $11 ✂️2x
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-xs">
-                {STOCKPILE_COMPANY_IDS.map((cid) => {
-                  const meta = STOCKPILE_COMPANIES[cid];
-                  const currentPrice = state.stockPrices[cid];
-                  return (
-                    <tr key={cid} className="hover:bg-slate-800/30">
-                      <td className="py-2 pr-3 font-bold whitespace-nowrap">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-full mr-2"
-                          style={{ backgroundColor: meta.colorHex }}
-                        />
-                        <span className="text-slate-100">{meta.name}</span>
-                        <span className="ml-1.5 text-[10px] font-mono text-slate-400">
-                          ({meta.ticker})
-                        </span>
-                      </td>
-                      {/* $0 Bankruptcy cell */}
-                      <td className="p-1 text-center bg-rose-950/20 border-x border-rose-900/30">
-                        <span className="text-[10px] text-rose-400/70 font-mono">
-                          Wipe→$5
-                        </span>
-                      </td>
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((val) => {
-                        const isHere = currentPrice === val;
+          <div className="space-y-2 overflow-x-auto">
+            {STOCKPILE_COMPANY_IDS.map((cid) => {
+              const meta = STOCKPILE_COMPANIES[cid];
+              const track = getCompanyTrack(cid, state.boardMode);
+              const currentSpaceIdx =
+                state.stockTrackPositions?.[cid] ??
+                Math.max(
+                  0,
+                  track.spaces.findIndex(
+                    (s) => s.price === state.stockPrices[cid]
+                  )
+                );
+              const startPriceLabel =
+                track.spaces[track.startSpaceIndex]?.displayLabel ?? '5';
+              const splitPriceLabel =
+                track.spaces[track.splitResetIndex]?.displayLabel ?? '6';
+
+              return (
+                <div
+                  key={cid}
+                  className="p-2 rounded-xl bg-slate-950/75 border border-slate-800 flex items-center justify-between gap-2 min-w-[660px]"
+                >
+                  {/* Company Label */}
+                  <div className="w-48 shrink-0 flex items-center gap-2 pr-2">
+                    <span
+                      className="inline-block w-3 h-3 rounded-full shrink-0 border border-white/40"
+                      style={{ backgroundColor: meta.colorHex }}
+                    />
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-100 truncate">
+                        {meta.name}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400">
+                        {meta.ticker} • Now: ${state.stockPrices[cid]}K
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Track Spaces Row: Bankruptcy -> Spaces -> Split */}
+                  <div className="flex-1 flex items-center gap-1">
+                    {/* Bankruptcy Left Box */}
+                    <div
+                      className="px-2 py-1.5 rounded-lg bg-rose-950/35 border border-rose-500/40 text-center shrink-0"
+                      title={`Bankruptcy: Wipes all shares and resets to ${startPriceLabel}`}
+                    >
+                      <div className="text-[9px] font-black text-rose-300 uppercase leading-none">
+                        💥 Bankrupt
+                      </div>
+                      <div className="text-[9px] font-mono text-rose-200/80 leading-none mt-0.5">
+                        → ${startPriceLabel}
+                      </div>
+                    </div>
+
+                    {/* Track Value Squares */}
+                    <div className="flex-1 flex items-center gap-1">
+                      {track.spaces.map((sp) => {
+                        const isHere = currentSpaceIdx === sp.index;
+                        const isStartOrBankrupt =
+                          sp.index === track.startSpaceIndex;
+                        const isSplitReset =
+                          sp.index === track.splitResetIndex;
+                        const hasDividend = sp.dividendDollars > 0;
+
                         return (
-                          <td
-                            key={val}
-                            className={`p-1 text-center font-mono ${
-                              val === 5 || val === 6
-                                ? 'bg-slate-800/30'
+                          <div
+                            key={sp.id}
+                            title={`Space ${sp.displayLabel} ($${sp.price}K/share)${
+                              isStartOrBankrupt ? ' • Start / Bankruptcy Reset' : ''
+                            }${isSplitReset ? ' • Split Reset' : ''}${
+                              hasDividend
+                                ? ` • Pays +$${sp.dividendDollars.toLocaleString()}/share when passed or landed on moving UP`
                                 : ''
                             }`}
+                            className={`flex-1 min-w-[36px] h-10 rounded-lg border flex flex-col items-center justify-center font-mono relative transition ${
+                              isHere
+                                ? 'text-slate-950 font-black shadow-lg ring-2 ring-white scale-105 z-10'
+                                : hasDividend
+                                  ? 'bg-emerald-950/30 border-emerald-500/50 text-emerald-200'
+                                  : isStartOrBankrupt || isSplitReset
+                                    ? 'bg-slate-800/80 border-slate-600 text-slate-200'
+                                    : 'bg-slate-900/70 border-slate-800 text-slate-400'
+                            }`}
+                            style={
+                              isHere
+                                ? {
+                                    backgroundColor: meta.colorHex,
+                                    borderColor: '#ffffff',
+                                  }
+                                : undefined
+                            }
                           >
-                            {isHere ? (
-                              <div
-                                className="mx-auto w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-slate-950 shadow-md ring-2 ring-white"
-                                style={{ backgroundColor: meta.colorHex }}
+                            <span className="text-xs font-extrabold leading-none">
+                              {sp.displayLabel}
+                            </span>
+                            {(isStartOrBankrupt || isSplitReset) && (
+                              <span
+                                className={`text-[7px] font-sans font-black uppercase leading-none mt-0.5 ${
+                                  isHere ? 'text-slate-950' : 'text-amber-300'
+                                }`}
                               >
-                                ${val}
-                              </div>
-                            ) : (
-                              <span className="text-slate-600 text-[11px]">
-                                ·
+                                {isStartOrBankrupt && isSplitReset
+                                  ? 'START/SPLIT'
+                                  : isStartOrBankrupt
+                                    ? 'START'
+                                    : 'SPLIT'}
                               </span>
                             )}
-                          </td>
+                          </div>
                         );
                       })}
-                      {/* $11 Stock Split cell */}
-                      <td className="p-1 text-center bg-emerald-950/20 border-x border-emerald-900/30">
-                        <span className="text-[10px] text-emerald-400/80 font-mono">
-                          2x→$6
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    </div>
+
+                    {/* Split Right Box */}
+                    <div
+                      className="px-2 py-1.5 rounded-lg bg-emerald-950/35 border border-emerald-500/40 text-center shrink-0"
+                      title={`Stock Split: Doubles all shares and resets to ${splitPriceLabel}`}
+                    >
+                      <div className="text-[9px] font-black text-emerald-300 uppercase leading-none">
+                        ✂️ Split 2×
+                      </div>
+                      <div className="text-[9px] font-mono text-emerald-200/80 leading-none mt-0.5">
+                        → ${splitPriceLabel}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -834,6 +912,11 @@ export const StockpileBoard: React.FC<StockpileBoardProps> = ({
                     {mv.triggeredBankruptcy && (
                       <div className="text-[10px] font-extrabold text-rose-300 bg-rose-950/70 px-1.5 py-0.5 rounded">
                         💥 BANKRUPT! Wiped!
+                      </div>
+                    )}
+                    {(mv.dividendPerShare ?? 0) > 0 && (
+                      <div className="text-[10px] font-extrabold text-amber-300 bg-amber-950/70 px-1.5 py-0.5 rounded">
+                        💵 Dividend: +${((mv.dividendPerShare ?? 0) / 1000).toFixed(0)}K/sh!
                       </div>
                     )}
                   </div>

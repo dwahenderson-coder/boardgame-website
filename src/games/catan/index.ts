@@ -2404,12 +2404,42 @@ export function applyCatanAction(
       const returnStep: 'ROLL_DICE' | 'MAIN_PHASE' =
         state.turnStep === 'ROLL_DICE' ? 'ROLL_DICE' : 'MAIN_PHASE';
 
+      const nextPlayers: Record<string, CatanPlayerState> = {
+        ...state.players,
+        [playerId]: {
+          ...player,
+          devCards: nextDevCards,
+          faceUpKnights: player.faceUpKnights + 1,
+        },
+      };
+
+      // If no targetHexId was passed in action, transition to MOVE_ROBBER so the player can select the hex on the board in the exact same way as when a 7 is rolled!
+      if (!action.targetHexId) {
+        const nextState = recalculateAwardsAndVictoryPoints({
+          ...state,
+          hasPlayedDevCardThisTurn: true,
+          robberReturnStep: returnStep,
+          players: nextPlayers,
+        });
+        const newKnights = nextState.players[playerId]!.faceUpKnights;
+        const armyNote =
+          nextState.largestArmyOwnerId === playerId &&
+          state.largestArmyOwnerId !== playerId
+            ? ` — ${playerId} claims Largest Army (+2 VP)!`
+            : '';
+
+        return {
+          ...nextState,
+          turnStep: 'MOVE_ROBBER',
+          robberEligibleVictimIds: [],
+          robberVictimId: null,
+          robberShuffledVictimCards: [],
+          lastActionSummary: `${playerId} played a Knight (${newKnights} face-up)${armyNote}. Select a hex on the board to move the Robber!`,
+        };
+      }
+
       const board = cloneBoard(state.board);
-      // Determine target robber hex
-      const targetHexId =
-        action.targetHexId && action.targetHexId !== board.robberHexId
-          ? action.targetHexId
-          : Object.keys(board.hexes).find((id) => id !== board.robberHexId)!;
+      const targetHexId = action.targetHexId;
 
       for (const h of Object.values(board.hexes)) {
         h.hasRobber = h.id === targetHexId;
@@ -2429,15 +2459,6 @@ export function applyCatanAction(
         }
       }
 
-      const nextPlayers: Record<string, CatanPlayerState> = {
-        ...state.players,
-        [playerId]: {
-          ...player,
-          devCards: nextDevCards,
-          faceUpKnights: player.faceUpKnights + 1,
-        },
-      };
-
       const nextState = recalculateAwardsAndVictoryPoints({
         ...state,
         board,
@@ -2452,32 +2473,6 @@ export function applyCatanAction(
         state.largestArmyOwnerId !== playerId
           ? ` — ${playerId} claims Largest Army (+2 VP)!`
           : '';
-
-      // If no targetHexId was passed in action, enter MOVE_ROBBER so the player can select the hex on the board (unless no opponents have cards anywhere on default hex)
-      if (!action.targetHexId) {
-        // Check if any opponent on targetHexId has resource cards; if so, prompt victim selection
-        const opponentsWithCards = adjacentOpponents.filter(
-          (oid) => getTotalResourceCards(state.players[oid]!.resources) > 0
-        );
-        if (opponentsWithCards.length > 0) {
-          return {
-            ...nextState,
-            turnStep: 'SELECT_ROBBER_VICTIM',
-            robberEligibleVictimIds: adjacentOpponents,
-            robberVictimId: null,
-            robberShuffledVictimCards: [],
-            lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}. Select a player on that hex to steal from!`,
-          };
-        }
-        return {
-          ...nextState,
-          turnStep: returnStep,
-          robberEligibleVictimIds: [],
-          robberVictimId: null,
-          robberShuffledVictimCards: [],
-          lastActionSummary: `${playerId} played a Knight (${newKnights} face-up), moved the Robber to hex (${targetHexId})${armyNote}`,
-        };
-      }
 
       if (
         action.victimPlayerId &&

@@ -1772,6 +1772,11 @@ export const SandboxApp: React.FC = () => {
             /* Mount <CatanBoard /> when `selectedGameId === 'catan'` */
             <CatanBoard
               view={catanSanitized}
+              playerColors={
+                runnerMode === 'MULTIPLAYER'
+                  ? mp.playerColors
+                  : localEffectivePlayerColors
+              }
               isControlsLocked={isControlsLocked}
               pendingAction={mp.pendingAction}
               formatPlayerLabel={formatPlayerLabel}

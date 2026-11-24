@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ALL_CATAN_RESOURCES,
   CatanAction,
@@ -15,11 +15,38 @@ import { getPlayerPalette } from './mapData.js';
 
 interface CatanBoardProps {
   readonly view: CatanSanitizedGameState;
+  readonly playerColors?: Readonly<Record<string, string>>;
   readonly isControlsLocked: boolean;
   readonly pendingAction: boolean;
   readonly formatPlayerLabel: (pid: string) => string;
   readonly onDispatchAction: (actorId: string, action: CatanAction) => void;
 }
+
+type PendingBoardConfirmation =
+  | {
+      readonly kind: 'INITIAL_SETTLEMENT';
+      readonly vertexId: string;
+    }
+  | {
+      readonly kind: 'MAIN_SETTLEMENT';
+      readonly vertexId: string;
+    }
+  | {
+      readonly kind: 'UPGRADE_CITY';
+      readonly vertexId: string;
+    }
+  | {
+      readonly kind: 'INITIAL_ROAD';
+      readonly edgeId: string;
+    }
+  | {
+      readonly kind: 'MAIN_ROAD';
+      readonly edgeId: string;
+    }
+  | {
+      readonly kind: 'MOVE_ROBBER';
+      readonly hexId: string;
+    };
 
 const TERRAIN_THEMES: Readonly<
   Record<
@@ -50,10 +77,10 @@ const TERRAIN_THEMES: Readonly<
   },
   WHEAT: {
     label: 'Fields (Wheat)',
-    fill: '#713f12',
-    stroke: '#facc15',
+    fill: '#eab308',
+    stroke: '#fef08a',
     icon: '🌾',
-    badge: 'bg-amber-600 text-slate-950 border-amber-300',
+    badge: 'bg-yellow-400 text-slate-950 border-yellow-200',
   },
   ORE: {
     label: 'Mountains (Ore)',
@@ -191,6 +218,7 @@ function formatBundleText(
 
 export const CatanBoard: React.FC<CatanBoardProps> = ({
   view,
+  playerColors = {},
   isControlsLocked,
   pendingAction,
   formatPlayerLabel,
@@ -204,6 +232,45 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
   );
   const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  // Interactive Zoom & Pan state (matching Ticket to Ride)
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+  const [isDraggingMap, setIsDraggingMap] = useState<boolean>(false);
+  const [dragOrigin, setDragOrigin] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+
+  const handleZoomDelta = (delta: number) => {
+    setZoomScale((prev) => {
+      const next = Math.min(2.5, Math.max(1, Number((prev + delta).toFixed(2))));
+      if (next === 1) {
+        setPanOffset({ x: 0, y: 0 });
+      }
+      return next;
+    });
+  };
+
+  const handleResetZoom = () => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  // Pending board change confirmation (Road, Settlement, City, Robber)
+  const [pendingConfirm, setPendingConfirm] =
+    useState<PendingBoardConfirmation | null>(null);
+
+  // Trade GUI Modal Window state
+  const [isTradeWindowOpen, setIsTradeWindowOpen] = useState<boolean>(false);
+
+  // Clear pending confirmation when turnStep or activePlayerId changes
+  useEffect(() => {
+    setPendingConfirm(null);
+  }, [view.turnStep, view.activePlayerId, view.turnNumber]);
 
   // Maritime trade state
   const [tradeGive, setTradeGive] = useState<CatanResource>('WOOD');
@@ -299,8 +366,8 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
         view.turnStep === 'SETUP_SETTLEMENT_2') &&
       validInitialVertices.has(vertexId)
     ) {
-      onDispatchAction(selfPlayer.id, {
-        type: 'CATAN_PLACE_INITIAL_SETTLEMENT',
+      setPendingConfirm({
+        kind: 'INITIAL_SETTLEMENT',
         vertexId,
       });
       return;
@@ -308,8 +375,8 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
 
     if (isMyTurn && view.turnStep === 'SELECT_CITY_UPGRADE') {
       if (vertex.ownerId === selfPlayer.id && vertex.building === 'settlement') {
-        onDispatchAction(selfPlayer.id, {
-          type: 'CATAN_UPGRADE_CITY',
+        setPendingConfirm({
+          kind: 'UPGRADE_CITY',
           vertexId,
         });
       }
@@ -317,7 +384,22 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
     }
 
     if (isMyTurn && view.turnStep === 'MAIN_PHASE') {
-      // If clicking valid empty settlement spot and affordable, build Settlement
+      // If clicking one of own existing settlements and player has 2 Wheat + 3 Ore + cities remaining, stage City Upgrade confirmation
+      if (
+        vertex.ownerId === selfPlayer.id &&
+        vertex.building === 'settlement' &&
+        selfPlayer.resources.WHEAT >= 2 &&
+        selfPlayer.resources.ORE >= 3 &&
+        selfPlayer.citiesRemaining > 0
+      ) {
+        setPendingConfirm({
+          kind: 'UPGRADE_CITY',
+          vertexId,
+        });
+        return;
+      }
+
+      // If clicking valid empty settlement spot and affordable, stage Settlement confirmation
       if (
         validMainPhaseVertices.has(vertexId) &&
         selfPlayer.resources.WOOD >= 1 &&
@@ -326,8 +408,8 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
         selfPlayer.resources.WHEAT >= 1 &&
         selfPlayer.settlementsRemaining > 0
       ) {
-        onDispatchAction(selfPlayer.id, {
-          type: 'CATAN_BUILD_SETTLEMENT',
+        setPendingConfirm({
+          kind: 'MAIN_SETTLEMENT',
           vertexId,
         });
       }
@@ -342,8 +424,8 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
       (view.turnStep === 'SETUP_ROAD_1' || view.turnStep === 'SETUP_ROAD_2') &&
       validRoadEdges.has(edgeId)
     ) {
-      onDispatchAction(selfPlayer.id, {
-        type: 'CATAN_PLACE_INITIAL_ROAD',
+      setPendingConfirm({
+        kind: 'INITIAL_ROAD',
         edgeId,
       });
       return;
@@ -355,11 +437,54 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
       (view.freeRoadsRemaining > 0 ||
         (selfPlayer.resources.WOOD >= 1 && selfPlayer.resources.BRICK >= 1))
     ) {
-      onDispatchAction(selfPlayer.id, {
-        type: 'CATAN_BUILD_ROAD',
+      setPendingConfirm({
+        kind: 'MAIN_ROAD',
         edgeId,
       });
     }
+  };
+
+  const executePendingBoardConfirmation = () => {
+    if (!pendingConfirm) return;
+    switch (pendingConfirm.kind) {
+      case 'INITIAL_SETTLEMENT':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_PLACE_INITIAL_SETTLEMENT',
+          vertexId: pendingConfirm.vertexId,
+        });
+        break;
+      case 'MAIN_SETTLEMENT':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_BUILD_SETTLEMENT',
+          vertexId: pendingConfirm.vertexId,
+        });
+        break;
+      case 'UPGRADE_CITY':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_UPGRADE_CITY',
+          vertexId: pendingConfirm.vertexId,
+        });
+        break;
+      case 'INITIAL_ROAD':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_PLACE_INITIAL_ROAD',
+          edgeId: pendingConfirm.edgeId,
+        });
+        break;
+      case 'MAIN_ROAD':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_BUILD_ROAD',
+          edgeId: pendingConfirm.edgeId,
+        });
+        break;
+      case 'MOVE_ROBBER':
+        onDispatchAction(selfPlayer.id, {
+          type: 'CATAN_MOVE_ROBBER',
+          targetHexId: pendingConfirm.hexId,
+        });
+        break;
+    }
+    setPendingConfirm(null);
   };
 
   const maritimeRate = getPlayerMaritimeTradeRate(
@@ -395,7 +520,11 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
               const isSelf = pid === selfPlayer.id;
               const isTurn = pid === view.activePlayerId;
               const opp = view.opponents[pid];
-              const palette = getPlayerPalette(pid, view.playerOrder);
+              const palette = getPlayerPalette(
+                pid,
+                view.playerOrder,
+                playerColors
+              );
 
               const resourceCardCount = isSelf
                 ? ALL_CATAN_RESOURCES.reduce(
@@ -540,10 +669,43 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
         </aside>
 
         {/* CENTER HEX ISLAND SVG PLAY MAT AREA */}
-        <div className="flex-1 relative min-h-0 flex items-center justify-center bg-slate-950 overflow-hidden">
+        <div
+          className={`flex-1 relative min-h-0 flex items-center justify-center bg-slate-950 overflow-hidden ${
+            zoomScale > 1
+              ? isDraggingMap
+                ? 'cursor-grabbing'
+                : 'cursor-grab'
+              : ''
+          }`}
+          onWheel={(e) => {
+            e.preventDefault();
+            handleZoomDelta(e.deltaY < 0 ? 0.2 : -0.2);
+          }}
+          onMouseDown={(e) => {
+            if (zoomScale <= 1 || e.button !== 0) return;
+            setIsDraggingMap(true);
+            setDragOrigin({
+              x: e.clientX - panOffset.x,
+              y: e.clientY - panOffset.y,
+            });
+          }}
+          onMouseMove={(e) => {
+            if (!isDraggingMap) return;
+            setPanOffset({
+              x: Math.max(-420, Math.min(420, e.clientX - dragOrigin.x)),
+              y: Math.max(-260, Math.min(260, e.clientY - dragOrigin.y)),
+            });
+          }}
+          onMouseUp={() => setIsDraggingMap(false)}
+          onMouseLeave={() => setIsDraggingMap(false)}
+        >
           <svg
             viewBox="0 0 1000 600"
-            className="w-full h-full max-h-full object-contain"
+            className="w-full h-full max-h-full object-contain transition-transform duration-75"
+            style={{
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
+              transformOrigin: 'center center',
+            }}
           >
             {/* Ocean Backdrop */}
             <rect
@@ -576,6 +738,9 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                   hexNode.terrain.toUpperCase() as CatanTerrain;
                 const theme = TERRAIN_THEMES[upperTerrain];
                 const isSelected = hexNode.id === selectedHexId;
+                const isPendingRobberTarget =
+                  pendingConfirm?.kind === 'MOVE_ROBBER' &&
+                  pendingConfirm.hexId === hexNode.id;
                 const isHotRoll =
                   lastRollSum !== null &&
                   hexNode.numberToken === lastRollSum &&
@@ -608,9 +773,9 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                         view.turnStep === 'MOVE_ROBBER' &&
                         hexNode.id !== view.board.robberHexId
                       ) {
-                        onDispatchAction(selfPlayer.id, {
-                          type: 'CATAN_MOVE_ROBBER',
-                          targetHexId: hexNode.id,
+                        setPendingConfirm({
+                          kind: 'MOVE_ROBBER',
+                          hexId: hexNode.id,
                         });
                       }
                     }}
@@ -620,21 +785,25 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                       points={cornerPoints}
                       fill={theme.fill}
                       stroke={
-                        view.turnStep === 'MOVE_ROBBER' &&
-                        hexNode.id !== view.board.robberHexId
-                          ? '#f43f5e'
-                          : isSelected
-                          ? '#fbbf24'
-                          : isHotRoll
-                          ? '#34d399'
-                          : theme.stroke
+                        isPendingRobberTarget
+                          ? '#fde047'
+                          : view.turnStep === 'MOVE_ROBBER' &&
+                              hexNode.id !== view.board.robberHexId
+                            ? '#f43f5e'
+                            : isSelected
+                              ? '#fbbf24'
+                              : isHotRoll
+                                ? '#34d399'
+                                : theme.stroke
                       }
                       strokeWidth={
-                        view.turnStep === 'MOVE_ROBBER' ||
-                        isSelected ||
-                        isHotRoll
-                          ? 3.5
-                          : 2
+                        isPendingRobberTarget
+                          ? 5
+                          : view.turnStep === 'MOVE_ROBBER' ||
+                              isSelected ||
+                              isHotRoll
+                            ? 3.5
+                            : 2
                       }
                     />
 
@@ -683,7 +852,7 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                       </g>
                     )}
 
-                    {/* Robber Pawn */}
+                    {/* Current Robber Pawn */}
                     {hexNode.hasRobber && (
                       <g
                         transform={`translate(${center.x + 18}, ${
@@ -707,6 +876,39 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                         </text>
                       </g>
                     )}
+
+                    {/* Flashing Staged Robber Pawn Preview when confirming Robber placement */}
+                    {isPendingRobberTarget && (
+                      <g
+                        transform={`translate(${center.x + 18}, ${
+                          center.y - 14
+                        })`}
+                        className="animate-pulse"
+                      >
+                        <circle
+                          r="16"
+                          fill="none"
+                          stroke="#fde047"
+                          strokeWidth="3"
+                          strokeDasharray="4 2"
+                        />
+                        <circle
+                          r="12"
+                          fill="#dc2626"
+                          stroke="#fef08a"
+                          strokeWidth="2.5"
+                        />
+                        <text
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#ffffff"
+                          fontSize="11"
+                          fontWeight="900"
+                        >
+                          🦹
+                        </text>
+                      </g>
+                    )}
                   </g>
                 );
               })}
@@ -721,11 +923,16 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                 const p2 = toSvgCoords(v2.x, v2.y);
                 const isSelectableRoad = isMyTurn && validRoadEdges.has(edge.id);
                 const isSelectedEdge = selectedEdgeId === edge.id;
+                const isPendingRoadTarget =
+                  (pendingConfirm?.kind === 'INITIAL_ROAD' ||
+                    pendingConfirm?.kind === 'MAIN_ROAD') &&
+                  pendingConfirm.edgeId === edge.id;
 
                 if (edge.ownerId) {
                   const palette = getPlayerPalette(
                     edge.ownerId,
-                    view.playerOrder
+                    view.playerOrder,
+                    playerColors
                   );
                   return (
                     <g key={edge.id} onClick={() => handleEdgeClick(edge.id)}>
@@ -751,28 +958,57 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                   );
                 }
 
+                const selfPalette = getPlayerPalette(
+                  selfPlayer.id,
+                  view.playerOrder,
+                  playerColors
+                );
+
                 return (
                   <g
                     key={edge.id}
                     onClick={() => handleEdgeClick(edge.id)}
                     className={isSelectableRoad ? 'cursor-pointer' : ''}
                   >
-                    <line
-                      x1={p1.x}
-                      y1={p1.y}
-                      x2={p2.x}
-                      y2={p2.y}
-                      stroke={
-                        isSelectableRoad
-                          ? '#38bdf8'
-                          : isSelectedEdge
-                          ? '#fbbf24'
-                          : 'rgba(148, 163, 184, 0.22)'
-                      }
-                      strokeWidth={isSelectableRoad ? 7 : 4}
-                      strokeDasharray={isSelectableRoad ? '4 2' : undefined}
-                      strokeLinecap="round"
-                    />
+                    {isPendingRoadTarget ? (
+                      <g className="animate-pulse">
+                        <line
+                          x1={p1.x}
+                          y1={p1.y}
+                          x2={p2.x}
+                          y2={p2.y}
+                          stroke="#fde047"
+                          strokeWidth="13"
+                          strokeLinecap="round"
+                        />
+                        <line
+                          x1={p1.x}
+                          y1={p1.y}
+                          x2={p2.x}
+                          y2={p2.y}
+                          stroke={selfPalette.fillHex}
+                          strokeWidth="8"
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    ) : (
+                      <line
+                        x1={p1.x}
+                        y1={p1.y}
+                        x2={p2.x}
+                        y2={p2.y}
+                        stroke={
+                          isSelectableRoad
+                            ? '#38bdf8'
+                            : isSelectedEdge
+                              ? '#fbbf24'
+                              : 'rgba(148, 163, 184, 0.22)'
+                        }
+                        strokeWidth={isSelectableRoad ? 7 : 4}
+                        strokeDasharray={isSelectableRoad ? '4 2' : undefined}
+                        strokeLinecap="round"
+                      />
+                    )}
                   </g>
                 );
               })}
@@ -787,6 +1023,19 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                 const isMainBuildSpot =
                   isMyTurn && validMainPhaseVertices.has(vertex.id);
                 const isSelectedVertex = selectedVertexId === vertex.id;
+                const isPendingSettlementTarget =
+                  (pendingConfirm?.kind === 'INITIAL_SETTLEMENT' ||
+                    pendingConfirm?.kind === 'MAIN_SETTLEMENT') &&
+                  pendingConfirm.vertexId === vertex.id;
+                const isPendingCityTarget =
+                  pendingConfirm?.kind === 'UPGRADE_CITY' &&
+                  pendingConfirm.vertexId === vertex.id;
+
+                const selfPalette = getPlayerPalette(
+                  selfPlayer.id,
+                  view.playerOrder,
+                  playerColors
+                );
 
                 return (
                   <g
@@ -795,39 +1044,60 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                     onClick={() => handleVertexClick(vertex.id)}
                     className="cursor-pointer"
                   >
-                    {/* Coastal Harbor Tag if present */}
+                    {/* Coastal Harbor Tag if present — Black Font on Parchment Pill */}
                     {vertex.harbor && !vertex.building && (
-                      <text
-                        y="-10"
-                        textAnchor="middle"
-                        fill="#7dd3fc"
-                        fontSize="7.5"
-                        fontWeight="800"
-                      >
-                        ⚓{vertex.harbor}
-                      </text>
+                      <g transform="translate(0, -13)">
+                        <rect
+                          x="-24"
+                          y="-6.5"
+                          width="48"
+                          height="13"
+                          rx="4"
+                          fill="#fef3c7"
+                          stroke="#78350f"
+                          strokeWidth="1.2"
+                        />
+                        <text
+                          y="0.5"
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#000000"
+                          fontSize="7.5"
+                          fontWeight="900"
+                        >
+                          ⚓{vertex.harbor}
+                        </text>
+                      </g>
                     )}
 
                     {vertex.building && vertex.ownerId ? (
                       (() => {
                         const palette = getPlayerPalette(
                           vertex.ownerId,
-                          view.playerOrder
+                          view.playerOrder,
+                          playerColors
                         );
-                        const isCity = vertex.building === 'city';
+                        const isCity =
+                          vertex.building === 'city' || isPendingCityTarget;
                         const isUpgradeableTarget =
                           isMyTurn &&
                           view.turnStep === 'SELECT_CITY_UPGRADE' &&
                           vertex.ownerId === selfPlayer.id &&
                           vertex.building === 'settlement';
                         return (
-                          <g>
-                            {isUpgradeableTarget && (
+                          <g
+                            className={
+                              isPendingCityTarget ? 'animate-pulse' : ''
+                            }
+                          >
+                            {(isUpgradeableTarget || isPendingCityTarget) && (
                               <circle
-                                r="14"
+                                r={isPendingCityTarget ? 16 : 14}
                                 fill="none"
-                                stroke="#38bdf8"
-                                strokeWidth="3"
+                                stroke={
+                                  isPendingCityTarget ? '#fde047' : '#38bdf8'
+                                }
+                                strokeWidth="3.5"
                                 strokeDasharray="3 2"
                               />
                             )}
@@ -839,14 +1109,18 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                                 height="20"
                                 rx="4"
                                 fill={palette.fillHex}
-                                stroke="#020617"
-                                strokeWidth="2.5"
+                                stroke={
+                                  isPendingCityTarget ? '#fde047' : '#020617'
+                                }
+                                strokeWidth={isPendingCityTarget ? 3.5 : 2.5}
                               />
                             ) : (
                               <polygon
                                 points="0,-10 9,-2 7,9 -7,9 -9,-2"
                                 fill={palette.fillHex}
-                                stroke={isUpgradeableTarget ? '#38bdf8' : '#020617'}
+                                stroke={
+                                  isUpgradeableTarget ? '#38bdf8' : '#020617'
+                                }
                                 strokeWidth="2.2"
                               />
                             )}
@@ -862,6 +1136,31 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                           </g>
                         );
                       })()
+                    ) : isPendingSettlementTarget ? (
+                      <g className="animate-pulse">
+                        <circle
+                          r="16"
+                          fill="none"
+                          stroke="#fde047"
+                          strokeWidth="3.5"
+                          strokeDasharray="4 2"
+                        />
+                        <polygon
+                          points="0,-11 10,-2 8,10 -8,10 -10,-2"
+                          fill={selfPalette.fillHex}
+                          stroke="#fde047"
+                          strokeWidth="3"
+                        />
+                        <text
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#020617"
+                          fontSize="9"
+                          fontWeight="900"
+                        >
+                          🏠
+                        </text>
+                      </g>
                     ) : isInitialSpot || isMainBuildSpot ? (
                       <circle
                         r={isInitialSpot ? 7.5 : 6.5}
@@ -885,6 +1184,81 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
               })}
             </g>
           </svg>
+
+          {/* FLOATING BOTTOM-LEFT ZOOM & PAN CONTROLS (Matching Ticket to Ride) */}
+          <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1 bg-slate-900/95 border border-amber-500/60 rounded-xl px-2 py-1 shadow-xl backdrop-blur-sm text-xs">
+            <button
+              type="button"
+              onClick={() => handleZoomDelta(-0.25)}
+              disabled={zoomScale <= 1}
+              className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-amber-200 font-black flex items-center justify-center cursor-pointer"
+              title="Zoom Out"
+            >
+              −
+            </button>
+            <span className="px-2 font-mono font-bold text-amber-300 text-[11px]">
+              {Math.round(zoomScale * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => handleZoomDelta(0.25)}
+              disabled={zoomScale >= 2.5}
+              className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-amber-200 font-black flex items-center justify-center cursor-pointer"
+              title="Zoom In"
+            >
+              +
+            </button>
+            {zoomScale > 1 && (
+              <button
+                type="button"
+                onClick={handleResetZoom}
+                className="ml-1 px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-bold text-[10px] cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+
+          {/* FLASHING BOARD PLACEMENT CONFIRMATION BAR (Road, Settlement, City, Robber) */}
+          {pendingConfirm && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-slate-900/98 border-2 border-yellow-400 rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-4 text-xs animate-bounce">
+              <div>
+                <div className="font-black uppercase tracking-wider text-yellow-300 text-[11px]">
+                  {pendingConfirm.kind === 'INITIAL_SETTLEMENT' &&
+                    '🏠 Confirm Starting Settlement Placement?'}
+                  {pendingConfirm.kind === 'MAIN_SETTLEMENT' &&
+                    '🏠 Confirm Build Settlement (1W, 1B, 1S, 1Wh)?'}
+                  {pendingConfirm.kind === 'UPGRADE_CITY' &&
+                    '🏛️ Confirm Upgrade Settlement to City?'}
+                  {pendingConfirm.kind === 'INITIAL_ROAD' &&
+                    '🛣️ Confirm Starting Road Segment Placement?'}
+                  {pendingConfirm.kind === 'MAIN_ROAD' &&
+                    '🛣️ Confirm Build Road Segment?'}
+                  {pendingConfirm.kind === 'MOVE_ROBBER' &&
+                    `🦹 Confirm Move Robber to Hex (${pendingConfirm.hexId})?`}
+                </div>
+                <div className="text-[11px] text-slate-300">
+                  The flashing piece on the board shows where it will be placed.
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={executePendingBoardConfirmation}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg cursor-pointer"
+                >
+                  ✓ Confirm Placement
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingConfirm(null)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-xs cursor-pointer"
+                >
+                  ✕ Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* TOP-LEFT SPECIAL AWARD BOARDS: LARGEST ARMY (+2 VP) & LONGEST ROAD (+2 VP) */}
           <div className="absolute top-3 left-3 flex flex-col gap-2 w-64 z-10 pointer-events-none">
@@ -1086,83 +1460,153 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
             </div>
           )}
 
-          {/* SELECT ROBBER VICTIM MODAL */}
-          {view.turnStep === 'SELECT_ROBBER_VICTIM' && (
-            <div className="absolute inset-x-8 top-16 max-w-md mx-auto bg-slate-900/98 border-2 border-amber-400 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
-              <div className="font-black uppercase tracking-wider text-amber-300 text-xs border-b border-slate-800 pb-2">
-                🦹 Select Player on Robber Hex to Steal From
-              </div>
-              <p className="text-slate-300 text-[11px]">
-                Select a player who has a settlement or city on the Robber hex:
-              </p>
-              <div className="grid grid-cols-1 gap-2">
-                {view.robberEligibleVictimIds.map((vid) => {
-                  const oppCards =
-                    view.opponents[vid]?.totalResourceCards ?? 0;
-                  return (
-                    <button
-                      key={vid}
-                      type="button"
-                      disabled={!isMyTurn || isControlsLocked}
-                      onClick={() =>
-                        onDispatchAction(selfPlayer.id, {
-                          type: 'CATAN_SELECT_ROBBER_VICTIM',
-                          victimPlayerId: vid,
-                        })
-                      }
-                      className="p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/50 flex items-center justify-between font-bold text-slate-100 transition"
-                    >
-                      <span>{formatPlayerLabel(vid)}</span>
-                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[11px]">
-                        {oppCards} Resource Card(s)
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* SHUFFLED RESOURCE CARD STEAL DISPLAY */}
-          {view.turnStep === 'STEAL_ROBBER_CARD' && view.robberVictimId && (
-            <div className="absolute inset-x-8 top-16 max-w-lg mx-auto bg-slate-900/98 border-2 border-emerald-400 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="font-black uppercase tracking-wider text-emerald-300 text-xs">
-                  🃏 Pick 1 Card from {formatPlayerLabel(view.robberVictimId)}&apos;s Shuffled Hand
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-200 font-mono font-black text-[11px]">
-                  Picking from {view.robberVictimCardCount} Card(s)
-                </span>
-              </div>
-              <p className="text-slate-300 text-[11px]">
-                {formatPlayerLabel(view.robberVictimId)}&apos;s{' '}
-                <strong>{view.robberVictimCardCount}</strong> resource cards have
-                been shuffled face-down. Click any card below to steal it!
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2.5 py-2">
-                {Array.from(
-                  { length: view.robberVictimCardCount },
-                  (_, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={!isMyTurn || isControlsLocked}
-                      onClick={() =>
-                        onDispatchAction(selfPlayer.id, {
-                          type: 'CATAN_STEAL_CARD',
-                          cardIndex: idx,
-                        })
-                      }
-                      className="w-16 h-24 rounded-xl bg-gradient-to-br from-amber-700 via-amber-900 to-slate-950 hover:from-emerald-600 hover:to-emerald-900 border-2 border-amber-400 hover:border-emerald-300 shadow-lg flex flex-col items-center justify-center gap-1 transition transform hover:-translate-y-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <span className="text-lg">🌾</span>
-                      <span className="font-mono font-black text-[10px] text-amber-200">
-                        Card #{idx + 1}
-                      </span>
-                    </button>
-                  )
-                )}
-              </div>
+          {/* SELECT ROBBER VICTIM & SHUFFLED RESOURCE CARD STEAL CENTER WINDOW OVERLAY */}
+          {(view.turnStep === 'SELECT_ROBBER_VICTIM' ||
+            (view.turnStep === 'STEAL_ROBBER_CARD' && view.robberVictimId)) && (
+            <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-40 p-4">
+              {view.turnStep === 'SELECT_ROBBER_VICTIM' ? (
+                <div className="w-full max-w-md bg-slate-900 border-2 border-amber-400 rounded-2xl p-5 shadow-2xl text-xs space-y-3">
+                  <div className="font-black uppercase tracking-wider text-amber-300 text-sm border-b border-slate-800 pb-2">
+                    🦹 Select Player on Robber Hex to Steal From
+                  </div>
+                  <p className="text-slate-300 text-xs">
+                    Select a player who has a settlement or city on the Robber
+                    hex:
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {view.robberEligibleVictimIds.map((vid) => {
+                      const oppCards =
+                        view.opponents[vid]?.totalResourceCards ?? 0;
+                      const oppPalette = getPlayerPalette(
+                        vid,
+                        view.playerOrder,
+                        playerColors
+                      );
+                      return (
+                        <button
+                          key={vid}
+                          type="button"
+                          disabled={!isMyTurn || isControlsLocked}
+                          onClick={() =>
+                            onDispatchAction(selfPlayer.id, {
+                              type: 'CATAN_SELECT_ROBBER_VICTIM',
+                              victimPlayerId: vid,
+                            })
+                          }
+                          className="p-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/50 flex items-center justify-between font-bold text-slate-100 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-3.5 h-3.5 rounded-full border"
+                              style={{
+                                backgroundColor: oppPalette.fillHex,
+                                borderColor: oppPalette.strokeHex,
+                              }}
+                            />
+                            <span>{formatPlayerLabel(vid)}</span>
+                          </div>
+                          <span className="px-2.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[11px]">
+                            {oppCards} Resource Card(s)
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full max-w-xl bg-slate-900 border-2 border-amber-400 rounded-2xl p-5 shadow-2xl text-xs space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <span className="font-black uppercase tracking-wider text-amber-300 text-sm">
+                      🃏 Pick 1 Card from{' '}
+                      {formatPlayerLabel(view.robberVictimId!)}&apos;s Hand
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-200 font-mono font-black text-[11px]">
+                      {view.robberVictimCardCount} Shuffled Card(s)
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-xs">
+                    {formatPlayerLabel(view.robberVictimId!)}&apos;s{' '}
+                    <strong>{view.robberVictimCardCount}</strong> resource cards
+                    are fanned out face-down below. Click any card back to steal
+                    it — this window will close automatically once selected!
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 py-3">
+                    {Array.from(
+                      { length: view.robberVictimCardCount },
+                      (_, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          disabled={!isMyTurn || isControlsLocked}
+                          onClick={() =>
+                            onDispatchAction(selfPlayer.id, {
+                              type: 'CATAN_STEAL_CARD',
+                              cardIndex: idx,
+                            })
+                          }
+                          title={`Steal Card #${idx + 1}`}
+                          className="group w-20 h-28 rounded-xl p-1 bg-[#f5e6c8] hover:bg-amber-100 border-2 border-[#78350f] hover:border-amber-400 shadow-xl transition transform hover:-translate-y-1.5 hover:scale-105 cursor-pointer disabled:opacity-50"
+                        >
+                          {/* Classic Catan Resource Card Back Artwork (Compass Rose, Sun over Sea/Island & CATAN Banner) */}
+                          <div className="w-full h-full rounded-lg border border-[#78350f] bg-gradient-to-b from-[#b45309] via-[#92400e] to-[#451a03] flex flex-col items-center justify-between p-1.5 relative overflow-hidden">
+                            <span className="text-[7px] font-black tracking-widest uppercase text-amber-200">
+                              RESOURCE
+                            </span>
+                            <svg
+                              viewBox="0 0 64 64"
+                              className="w-11 h-11 drop-shadow"
+                            >
+                              {/* Outer golden sun & compass ring */}
+                              <circle
+                                cx="32"
+                                cy="32"
+                                r="26"
+                                fill="#1e3a8a"
+                                stroke="#fbbf24"
+                                strokeWidth="3"
+                              />
+                              {/* Rising golden sun */}
+                              <circle cx="32" cy="30" r="13" fill="#f59e0b" />
+                              <circle cx="32" cy="30" r="9" fill="#fde047" />
+                              {/* Ocean waves */}
+                              <path
+                                d="M 9 38 Q 20 33 32 38 T 55 38 L 53 52 L 11 52 Z"
+                                fill="#0284c7"
+                              />
+                              <path
+                                d="M 12 44 Q 22 40 32 44 T 52 44"
+                                fill="none"
+                                stroke="#bae6fd"
+                                strokeWidth="2"
+                              />
+                              {/* Compass cardinal points */}
+                              <polygon
+                                points="32,3 35,11 29,11"
+                                fill="#fde047"
+                              />
+                              <polygon
+                                points="32,61 35,53 29,53"
+                                fill="#fde047"
+                              />
+                              <polygon
+                                points="3,32 11,29 11,35"
+                                fill="#fde047"
+                              />
+                              <polygon
+                                points="61,32 53,29 53,35"
+                                fill="#fde047"
+                              />
+                            </svg>
+                            <span className="px-1.5 py-0.2 rounded bg-[#78350f] border border-amber-400/80 text-[8px] font-serif font-black tracking-wider text-amber-200">
+                              CATAN
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1244,283 +1688,613 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
             )}
           </div>
 
-          {/* ACTIVE PLAYER-TO-PLAYER TRADE NEGOTIATION OVERLAY */}
-          {view.activeTrade && (
-            <div className="absolute inset-x-6 bottom-4 max-w-3xl mx-auto bg-slate-900/98 border-2 border-cyan-400 rounded-2xl p-4 shadow-2xl z-30 text-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div>
-                  <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400 text-cyan-200 font-black text-[10px] uppercase">
-                    🤝 Active Trade Negotiation ({view.activeTrade.phase})
-                  </span>
-                  <h3 className="font-black text-sm text-slate-100 mt-1">
-                    {formatPlayerLabel(view.activeTrade.initiatorId)} offers{' '}
-                    <span className="text-emerald-300">
-                      {formatBundleText(view.activeTrade.initialOffered)}
-                    </span>{' '}
-                    for{' '}
-                    <span className="text-amber-300">
-                      {formatBundleText(view.activeTrade.initialRequested)}
+          {/* CENTERED GUI TRADE WINDOW (Used for All Parts of Domestic & Maritime Trade) */}
+          {(isTradeWindowOpen || view.activeTrade) && (
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-40 p-4 overflow-y-auto">
+              <div className="w-full max-w-3xl bg-slate-900 border-2 border-cyan-400 rounded-2xl p-5 shadow-2xl text-xs space-y-4 my-auto">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div>
+                    <span className="px-2.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400 text-cyan-200 font-black text-[10px] uppercase tracking-wider">
+                      {view.activeTrade
+                        ? `🤝 Active Trade Negotiation • ${view.activeTrade.phase.replace(/_/g, ' ')}`
+                        : '🤝 Catan Trading Exchange • Domestic & Maritime Port Trade'}
                     </span>
-                  </h3>
+                    <h3 className="font-black text-base text-slate-100 mt-1">
+                      {view.activeTrade ? (
+                        <>
+                          {formatPlayerLabel(view.activeTrade.initiatorId)}{' '}
+                          offers{' '}
+                          <span className="text-emerald-300">
+                            {formatBundleText(view.activeTrade.initialOffered)}
+                          </span>{' '}
+                          for{' '}
+                          <span className="text-amber-300">
+                            {formatBundleText(
+                              view.activeTrade.initialRequested
+                            )}
+                          </span>
+                        </>
+                      ) : (
+                        'Build Your Trade Proposal (Offer on Left • Ask on Right)'
+                      )}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {view.activeTrade &&
+                      selfPlayer.id === view.activeTrade.initiatorId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onDispatchAction(selfPlayer.id, {
+                              type: 'CATAN_CANCEL_TRADE',
+                            });
+                            setIsTradeWindowOpen(false);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-950/90 hover:bg-rose-900 border border-rose-500/60 text-rose-200 font-bold text-xs cursor-pointer"
+                        >
+                          ✕ Cancel Trade Offer
+                        </button>
+                      )}
+                    {!view.activeTrade && (
+                      <button
+                        type="button"
+                        onClick={() => setIsTradeWindowOpen(false)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
+                      >
+                        ✕ Close Window
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {selfPlayer.id === view.activeTrade.initiatorId && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onDispatchAction(selfPlayer.id, {
-                        type: 'CATAN_CANCEL_TRADE',
-                      })
-                    }
-                    className="px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-500/60 text-rose-200 font-bold text-[11px]"
-                  >
-                    ✕ Cancel Trade
-                  </button>
+
+                {/* PART 1: No active trade yet -> Offer on Left & Ask on Right + Maritime Trade */}
+                {!view.activeTrade ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* LEFT PANEL: OFFER (What You Give) */}
+                      <div className="p-3.5 rounded-xl bg-slate-950 border-2 border-emerald-500/50 space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                          <span className="font-black uppercase tracking-wider text-emerald-300 text-xs">
+                            📤 You Offer (Left)
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            From Your Hand
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {ALL_CATAN_RESOURCES.map((r) => {
+                            const theme = TERRAIN_THEMES[r];
+                            const held = selfPlayer.resources[r];
+                            const current = offerAmounts[r];
+                            return (
+                              <div
+                                key={`gui_off_${r}`}
+                                className="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[11px] font-black border ${theme.badge}`}
+                                  >
+                                    {theme.icon} {r}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    (Have: {held})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={current <= 0}
+                                    onClick={() =>
+                                      setOfferAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.max(0, prev[r] - 1),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 font-black text-slate-200 cursor-pointer"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-6 text-center font-mono font-black text-sm text-emerald-300">
+                                    {current}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={current >= held}
+                                    onClick={() =>
+                                      setOfferAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.min(held, prev[r] + 1),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 font-black text-slate-200 cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* RIGHT PANEL: ASK (What You Want) */}
+                      <div className="p-3.5 rounded-xl bg-slate-950 border-2 border-amber-500/50 space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                          <span className="font-black uppercase tracking-wider text-amber-300 text-xs">
+                            📥 You Ask For (Right)
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Requested Resources
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {ALL_CATAN_RESOURCES.map((r) => {
+                            const theme = TERRAIN_THEMES[r];
+                            const current = requestAmounts[r];
+                            return (
+                              <div
+                                key={`gui_req_${r}`}
+                                className="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[11px] font-black border ${theme.badge}`}
+                                  >
+                                    {theme.icon} {r}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={current <= 0}
+                                    onClick={() =>
+                                      setRequestAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.max(0, prev[r] - 1),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 font-black text-slate-200 cursor-pointer"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-6 text-center font-mono font-black text-sm text-amber-300">
+                                    {current}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={current >= 19}
+                                    onClick={() =>
+                                      setRequestAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.min(19, prev[r] + 1),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 font-black text-slate-200 cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Propose Player Trade Action Bar */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-950/90 border border-slate-800">
+                      <div className="text-xs text-slate-300">
+                        Offering:{' '}
+                        <strong className="text-emerald-300">
+                          {formatBundleText(offerAmounts)}
+                        </strong>{' '}
+                        ➔ Asking:{' '}
+                        <strong className="text-amber-300">
+                          {formatBundleText(requestAmounts)}
+                        </strong>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOfferAmounts(createZeroBundle());
+                            setRequestAmounts(createZeroBundle());
+                          }}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+                        >
+                          Reset Counts
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            isControlsLocked ||
+                            pendingAction ||
+                            !isMyTurn ||
+                            view.turnStep !== 'MAIN_PHASE'
+                          }
+                          onClick={() =>
+                            onDispatchAction(selfPlayer.id, {
+                              type: 'CATAN_PROPOSE_TRADE',
+                              offered: offerAmounts,
+                              requested: requestAmounts,
+                            })
+                          }
+                          className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-black text-xs shadow-lg cursor-pointer"
+                        >
+                          🤝 Send Trade Offer to All Players
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Maritime / Port Bank Trade Section inside the GUI Window */}
+                    <div className="p-3.5 rounded-xl bg-slate-950 border border-cyan-500/30 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="font-black uppercase tracking-wider text-cyan-300 text-xs">
+                          ⚓ Maritime / Port Bank Trade ({maritimeRate}:1 Rate)
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Trade directly with the Bank or your coastal Harbors
+                          without waiting on opponents.
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select
+                          value={tradeGive}
+                          onChange={(e) =>
+                            setTradeGive(e.target.value as CatanResource)
+                          }
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 font-bold"
+                        >
+                          {ALL_CATAN_RESOURCES.map((r) => (
+                            <option key={`mg_${r}`} value={r}>
+                              Give{' '}
+                              {getPlayerMaritimeTradeRate(
+                                view.board,
+                                selfPlayer.id,
+                                r
+                              )}
+                              × {r} (Have {selfPlayer.resources[r]})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="font-black text-amber-300">➔</span>
+                        <select
+                          value={tradeReceive}
+                          onChange={(e) =>
+                            setTradeReceive(e.target.value as CatanResource)
+                          }
+                          className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 font-bold"
+                        >
+                          {ALL_CATAN_RESOURCES.map((r) => (
+                            <option key={`mr_${r}`} value={r}>
+                              Receive 1× {r}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={
+                            isControlsLocked ||
+                            pendingAction ||
+                            !isMyTurn ||
+                            view.turnStep !== 'MAIN_PHASE'
+                          }
+                          onClick={() =>
+                            onDispatchAction(selfPlayer.id, {
+                              type: 'CATAN_MARITIME_TRADE',
+                              give: tradeGive,
+                              receive: tradeReceive,
+                            })
+                          }
+                          className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-xs shadow cursor-pointer"
+                        >
+                          ⚓ Execute Bank Trade
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* PART 2: Active Trade Negotiation & Counter-Offers (Offer on Left, Ask on Right) */
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {Object.values(view.activeTrade.branches).map(
+                        (branch) => {
+                          const isMyBranch =
+                            selfPlayer.id === branch.opponentId;
+                          const isActiveInitiator =
+                            selfPlayer.id === view.activeTrade?.initiatorId;
+
+                          return (
+                            <div
+                              key={branch.opponentId}
+                              className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-100 text-xs">
+                                  {formatPlayerLabel(branch.opponentId)}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    branch.status === 'OPPONENT_ACCEPTED'
+                                      ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+                                      : branch.status === 'OPPONENT_COUNTERED'
+                                        ? 'bg-amber-500/20 border border-amber-400 text-amber-300'
+                                        : branch.status === 'DECLINED'
+                                          ? 'bg-rose-500/20 border border-rose-400 text-rose-300'
+                                          : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  {branch.status}
+                                </span>
+                              </div>
+
+                              {/* Offer on Left / Ask on Right summary */}
+                              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                <div className="p-2 rounded-lg bg-emerald-950/30 border border-emerald-500/30">
+                                  <div className="text-[9px] uppercase font-bold text-emerald-300">
+                                    📤 Offer (Active Gives)
+                                  </div>
+                                  <div className="font-bold text-white mt-0.5">
+                                    {formatBundleText(branch.activeGives)}
+                                  </div>
+                                </div>
+                                <div className="p-2 rounded-lg bg-amber-950/30 border border-amber-500/30">
+                                  <div className="text-[9px] uppercase font-bold text-amber-300">
+                                    📥 Ask ({formatPlayerLabel(branch.opponentId)}{' '}
+                                    Gives)
+                                  </div>
+                                  <div className="font-bold text-white mt-0.5">
+                                    {formatBundleText(branch.opponentGives)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Opponent Controls when AWAITING_OPPONENTS */}
+                              {view.activeTrade?.phase ===
+                                'AWAITING_OPPONENTS' &&
+                                (isMyBranch || !isControlsLocked) &&
+                                branch.status === 'AWAITING_OPPONENT' && (
+                                  <div className="flex items-center gap-2 pt-1.5 border-t border-slate-800">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onDispatchAction(branch.opponentId, {
+                                          type: 'CATAN_RESPOND_TRADE',
+                                          response: 'ACCEPT',
+                                        })
+                                      }
+                                      className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs cursor-pointer"
+                                    >
+                                      ✓ Accept
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCounteringTargetId(
+                                          counteringTargetId ===
+                                            branch.opponentId
+                                            ? null
+                                            : branch.opponentId
+                                        )
+                                      }
+                                      className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+                                    >
+                                      ⇄ Counter
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onDispatchAction(branch.opponentId, {
+                                          type: 'CATAN_RESPOND_TRADE',
+                                          response: 'DECLINE',
+                                        })
+                                      }
+                                      className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer"
+                                    >
+                                      ✕ Decline
+                                    </button>
+                                  </div>
+                                )}
+
+                              {/* Active Player Controls when AWAITING_ACTIVE_PLAYER */}
+                              {view.activeTrade?.phase ===
+                                'AWAITING_ACTIVE_PLAYER' &&
+                                isActiveInitiator &&
+                                (branch.status === 'OPPONENT_ACCEPTED' ||
+                                  branch.status === 'OPPONENT_COUNTERED') && (
+                                  <div className="flex items-center gap-2 pt-1.5 border-t border-slate-800">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onDispatchAction(selfPlayer.id, {
+                                          type: 'CATAN_RESPOND_TRADE',
+                                          response: 'ACCEPT',
+                                          targetOpponentId: branch.opponentId,
+                                        });
+                                        setIsTradeWindowOpen(false);
+                                      }}
+                                      className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs cursor-pointer"
+                                    >
+                                      ✓ Accept Offer
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCounteringTargetId(
+                                          counteringTargetId ===
+                                            branch.opponentId
+                                            ? null
+                                            : branch.opponentId
+                                        )
+                                      }
+                                      className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+                                    >
+                                      ⇄ Counter
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onDispatchAction(selfPlayer.id, {
+                                          type: 'CATAN_RESPOND_TRADE',
+                                          response: 'DECLINE',
+                                          targetOpponentId: branch.opponentId,
+                                        })
+                                      }
+                                      className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer"
+                                    >
+                                      ✕ Decline
+                                    </button>
+                                  </div>
+                                )}
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+
+                    {/* Counter-Offer Editor (Offer on Left, Ask on Right) */}
+                    {counteringTargetId && (
+                      <div className="p-4 rounded-xl bg-slate-950 border-2 border-amber-400/70 space-y-3">
+                        <div className="font-black text-amber-300 text-xs uppercase">
+                          ⇄ Build Counter-Proposal (Offer on Left • Ask on
+                          Right)
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/40 space-y-1.5">
+                            <span className="text-[11px] font-black text-emerald-300 block">
+                              📤 You Offer (Left):
+                            </span>
+                            {ALL_CATAN_RESOURCES.map((r) => (
+                              <div
+                                key={`cg_${r}`}
+                                className="flex items-center justify-between text-xs"
+                              >
+                                <span>
+                                  {TERRAIN_THEMES[r].icon} {r} (Have{' '}
+                                  {selfPlayer.resources[r]})
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCounterGiveAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.max(0, prev[r] - 1),
+                                      }))
+                                    }
+                                    className="w-5 h-5 rounded bg-slate-800 font-black"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-6 text-center font-mono font-bold text-emerald-300">
+                                    {counterGiveAmounts[r]}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCounterGiveAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.min(
+                                          selfPlayer.resources[r],
+                                          prev[r] + 1
+                                        ),
+                                      }))
+                                    }
+                                    className="w-5 h-5 rounded bg-slate-800 font-black"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/40 space-y-1.5">
+                            <span className="text-[11px] font-black text-amber-300 block">
+                              📥 You Ask For (Right):
+                            </span>
+                            {ALL_CATAN_RESOURCES.map((r) => (
+                              <div
+                                key={`cr_${r}`}
+                                className="flex items-center justify-between text-xs"
+                              >
+                                <span>
+                                  {TERRAIN_THEMES[r].icon} {r}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCounterRequestAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.max(0, prev[r] - 1),
+                                      }))
+                                    }
+                                    className="w-5 h-5 rounded bg-slate-800 font-black"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="w-6 text-center font-mono font-bold text-amber-300">
+                                    {counterRequestAmounts[r]}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCounterRequestAmounts((prev) => ({
+                                        ...prev,
+                                        [r]: Math.min(19, prev[r] + 1),
+                                      }))
+                                    }
+                                    className="w-5 h-5 rounded bg-slate-800 font-black"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCounteringTargetId(null)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-xs"
+                          >
+                            Cancel Counter
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const actorId =
+                                view.activeTrade?.phase === 'AWAITING_OPPONENTS'
+                                  ? counteringTargetId
+                                  : view.activeTrade?.initiatorId ??
+                                    selfPlayer.id;
+                              onDispatchAction(actorId, {
+                                type: 'CATAN_RESPOND_TRADE',
+                                response: 'COUNTER',
+                                ...(view.activeTrade?.phase ===
+                                'AWAITING_ACTIVE_PLAYER'
+                                  ? { targetOpponentId: counteringTargetId }
+                                  : {}),
+                                counterGive: counterGiveAmounts,
+                                counterRequest: counterRequestAmounts,
+                              });
+                              setCounteringTargetId(null);
+                            }}
+                            className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+                          >
+                            Send Counter-Proposal
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-
-              {/* Branches Status & Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {Object.values(view.activeTrade.branches).map((branch) => {
-                  const isMyBranch = selfPlayer.id === branch.opponentId;
-                  const isActiveInitiator =
-                    selfPlayer.id === view.activeTrade?.initiatorId;
-
-                  return (
-                    <div
-                      key={branch.opponentId}
-                      className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-100">
-                          {formatPlayerLabel(branch.opponentId)}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
-                            branch.status === 'OPPONENT_ACCEPTED'
-                              ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
-                              : branch.status === 'OPPONENT_COUNTERED'
-                              ? 'bg-amber-500/20 border border-amber-400 text-amber-300'
-                              : branch.status === 'DECLINED'
-                              ? 'bg-rose-500/20 border border-rose-400 text-rose-300'
-                              : 'bg-slate-800 text-slate-300'
-                          }`}
-                        >
-                          {branch.status}
-                        </span>
-                      </div>
-
-                      <div className="text-[11px] text-slate-300">
-                        <div>
-                          Active Gives:{' '}
-                          <strong className="text-emerald-300">
-                            {formatBundleText(branch.activeGives)}
-                          </strong>
-                        </div>
-                        <div>
-                          {formatPlayerLabel(branch.opponentId)} Gives:{' '}
-                          <strong className="text-amber-300">
-                            {formatBundleText(branch.opponentGives)}
-                          </strong>
-                        </div>
-                      </div>
-
-                      {/* Opponent Controls when AWAITING_OPPONENTS */}
-                      {view.activeTrade?.phase === 'AWAITING_OPPONENTS' &&
-                        (isMyBranch || !isControlsLocked) &&
-                        branch.status === 'AWAITING_OPPONENT' && (
-                          <div className="space-y-2 pt-1 border-t border-slate-800">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onDispatchAction(branch.opponentId, {
-                                    type: 'CATAN_RESPOND_TRADE',
-                                    response: 'ACCEPT',
-                                  })
-                                }
-                                className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px]"
-                              >
-                                ✓ Accept
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setCounteringTargetId(
-                                    counteringTargetId === branch.opponentId
-                                      ? null
-                                      : branch.opponentId
-                                  )
-                                }
-                                className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px]"
-                              >
-                                ⇄ Counter
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onDispatchAction(branch.opponentId, {
-                                    type: 'CATAN_RESPOND_TRADE',
-                                    response: 'DECLINE',
-                                  })
-                                }
-                                className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px]"
-                              >
-                                ✕ Decline
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                      {/* Active Player Controls when AWAITING_ACTIVE_PLAYER */}
-                      {view.activeTrade?.phase === 'AWAITING_ACTIVE_PLAYER' &&
-                        isActiveInitiator &&
-                        (branch.status === 'OPPONENT_ACCEPTED' ||
-                          branch.status === 'OPPONENT_COUNTERED') && (
-                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onDispatchAction(selfPlayer.id, {
-                                  type: 'CATAN_RESPOND_TRADE',
-                                  response: 'ACCEPT',
-                                  targetOpponentId: branch.opponentId,
-                                })
-                              }
-                              className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px]"
-                            >
-                              ✓ Accept Offer
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCounteringTargetId(
-                                  counteringTargetId === branch.opponentId
-                                    ? null
-                                    : branch.opponentId
-                                )
-                              }
-                              className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px]"
-                            >
-                              ⇄ Counter
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onDispatchAction(selfPlayer.id, {
-                                  type: 'CATAN_RESPOND_TRADE',
-                                  response: 'DECLINE',
-                                  targetOpponentId: branch.opponentId,
-                                })
-                              }
-                              className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-black text-[11px]"
-                            >
-                              ✕ Decline
-                            </button>
-                          </div>
-                        )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Counter-Offer Editor */}
-              {counteringTargetId && (
-                <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/60 space-y-2">
-                  <div className="font-bold text-amber-300 text-[11px]">
-                    Build Counter-Proposal (You Offer vs You Request):
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block mb-1">
-                        You Give (Max = Your Hand):
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ALL_CATAN_RESOURCES.map((r) => (
-                          <label
-                            key={`cg_${r}`}
-                            className="flex items-center gap-1 bg-slate-900 px-1.5 py-1 rounded border border-slate-800 text-[10px]"
-                          >
-                            <span>{r}:</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={selfPlayer.resources[r]}
-                              value={counterGiveAmounts[r]}
-                              onChange={(e) =>
-                                setCounterGiveAmounts((prev) => ({
-                                  ...prev,
-                                  [r]: Math.max(
-                                    0,
-                                    Math.min(
-                                      selfPlayer.resources[r],
-                                      Number(e.target.value) || 0
-                                    )
-                                  ),
-                                }))
-                              }
-                              className="w-10 bg-slate-950 border border-slate-700 rounded px-1 text-center font-mono"
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 block mb-1">
-                        You Ask For:
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ALL_CATAN_RESOURCES.map((r) => (
-                          <label
-                            key={`cr_${r}`}
-                            className="flex items-center gap-1 bg-slate-900 px-1.5 py-1 rounded border border-slate-800 text-[10px]"
-                          >
-                            <span>{r}:</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={19}
-                              value={counterRequestAmounts[r]}
-                              onChange={(e) =>
-                                setCounterRequestAmounts((prev) => ({
-                                  ...prev,
-                                  [r]: Math.max(
-                                    0,
-                                    Number(e.target.value) || 0
-                                  ),
-                                }))
-                              }
-                              className="w-10 bg-slate-950 border border-slate-700 rounded px-1 text-center font-mono"
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const actorId =
-                        view.activeTrade?.phase === 'AWAITING_OPPONENTS'
-                          ? counteringTargetId
-                          : view.activeTrade?.initiatorId ?? selfPlayer.id;
-                      onDispatchAction(actorId, {
-                        type: 'CATAN_RESPOND_TRADE',
-                        response: 'COUNTER',
-                        ...(view.activeTrade?.phase ===
-                        'AWAITING_ACTIVE_PLAYER'
-                          ? { targetOpponentId: counteringTargetId }
-                          : {}),
-                        counterGive: counterGiveAmounts,
-                        counterRequest: counterRequestAmounts,
-                      });
-                      setCounteringTargetId(null);
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs"
-                  >
-                    Send Counter-Proposal
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1772,9 +2546,6 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
                         if (card.type === 'KNIGHT') {
                           onDispatchAction(selfPlayer.id, {
                             type: 'CATAN_PLAY_KNIGHT',
-                            ...(selectedHexId !== view.board.robberHexId
-                              ? { targetHexId: selectedHexId }
-                              : {}),
                           });
                         } else if (card.type === 'MONOPOLY') {
                           onDispatchAction(selfPlayer.id, {
@@ -1855,145 +2626,54 @@ export const CatanBoard: React.FC<CatanBoardProps> = ({
           </div>
         </div>
 
-        {/* Column D: Player-to-Player Trade Proposal & Maritime Bank Trade */}
-        <div className="w-96 shrink-0 flex flex-col justify-between bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
+        {/* Column D: Trade Action Button (Opens Center-Screen GUI Trade Window) */}
+        <div className="w-80 shrink-0 flex flex-col justify-between bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-bold uppercase tracking-wider text-cyan-300">
-              🤝 Offer Trade (X for Y) &amp; {maritimeRate}:1 Port
+              🤝 Domestic &amp; Maritime Trade
+            </span>
+            <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/40 text-cyan-200 text-[10px] font-bold">
+              Best Port: {maritimeRate}:1
             </span>
           </div>
 
-          {/* Player-to-Player Trade Builder */}
-          <div className="space-y-1.5 my-auto">
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-emerald-300 font-bold w-14">
-                Offer (X):
-              </span>
-              {ALL_CATAN_RESOURCES.map((r) => (
-                <label
-                  key={`off_${r}`}
-                  className="flex items-center gap-0.5 bg-slate-900 px-1 py-0.5 rounded border border-slate-800 text-[9px]"
-                >
-                  <span>{r.slice(0, 2)}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={selfPlayer.resources[r]}
-                    value={offerAmounts[r]}
-                    onChange={(e) =>
-                      setOfferAmounts((prev) => ({
-                        ...prev,
-                        [r]: Math.max(
-                          0,
-                          Math.min(
-                            selfPlayer.resources[r],
-                            Number(e.target.value) || 0
-                          )
-                        ),
-                      }))
-                    }
-                    className="w-8 bg-slate-950 border border-slate-700 rounded text-center font-mono text-slate-100"
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-amber-300 font-bold w-14">
-                Ask (Y):
-              </span>
-              {ALL_CATAN_RESOURCES.map((r) => (
-                <label
-                  key={`req_${r}`}
-                  className="flex items-center gap-0.5 bg-slate-900 px-1 py-0.5 rounded border border-slate-800 text-[9px]"
-                >
-                  <span>{r.slice(0, 2)}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={19}
-                    value={requestAmounts[r]}
-                    onChange={(e) =>
-                      setRequestAmounts((prev) => ({
-                        ...prev,
-                        [r]: Math.max(0, Number(e.target.value) || 0),
-                      }))
-                    }
-                    className="w-8 bg-slate-950 border border-slate-700 rounded text-center font-mono text-slate-100"
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                disabled={
-                  isControlsLocked ||
-                  pendingAction ||
-                  !isMyTurn ||
-                  view.turnStep !== 'MAIN_PHASE' ||
-                  Boolean(view.activeTrade)
-                }
-                onClick={() =>
-                  onDispatchAction(selfPlayer.id, {
-                    type: 'CATAN_PROPOSE_TRADE',
-                    offered: offerAmounts,
-                    requested: requestAmounts,
-                  })
-                }
-                className="flex-1 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-35 text-slate-950 font-black text-[11px] transition shadow"
-              >
-                🤝 Propose Player Trade
-              </button>
-            </div>
-          </div>
-
-          {/* Maritime Trade Quick Bar */}
-          <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-slate-800/80 text-[10px]">
-            <select
-              value={tradeGive}
-              onChange={(e) => setTradeGive(e.target.value as CatanResource)}
-              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100"
-            >
-              {ALL_CATAN_RESOURCES.map((r) => (
-                <option key={`mg_${r}`} value={r}>
-                  Give {getPlayerMaritimeTradeRate(view.board, selfPlayer.id, r)}×{' '}
-                  {r}
-                </option>
-              ))}
-            </select>
-            <span>→</span>
-            <select
-              value={tradeReceive}
-              onChange={(e) => setTradeReceive(e.target.value as CatanResource)}
-              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100"
-            >
-              {ALL_CATAN_RESOURCES.map((r) => (
-                <option key={`mr_${r}`} value={r}>
-                  1× {r}
-                </option>
-              ))}
-            </select>
+          <div className="my-auto space-y-2">
             <button
               type="button"
               disabled={
-                isControlsLocked ||
+                (isControlsLocked && !view.activeTrade) ||
                 pendingAction ||
-                !isMyTurn ||
-                view.turnStep !== 'MAIN_PHASE'
+                (!isMyTurn && !view.activeTrade) ||
+                (view.turnStep !== 'MAIN_PHASE' && !view.activeTrade)
               }
-              onClick={() =>
-                onDispatchAction(selfPlayer.id, {
-                  type: 'CATAN_MARITIME_TRADE',
-                  give: tradeGive,
-                  receive: tradeReceive,
-                })
-              }
-              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-cyan-200 border border-cyan-500/40 font-bold"
+              onClick={() => setIsTradeWindowOpen(true)}
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 disabled:opacity-35 text-slate-950 font-black text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
             >
-              ⚓ Bank Trade
+              <span>🤝</span>
+              <span>
+                {view.activeTrade
+                  ? `Open Active Trade (${view.activeTrade.phase.replace(/_/g, ' ')})`
+                  : 'Open Trade Window'}
+              </span>
             </button>
+            <p className="text-[10px] text-slate-400 text-center leading-snug">
+              Opens the center-screen GUI Trade Window with your Offer on the
+              left, your Ask on the right, and Maritime Port trading.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+            <span>Harbor Rates:</span>
+            <span className="font-mono text-slate-300">
+              {ALL_CATAN_RESOURCES.map(
+                (r) =>
+                  `${r.slice(0, 2)}:${getPlayerMaritimeTradeRate(
+                    view.board,
+                    selfPlayer.id,
+                    r
+                  )}:1`
+              ).join(' • ')}
+            </span>
           </div>
         </div>
       </section>

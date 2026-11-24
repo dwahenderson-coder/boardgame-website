@@ -1127,6 +1127,158 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     </div>
                   );
                 })()
+              ) : stagedGame.id === 'stockpile' ? (
+                <div className="space-y-4">
+                  {/* Option 1: Basic Board vs Advanced Board Selector */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-cyan-300 text-[11px]">
+                        📊 Option 1: Select Stock Market Board
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Selection' : 'Synced with Host'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {(() => {
+                        const isAdvanced =
+                          selectedExpansions.includes('advanced_board');
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && isAdvanced) {
+                                  onToggleExpansion('advanced_board');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                !isAdvanced
+                                  ? 'bg-cyan-950/40 border-cyan-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  📈 Basic Board (Standard Tracks)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    !isAdvanced
+                                      ? 'bg-cyan-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {!isAdvanced ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Uniform 1–10 stock track for all 6 companies.
+                                Starts &amp; resets on 5 after Bankruptcy, and
+                                splits to 6.
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isAdvanced) {
+                                  onToggleExpansion('advanced_board');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isAdvanced
+                                  ? 'bg-cyan-950/40 border-cyan-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  🚀 Advanced Board (Asymmetric Tracks)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    isAdvanced
+                                      ? 'bg-cyan-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {isAdvanced ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Custom per-company tracks: Cosmic Computers
+                                (1-3-5-7-9), Bottomline Bank (1–6), Leading Labs
+                                (1–10), American Auto (1–13), Stanford Steel ($
+                                dividends), and Epic Electric.
+                              </p>
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Option 2: Other Expansions */}
+                  <div className="pt-3 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-purple-300 text-[11px]">
+                        🧩 Option 2: Optional Expansions
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Toggles' : 'Synced with Host'}
+                      </span>
+                    </div>
+                    <div className="space-y-2.5">
+                      {stagedGame.expansions
+                        .filter((exp) => exp.id !== 'advanced_board')
+                        .map((exp) => {
+                          const enabled = selectedExpansions.includes(exp.id);
+                          return (
+                            <div
+                              key={exp.id}
+                              onClick={() => {
+                                if (isHost) {
+                                  onToggleExpansion(exp.id);
+                                }
+                              }}
+                              title={exp.description}
+                              className={`p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
+                                enabled
+                                  ? 'bg-purple-950/40 border-purple-400/80 shadow'
+                                  : 'bg-slate-900/70 border-slate-800'
+                              } ${
+                                isHost
+                                  ? 'cursor-pointer hover:border-purple-400/60'
+                                  : 'cursor-default'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <span className="font-bold text-slate-100 text-xs">
+                                  {exp.name}
+                                </span>
+                                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                  {exp.description}
+                                </p>
+                              </div>
+                              <span
+                                className={`px-2.5 py-1 rounded-full font-black text-[10px] uppercase shrink-0 border ${
+                                  enabled
+                                    ? 'bg-purple-500 text-slate-950 border-purple-300'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                                }`}
+                              >
+                                {enabled ? '✓ Enabled' : 'Disabled'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-2.5">

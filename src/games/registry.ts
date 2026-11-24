@@ -310,8 +310,16 @@ export const GameRegistry: Readonly<
   },
   stockpile: {
     ...findMetadata('stockpile'),
-    initGame: (playerIds: string[], seed: number) =>
-      initStockpileGame(playerIds, seed),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) =>
+      initStockpileGame(playerIds, seed, {
+        boardMode: options?.selectedExpansions?.includes('advanced_board')
+          ? 'ADVANCED'
+          : 'BASIC',
+      }),
     validateAction: validateStockpileAction,
     applyAction: applyStockpileAction,
     getPlayerPerspective: getStockpilePlayerPerspective,

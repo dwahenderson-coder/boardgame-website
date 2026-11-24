@@ -46,6 +46,9 @@ import {
 import {
   applyCompanyPriceShift,
   createMarketDeck80,
+  FORECAST_CARDS,
+  getCompanyTrack,
+  STOCKPILE_COMPANIES,
   STOCKPILE_COMPANY_IDS,
   StockpileGameState,
 } from '../src/games/stockpile/index.js';
@@ -1346,6 +1349,128 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(state.phase).toBe('GAME_OVER');
       expect(state.roundNumber).toBe(6);
       expect(state.winnerId).not.toBeNull();
+    });
+
+    it('supports 0.00O Stockpile updates: new company names & order, FC_PLUS_1, FC_DIVIDEND ($2,000/sh), and Advanced Board asymmetric tracks with Stanford Steel upward dividends', () => {
+      // 1. Verify company ordering and updated display names / colors
+      expect(STOCKPILE_COMPANY_IDS).toEqual([
+        'GLOBAL_TELECOM',
+        'BIOTECH',
+        'RAIL',
+        'AUTOMOBILE',
+        'ELECTRONIC',
+        'ENERGY',
+      ]);
+      expect(STOCKPILE_COMPANIES.GLOBAL_TELECOM.name).toBe('Cosmic Computers');
+      expect(STOCKPILE_COMPANIES.BIOTECH.name).toBe('Bottomline Bank');
+      expect(STOCKPILE_COMPANIES.RAIL.name).toBe('Leading Laboratories');
+      expect(STOCKPILE_COMPANIES.AUTOMOBILE.name).toBe('American Automotive');
+      expect(STOCKPILE_COMPANIES.ELECTRONIC.name).toBe('Stanford Steel');
+      expect(STOCKPILE_COMPANIES.ELECTRONIC.colorHex).toBe('#94a3b8'); // Grey
+      expect(STOCKPILE_COMPANIES.ENERGY.name).toBe('Epic Electric');
+
+      // 2. Verify FORECAST_CARDS updates: FC_PLUS_1 (+1) and FC_DIVIDEND ($2,000/share)
+      expect(FORECAST_CARDS.some((c) => c.id === 'FC_PLUS_1' && c.delta === 1)).toBe(
+        true
+      );
+      expect(
+        FORECAST_CARDS.some(
+          (c) => c.id === 'FC_DIVIDEND' && c.type === 'DIVIDEND' && c.delta === 0
+        )
+      ).toBe(true);
+
+      // 3. Initialize Advanced Board via GameRegistry options (`selectedExpansions: ['advanced_board']`)
+      const spEngine = GameRegistry.stockpile;
+      let advState = spEngine.initGame(['p1', 'p2'], 2027, {
+        selectedExpansions: ['advanced_board'],
+      }) as StockpileGameState;
+
+      expect(advState.boardMode).toBe('ADVANCED');
+
+      // Verify Epic Electric Advanced track hides 'a' in 5a and 6a display labels
+      const epicTrack = getCompanyTrack('ENERGY', 'ADVANCED');
+      expect(epicTrack.spaces.map((s) => s.displayLabel)).toEqual([
+        '1',
+        '3',
+        '4',
+        '5',
+        '5',
+        '6',
+        '6',
+        '7',
+        '8',
+        '10',
+      ]);
+      expect(epicTrack.spaces[epicTrack.startSpaceIndex]!.id).toBe('5a');
+      expect(epicTrack.spaces[epicTrack.splitResetIndex]!.id).toBe('6');
+
+      // 4. Test FC_DIVIDEND payout: value doesn't change and each player receives $2,000 per share owned
+      advState = {
+        ...advState,
+        players: {
+          ...advState.players,
+          p1: {
+            ...advState.players['p1']!,
+            cash: 10000,
+            portfolio: {
+              ...advState.players['p1']!.portfolio,
+              GLOBAL_TELECOM: 3, // 3 shares * $2,000 = +$6,000
+              ELECTRONIC: 2, // 2 shares of Stanford Steel
+            },
+          },
+        },
+      };
+
+      const divRes = applyCompanyPriceShift(
+        advState.stockPrices,
+        advState.players,
+        'GLOBAL_TELECOM',
+        0,
+        false,
+        {
+          boardMode: 'ADVANCED',
+          stockTrackPositions: advState.stockTrackPositions,
+          isDividendForecast: true,
+        }
+      );
+      expect(divRes.nextPrices.GLOBAL_TELECOM).toBe(5);
+      expect(divRes.nextPlayers['p1']!.cash).toBe(16000);
+      expect(divRes.movement.dividendPerShare).toBe(2000);
+
+      // 5. Test Stanford Steel ('ELECTRONIC') Advanced Track:
+      // Spaces: [0:'1', 1:'1$', 2:'2', 3:'2$', 4:'3', 5:'3$', 6:'4', 7:'4$', 8:'5', 9:'5$$']
+      // Starts at index 8 ('5'). Moving +1 step lands on index 9 ('5$$', which pays $2,000/share)!
+      const steelUp1 = applyCompanyPriceShift(
+        divRes.nextPrices,
+        divRes.nextPlayers,
+        'ELECTRONIC',
+        1,
+        false,
+        {
+          boardMode: 'ADVANCED',
+          stockTrackPositions: divRes.nextTrackPositions,
+        }
+      );
+      expect(steelUp1.nextTrackPositions.ELECTRONIC).toBe(9);
+      expect(steelUp1.nextPrices.ELECTRONIC).toBe(5);
+      // p1 owns 2 shares of Stanford Steel -> receives 2 * $2,000 = +$4,000 ($16,000 -> $20,000)!
+      expect(steelUp1.nextPlayers['p1']!.cash).toBe(20000);
+
+      // Moving Stanford Steel DOWN (-2 from index 9 to index 7 '4$') does NOT pay dividends!
+      const steelDown2 = applyCompanyPriceShift(
+        steelUp1.nextPrices,
+        steelUp1.nextPlayers,
+        'ELECTRONIC',
+        -2,
+        false,
+        {
+          boardMode: 'ADVANCED',
+          stockTrackPositions: steelUp1.nextTrackPositions,
+        }
+      );
+      expect(steelDown2.nextTrackPositions.ELECTRONIC).toBe(7);
+      expect(steelDown2.nextPrices.ELECTRONIC).toBe(4);
+      expect(steelDown2.nextPlayers['p1']!.cash).toBe(20000); // unchanged on downward move!
     });
   });
 

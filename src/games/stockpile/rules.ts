@@ -11,10 +11,13 @@ function shuffleWithPRNG<T>(
 import {
   StockpileAction,
   StockpileBidValue,
+  StockpileBoardMode,
   StockpileCompanyId,
   StockpileCompanyMeta,
+  StockpileCompanyTrack,
   StockpileForecastCard,
   StockpileGameState,
+  StockpileInitOptions,
   StockpileInsiderPairing,
   StockpileMarketCard,
   StockpileMovementEvent,
@@ -23,6 +26,7 @@ import {
   StockpilePublicPlayerState,
   StockpileSanitizedGameState,
   StockpileSanitizedPile,
+  StockpileTrackSpace,
   STOCKPILE_BID_TRACK,
 } from './types.js';
 
@@ -32,92 +36,265 @@ export const INITIAL_STOCK_PRICE = 5;
 export const SPLIT_RESET_PRICE = 6;
 export const BANKRUPTCY_RESET_PRICE = 5;
 export const SHARE_UNIT_DOLLARS = 1000;
+export const FORECAST_DIVIDEND_PER_SHARE = 2000;
 export const MAJORITY_BONUS_DOLLARS = 10000;
 export const MAJORITY_TIE_BONUS_DOLLARS = 5000;
 
 export const STOCKPILE_COMPANY_IDS: readonly StockpileCompanyId[] = [
   'GLOBAL_TELECOM',
   'BIOTECH',
-  'ENERGY',
   'RAIL',
   'AUTOMOBILE',
   'ELECTRONIC',
+  'ENERGY',
 ] as const;
 
-export const STOCKPILE_COMPANIES: Readonly<Record<StockpileCompanyId, StockpileCompanyMeta>> = {
+export const STOCKPILE_COMPANIES: Readonly<
+  Record<StockpileCompanyId, StockpileCompanyMeta>
+> = {
   GLOBAL_TELECOM: {
     id: 'GLOBAL_TELECOM',
-    name: 'Global Telecom',
-    ticker: 'GTC',
+    name: 'Cosmic Computers',
+    ticker: 'CSC',
     colorHex: '#38bdf8',
     badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
   },
   BIOTECH: {
     id: 'BIOTECH',
-    name: 'Biotech',
-    ticker: 'BIO',
+    name: 'Bottomline Bank',
+    ticker: 'BLB',
     colorHex: '#34d399',
     badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
   },
-  ENERGY: {
-    id: 'ENERGY',
-    name: 'Energy',
-    ticker: 'NRG',
-    colorHex: '#fbbf24',
-    badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-  },
   RAIL: {
     id: 'RAIL',
-    name: 'Rail',
-    ticker: 'RAL',
+    name: 'Leading Laboratories',
+    ticker: 'LDL',
     colorHex: '#a78bfa',
     badgeClass: 'bg-violet-500/20 text-violet-300 border-violet-500/40',
   },
   AUTOMOBILE: {
     id: 'AUTOMOBILE',
-    name: 'Automobile',
-    ticker: 'AUT',
+    name: 'American Automotive',
+    ticker: 'AMA',
     colorHex: '#f87171',
     badgeClass: 'bg-red-500/20 text-red-300 border-red-500/40',
   },
   ELECTRONIC: {
     id: 'ELECTRONIC',
-    name: 'Electronic',
-    ticker: 'ELC',
-    colorHex: '#fb923c',
-    badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
+    name: 'Stanford Steel',
+    ticker: 'SFS',
+    colorHex: '#94a3b8',
+    badgeClass: 'bg-slate-400/20 text-slate-300 border-slate-400/40',
+  },
+  ENERGY: {
+    id: 'ENERGY',
+    name: 'Epic Electric',
+    ticker: 'EPE',
+    colorHex: '#fbbf24',
+    badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
   },
 };
 
 export const FORECAST_CARDS: readonly StockpileForecastCard[] = [
   { id: 'FC_PLUS_4', type: 'CHANGE', delta: 4, label: '+4' },
-  { id: 'FC_PLUS_3', type: 'CHANGE', delta: 3, label: '+3' },
+  { id: 'FC_PLUS_1', type: 'CHANGE', delta: 1, label: '+1' },
   { id: 'FC_PLUS_2', type: 'CHANGE', delta: 2, label: '+2' },
   { id: 'FC_MINUS_2', type: 'CHANGE', delta: -2, label: '-2' },
   { id: 'FC_MINUS_3', type: 'CHANGE', delta: -3, label: '-3' },
-  { id: 'FC_BANKRUPTCY', type: 'BANKRUPTCY', delta: 0, label: 'BANKRUPTCY' },
+  {
+    id: 'FC_DIVIDEND',
+    type: 'DIVIDEND',
+    delta: 0,
+    label: 'DIVIDEND ($2K/sh)',
+  },
 ];
+
+function makeSimpleTrack(
+  companyId: StockpileCompanyId,
+  prices: readonly number[],
+  startPrice: number,
+  splitPrice: number
+): StockpileCompanyTrack {
+  const spaces: StockpileTrackSpace[] = prices.map((price, index) => ({
+    id: String(price),
+    index,
+    price,
+    displayLabel: `${price}`,
+    dividendDollars: 0,
+  }));
+  const startIdx = Math.max(
+    0,
+    spaces.findIndex((s) => s.price === startPrice)
+  );
+  const splitIdx = Math.max(
+    0,
+    spaces.findIndex((s) => s.price === splitPrice)
+  );
+  return {
+    companyId,
+    spaces,
+    startSpaceIndex: startIdx,
+    bankruptcyResetIndex: startIdx,
+    splitResetIndex: splitIdx,
+  };
+}
+
+export const BASIC_COMPANY_TRACKS: Readonly<
+  Record<StockpileCompanyId, StockpileCompanyTrack>
+> = {
+  GLOBAL_TELECOM: makeSimpleTrack(
+    'GLOBAL_TELECOM',
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    5,
+    6
+  ),
+  BIOTECH: makeSimpleTrack(
+    'BIOTECH',
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    5,
+    6
+  ),
+  RAIL: makeSimpleTrack('RAIL', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5, 6),
+  AUTOMOBILE: makeSimpleTrack(
+    'AUTOMOBILE',
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    5,
+    6
+  ),
+  ELECTRONIC: makeSimpleTrack(
+    'ELECTRONIC',
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    5,
+    6
+  ),
+  ENERGY: makeSimpleTrack('ENERGY', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5, 6),
+};
+
+export const ADVANCED_COMPANY_TRACKS: Readonly<
+  Record<StockpileCompanyId, StockpileCompanyTrack>
+> = {
+  // Blue - Cosmic Computers - 1, 3, 5, 7, 9 & Split. Bankruptcy/Start - 5, Split - 5
+  GLOBAL_TELECOM: makeSimpleTrack('GLOBAL_TELECOM', [1, 3, 5, 7, 9], 5, 5),
+  // Green - Bottomline Bank - 1, 2, 3, 4, 5, 6 & Split. Bankruptcy/Start - 5, Split - 4
+  BIOTECH: makeSimpleTrack('BIOTECH', [1, 2, 3, 4, 5, 6], 5, 4),
+  // Purple - Leading Laboratories - 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 & Split. Bankruptcy/Start 5, Split - 6
+  RAIL: makeSimpleTrack('RAIL', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5, 6),
+  // Red - American Automotive - 1, 3, 5, 7, 9, 11, 13 & Split. Bankruptcy/Start 5, Split 7
+  AUTOMOBILE: makeSimpleTrack('AUTOMOBILE', [1, 3, 5, 7, 9, 11, 13], 5, 7),
+  // Grey - Stanford Steel - 1, 1$, 2, 2$, 3, 3$, 4, 4$, 5, 5$$ & Split. Bankruptcy/Start 5 (index 8), Split 3 (index 4)
+  ELECTRONIC: {
+    companyId: 'ELECTRONIC',
+    spaces: [
+      { id: '1', index: 0, price: 1, displayLabel: '1', dividendDollars: 0 },
+      {
+        id: '1$',
+        index: 1,
+        price: 1,
+        displayLabel: '1$',
+        dividendDollars: 1000,
+      },
+      { id: '2', index: 2, price: 2, displayLabel: '2', dividendDollars: 0 },
+      {
+        id: '2$',
+        index: 3,
+        price: 2,
+        displayLabel: '2$',
+        dividendDollars: 1000,
+      },
+      { id: '3', index: 4, price: 3, displayLabel: '3', dividendDollars: 0 },
+      {
+        id: '3$',
+        index: 5,
+        price: 3,
+        displayLabel: '3$',
+        dividendDollars: 1000,
+      },
+      { id: '4', index: 6, price: 4, displayLabel: '4', dividendDollars: 0 },
+      {
+        id: '4$',
+        index: 7,
+        price: 4,
+        displayLabel: '4$',
+        dividendDollars: 1000,
+      },
+      { id: '5', index: 8, price: 5, displayLabel: '5', dividendDollars: 0 },
+      {
+        id: '5$$',
+        index: 9,
+        price: 5,
+        displayLabel: '5$$',
+        dividendDollars: 2000,
+      },
+    ],
+    startSpaceIndex: 8,
+    bankruptcyResetIndex: 8,
+    splitResetIndex: 4,
+  },
+  // Yellow - Epic Electric - 1, 3, 4, 5, 5a, 6, 6a, 7, 8, 10 & Split. Bankruptcy/Start 5a (index 4), Split 6 (index 5). Don't display the 'a' in 5a or 6a on the board.
+  ENERGY: {
+    companyId: 'ENERGY',
+    spaces: [
+      { id: '1', index: 0, price: 1, displayLabel: '1', dividendDollars: 0 },
+      { id: '3', index: 1, price: 3, displayLabel: '3', dividendDollars: 0 },
+      { id: '4', index: 2, price: 4, displayLabel: '4', dividendDollars: 0 },
+      { id: '5', index: 3, price: 5, displayLabel: '5', dividendDollars: 0 },
+      { id: '5a', index: 4, price: 5, displayLabel: '5', dividendDollars: 0 },
+      { id: '6', index: 5, price: 6, displayLabel: '6', dividendDollars: 0 },
+      { id: '6a', index: 6, price: 6, displayLabel: '6', dividendDollars: 0 },
+      { id: '7', index: 7, price: 7, displayLabel: '7', dividendDollars: 0 },
+      { id: '8', index: 8, price: 8, displayLabel: '8', dividendDollars: 0 },
+      { id: '10', index: 9, price: 10, displayLabel: '10', dividendDollars: 0 },
+    ],
+    startSpaceIndex: 4,
+    bankruptcyResetIndex: 4,
+    splitResetIndex: 5,
+  },
+};
+
+export function getCompanyTrack(
+  companyId: StockpileCompanyId,
+  boardMode: StockpileBoardMode = 'BASIC'
+): StockpileCompanyTrack {
+  return boardMode === 'ADVANCED'
+    ? ADVANCED_COMPANY_TRACKS[companyId]
+    : BASIC_COMPANY_TRACKS[companyId];
+}
 
 export function createEmptyPortfolio(): Record<StockpileCompanyId, number> {
   return {
     GLOBAL_TELECOM: 0,
     BIOTECH: 0,
-    ENERGY: 0,
     RAIL: 0,
     AUTOMOBILE: 0,
     ELECTRONIC: 0,
+    ENERGY: 0,
   };
 }
 
-export function createInitialStockPrices(): Record<StockpileCompanyId, number> {
+export function createInitialStockTrackPositions(
+  boardMode: StockpileBoardMode = 'BASIC'
+): Record<StockpileCompanyId, number> {
   return {
-    GLOBAL_TELECOM: INITIAL_STOCK_PRICE,
-    BIOTECH: INITIAL_STOCK_PRICE,
-    ENERGY: INITIAL_STOCK_PRICE,
-    RAIL: INITIAL_STOCK_PRICE,
-    AUTOMOBILE: INITIAL_STOCK_PRICE,
-    ELECTRONIC: INITIAL_STOCK_PRICE,
+    GLOBAL_TELECOM: getCompanyTrack('GLOBAL_TELECOM', boardMode).startSpaceIndex,
+    BIOTECH: getCompanyTrack('BIOTECH', boardMode).startSpaceIndex,
+    RAIL: getCompanyTrack('RAIL', boardMode).startSpaceIndex,
+    AUTOMOBILE: getCompanyTrack('AUTOMOBILE', boardMode).startSpaceIndex,
+    ELECTRONIC: getCompanyTrack('ELECTRONIC', boardMode).startSpaceIndex,
+    ENERGY: getCompanyTrack('ENERGY', boardMode).startSpaceIndex,
   };
+}
+
+export function createInitialStockPrices(
+  boardMode: StockpileBoardMode = 'BASIC'
+): Record<StockpileCompanyId, number> {
+  const positions = createInitialStockTrackPositions(boardMode);
+  const prices = {} as Record<StockpileCompanyId, number>;
+  for (const cid of STOCKPILE_COMPANY_IDS) {
+    const track = getCompanyTrack(cid, boardMode);
+    prices[cid] = track.spaces[positions[cid]]?.price ?? INITIAL_STOCK_PRICE;
+  }
+  return prices;
 }
 
 /**
@@ -250,30 +427,63 @@ function drawMarketCards(
 }
 
 /**
- * Helper to apply immediate price changes (from Boom/Bust or Phase 6 Forecasts)
- * and trigger Stock Splits at >= $11 or Bankruptcies at <= $0.
+ * Helper to apply immediate price/track changes (from Boom/Bust or Phase 6 Forecasts)
+ * across either the BASIC board (1..10 track) or ADVANCED board (asymmetric tracks),
+ * triggering Stock Splits, Bankruptcies, FC_DIVIDEND ($2,000/share), and Stanford Steel
+ * upward dividend spaces ($1,000 per $ symbol passed or landed on while moving up).
  */
 export function applyCompanyPriceShift(
   stockPrices: Readonly<Record<StockpileCompanyId, number>>,
   players: Readonly<Record<string, StockpilePlayerState>>,
   companyId: StockpileCompanyId,
   delta: number,
-  forceBankruptcy = false
+  forceBankruptcy = false,
+  options?: {
+    readonly boardMode?: StockpileBoardMode;
+    readonly stockTrackPositions?: Readonly<Record<StockpileCompanyId, number>>;
+    readonly isDividendForecast?: boolean;
+  }
 ): {
   nextPrices: Record<StockpileCompanyId, number>;
+  nextTrackPositions: Record<StockpileCompanyId, number>;
   nextPlayers: Record<string, StockpilePlayerState>;
   movement: StockpileMovementEvent;
 } {
+  const boardMode: StockpileBoardMode = options?.boardMode ?? 'BASIC';
+  const track = getCompanyTrack(companyId, boardMode);
   const previousPrice = stockPrices[companyId];
-  let newPrice = forceBankruptcy ? 0 : previousPrice + delta;
-  let triggeredSplit = false;
-  let triggeredBankruptcy = false;
+
+  // Determine current space index on the track (from stockTrackPositions if provided, or inferred from stockPrices)
+  const inferredIdx = (() => {
+    const exactMatch = track.spaces.findIndex((s) => s.price === previousPrice);
+    return exactMatch >= 0 ? exactMatch : track.startSpaceIndex;
+  })();
+  const previousIndex =
+    options?.stockTrackPositions?.[companyId] ?? inferredIdx;
 
   const nextPlayers: Record<string, StockpilePlayerState> = { ...players };
+  let newIndex = previousIndex;
+  let newPrice = previousPrice;
+  let triggeredSplit = false;
+  let triggeredBankruptcy = false;
+  let totalDividendPerShare = 0;
 
-  if (forceBankruptcy || newPrice <= 0) {
+  if (options?.isDividendForecast) {
+    // FC_DIVIDEND: Value doesn't change, and each player receives $2,000 for every share they own
+    totalDividendPerShare = FORECAST_DIVIDEND_PER_SHARE;
+    for (const [pid, pState] of Object.entries(nextPlayers)) {
+      const shares = pState.portfolio[companyId] ?? 0;
+      if (shares > 0) {
+        nextPlayers[pid] = {
+          ...pState,
+          cash: pState.cash + shares * FORECAST_DIVIDEND_PER_SHARE,
+        };
+      }
+    }
+  } else if (forceBankruptcy) {
     triggeredBankruptcy = true;
-    newPrice = BANKRUPTCY_RESET_PRICE;
+    newIndex = track.bankruptcyResetIndex;
+    newPrice = track.spaces[newIndex]?.price ?? BANKRUPTCY_RESET_PRICE;
     for (const [pid, pState] of Object.entries(nextPlayers)) {
       if (pState.portfolio[companyId] > 0) {
         nextPlayers[pid] = {
@@ -285,20 +495,65 @@ export function applyCompanyPriceShift(
         };
       }
     }
-  } else if (newPrice >= 11) {
-    triggeredSplit = true;
-    newPrice = SPLIT_RESET_PRICE;
-    for (const [pid, pState] of Object.entries(nextPlayers)) {
-      const currentShares = pState.portfolio[companyId];
-      if (currentShares > 0) {
-        nextPlayers[pid] = {
-          ...pState,
-          portfolio: {
-            ...pState.portfolio,
-            [companyId]: currentShares * 2,
-          },
-        };
+  } else {
+    const targetIndex = previousIndex + delta;
+
+    // If stock is moving UP (delta > 0), check if any passed or landed spaces pay track dividends (Stanford Steel $ spaces)
+    if (delta > 0) {
+      const upperSpaceIdx = Math.min(targetIndex, track.spaces.length - 1);
+      for (let idx = previousIndex + 1; idx <= upperSpaceIdx; idx++) {
+        const space = track.spaces[idx];
+        if (space && space.dividendDollars > 0) {
+          totalDividendPerShare += space.dividendDollars;
+        }
       }
+      if (totalDividendPerShare > 0) {
+        for (const [pid, pState] of Object.entries(nextPlayers)) {
+          const shares = pState.portfolio[companyId] ?? 0;
+          if (shares > 0) {
+            nextPlayers[pid] = {
+              ...pState,
+              cash: pState.cash + shares * totalDividendPerShare,
+            };
+          }
+        }
+      }
+    }
+
+    if (targetIndex < 0) {
+      triggeredBankruptcy = true;
+      newIndex = track.bankruptcyResetIndex;
+      newPrice = track.spaces[newIndex]?.price ?? BANKRUPTCY_RESET_PRICE;
+      for (const [pid, pState] of Object.entries(nextPlayers)) {
+        if (pState.portfolio[companyId] > 0) {
+          nextPlayers[pid] = {
+            ...pState,
+            portfolio: {
+              ...pState.portfolio,
+              [companyId]: 0,
+            },
+          };
+        }
+      }
+    } else if (targetIndex >= track.spaces.length) {
+      triggeredSplit = true;
+      newIndex = track.splitResetIndex;
+      newPrice = track.spaces[newIndex]?.price ?? SPLIT_RESET_PRICE;
+      for (const [pid, pState] of Object.entries(nextPlayers)) {
+        const currentShares = pState.portfolio[companyId];
+        if (currentShares > 0) {
+          nextPlayers[pid] = {
+            ...pState,
+            portfolio: {
+              ...pState.portfolio,
+              [companyId]: currentShares * 2,
+            },
+          };
+        }
+      }
+    } else {
+      newIndex = targetIndex;
+      newPrice = track.spaces[newIndex]?.price ?? previousPrice;
     }
   }
 
@@ -307,25 +562,46 @@ export function applyCompanyPriceShift(
     [companyId]: newPrice,
   };
 
+  const baseTrackPositions =
+    options?.stockTrackPositions ?? createInitialStockTrackPositions(boardMode);
+  const nextTrackPositions: Record<StockpileCompanyId, number> = {
+    ...baseTrackPositions,
+    [companyId]: newIndex,
+  };
+
+  const forecastLabel = options?.isDividendForecast
+    ? 'DIVIDEND ($2K/sh)'
+    : forceBankruptcy
+      ? 'BANKRUPTCY'
+      : delta >= 0
+        ? `+${delta}`
+        : `${delta}`;
+
   return {
     nextPrices,
+    nextTrackPositions,
     nextPlayers,
     movement: {
       companyId,
       previousPrice,
-      forecastLabel: forceBankruptcy ? 'BANKRUPTCY' : delta >= 0 ? `+${delta}` : `${delta}`,
+      forecastLabel,
       finalPrice: newPrice,
       triggeredSplit,
       triggeredBankruptcy,
+      ...(totalDividendPerShare > 0
+        ? { dividendPerShare: totalDividendPerShare }
+        : {}),
     },
   };
 }
 
 function setupRoundPhase1And2(
+  boardMode: StockpileBoardMode,
   playerOrder: readonly string[],
   firstPlayerIndex: number,
   roundNumber: number,
   stockPrices: Readonly<Record<StockpileCompanyId, number>>,
+  stockTrackPositions: Readonly<Record<StockpileCompanyId, number>>,
   existingPlayers: Readonly<Record<string, StockpilePlayerState>>,
   deck: readonly StockpileMarketCard[],
   discard: readonly StockpileMarketCard[],
@@ -335,7 +611,10 @@ function setupRoundPhase1And2(
 ): StockpileGameState {
   // Phase 1: Information (shuffle 6 companies & 6 forecast cards)
   const shuffledCompanies = shuffleWithPRNG(STOCKPILE_COMPANY_IDS, prng);
-  const shuffledForecasts = shuffleWithPRNG(FORECAST_CARDS, shuffledCompanies.nextState);
+  const shuffledForecasts = shuffleWithPRNG(
+    FORECAST_CARDS,
+    shuffledCompanies.nextState
+  );
   let currentPrng = shuffledForecasts.nextState;
 
   const allPairings: StockpileInsiderPairing[] = [];
@@ -343,7 +622,8 @@ function setupRoundPhase1And2(
     const companyId = shuffledCompanies.shuffled[i]!;
     const forecast = shuffledForecasts.shuffled[i]!;
     const isPublic = i === 0;
-    const ownerPlayerId = !isPublic && i - 1 < playerOrder.length ? playerOrder[i - 1]! : null;
+    const ownerPlayerId =
+      !isPublic && i - 1 < playerOrder.length ? playerOrder[i - 1]! : null;
     allPairings.push({
       companyId,
       forecast,
@@ -361,7 +641,12 @@ function setupRoundPhase1And2(
 
   const stockpiles: StockpilePile[] = [];
   for (let i = 0; i < playerOrder.length; i++) {
-    const drawRes = drawMarketCards(currentDeck, currentDiscard, 1, currentPrng);
+    const drawRes = drawMarketCards(
+      currentDeck,
+      currentDiscard,
+      1,
+      currentPrng
+    );
     currentDeck = drawRes.nextDeck;
     currentDiscard = drawRes.nextDiscard;
     currentPrng = drawRes.nextPrng;
@@ -380,7 +665,12 @@ function setupRoundPhase1And2(
   for (let i = 0; i < playerOrder.length; i++) {
     const pid = playerOrder[i]!;
     const prev = existingPlayers[pid]!;
-    const drawRes = drawMarketCards(currentDeck, currentDiscard, 2, currentPrng);
+    const drawRes = drawMarketCards(
+      currentDeck,
+      currentDiscard,
+      2,
+      currentPrng
+    );
     currentDeck = drawRes.nextDeck;
     currentDiscard = drawRes.nextDiscard;
     currentPrng = drawRes.nextPrng;
@@ -400,6 +690,7 @@ function setupRoundPhase1And2(
 
   return {
     gameId: 'stockpile',
+    boardMode,
     phase: 'PLAYING',
     turnStep: 'PHASE_2_SUPPLY',
     turnNumber: 1,
@@ -409,6 +700,7 @@ function setupRoundPhase1And2(
     firstPlayerIndex,
     activePlayerIndex: firstPlayerIndex,
     stockPrices,
+    stockTrackPositions,
     marketDeck: currentDeck,
     marketDiscard: currentDiscard,
     publicPairing,
@@ -422,11 +714,16 @@ function setupRoundPhase1And2(
   };
 }
 
-export function initStockpileGame(playerIds: readonly string[], seed = 42): StockpileGameState {
+export function initStockpileGame(
+  playerIds: readonly string[],
+  seed = 42,
+  options?: StockpileInitOptions
+): StockpileGameState {
   if (playerIds.length < 2 || playerIds.length > 5) {
     throw new Error('Stockpile requires 2 to 5 players.');
   }
 
+  const boardMode: StockpileBoardMode = options?.boardMode ?? 'BASIC';
   const initialPrng = createPRNG(seed);
   const rawDeck = createMarketDeck80();
   const shuffledDeck = shuffleWithPRNG(rawDeck, initialPrng);
@@ -450,16 +747,18 @@ export function initStockpileGame(playerIds: readonly string[], seed = 42): Stoc
   }
 
   return setupRoundPhase1And2(
+    boardMode,
     [...playerIds],
     0,
     1,
-    createInitialStockPrices(),
+    createInitialStockPrices(boardMode),
+    createInitialStockTrackPositions(boardMode),
     initialPlayers,
     shuffledDeck.shuffled,
     [],
     shuffledDeck.nextState,
     [],
-    'Round 1 started — Insider Information dealt & Stockpiles initialized!'
+    `Round 1 started (${boardMode === 'ADVANCED' ? 'Advanced Board' : 'Basic Board'}) — Insider Information dealt & Stockpiles initialized!`
   );
 }
 
@@ -723,21 +1022,38 @@ function resolveWonStockpilesAndEnterPhase4(state: StockpileGameState, lastSumma
  * PHASE_6_MOVEMENT_SUMMARY (for Rounds 1..5) or liquidates all final shares &
  * awards Majority Shareholder bonuses after Round 6 (`GAME_OVER`).
  */
-function executePhase6MarketMovement(state: StockpileGameState, lastSummary: string): StockpileGameState {
-  let workingPrices: Record<StockpileCompanyId, number> = { ...state.stockPrices };
-  let workingPlayers: Record<string, StockpilePlayerState> = { ...state.players };
+function executePhase6MarketMovement(
+  state: StockpileGameState,
+  lastSummary: string
+): StockpileGameState {
+  let workingPrices: Record<StockpileCompanyId, number> = {
+    ...state.stockPrices,
+  };
+  let workingTrackPositions: Record<StockpileCompanyId, number> = {
+    ...state.stockTrackPositions,
+  };
+  let workingPlayers: Record<string, StockpilePlayerState> = {
+    ...state.players,
+  };
   const movements: StockpileMovementEvent[] = [];
 
   for (const pairing of state.allPairings) {
     const isBankrupt = pairing.forecast.type === 'BANKRUPTCY';
+    const isDividend = pairing.forecast.type === 'DIVIDEND';
     const res = applyCompanyPriceShift(
       workingPrices,
       workingPlayers,
       pairing.companyId,
       pairing.forecast.delta,
-      isBankrupt
+      isBankrupt,
+      {
+        boardMode: state.boardMode,
+        stockTrackPositions: workingTrackPositions,
+        isDividendForecast: isDividend,
+      }
     );
     workingPrices = res.nextPrices;
+    workingTrackPositions = res.nextTrackPositions;
     workingPlayers = res.nextPlayers;
     movements.push(res.movement);
   }
@@ -760,12 +1076,16 @@ function executePhase6MarketMovement(state: StockpileGameState, lastSummary: str
       }
       if (maxShares > 0) {
         const leaders = state.playerOrder.filter(
-          (pid) => (workingPlayers[pid]?.portfolio[companyId] ?? 0) === maxShares
+          (pid) =>
+            (workingPlayers[pid]?.portfolio[companyId] ?? 0) === maxShares
         );
         const bonusPerLeader =
-          leaders.length === 1 ? MAJORITY_BONUS_DOLLARS : MAJORITY_TIE_BONUS_DOLLARS;
+          leaders.length === 1
+            ? MAJORITY_BONUS_DOLLARS
+            : MAJORITY_TIE_BONUS_DOLLARS;
         for (const leaderId of leaders) {
-          majorityBonuses[leaderId] = (majorityBonuses[leaderId] ?? 0) + bonusPerLeader;
+          majorityBonuses[leaderId] =
+            (majorityBonuses[leaderId] ?? 0) + bonusPerLeader;
         }
       }
     }
@@ -803,6 +1123,7 @@ function executePhase6MarketMovement(state: StockpileGameState, lastSummary: str
       phase: 'GAME_OVER',
       turnStep: 'GAME_OVER',
       stockPrices: workingPrices,
+      stockTrackPositions: workingTrackPositions,
       players: workingPlayers,
       lastRoundMovements: movements,
       winnerId,
@@ -814,6 +1135,7 @@ function executePhase6MarketMovement(state: StockpileGameState, lastSummary: str
     ...state,
     turnStep: 'PHASE_6_MOVEMENT_SUMMARY',
     stockPrices: workingPrices,
+    stockTrackPositions: workingTrackPositions,
     players: workingPlayers,
     lastRoundMovements: movements,
     lastActionSummary: `${lastSummary} — Phase 6: All Round ${state.roundNumber} Insider Forecasts revealed & applied!`,
@@ -1101,14 +1423,20 @@ export function applyStockpileAction(
     }
 
     case 'STOCKPILE_PLAY_BOOM_BUST': {
-      const card = player.pendingActionCards.find((c) => c.id === effectiveAction.cardId)!;
+      const card = player.pendingActionCards.find(
+        (c) => c.id === effectiveAction.cardId
+      )!;
       const delta = card.kind === 'BOOM' ? 2 : -2;
       const shiftRes = applyCompanyPriceShift(
         state.stockPrices,
         state.players,
         effectiveAction.companyId,
         delta,
-        false
+        false,
+        {
+          boardMode: state.boardMode,
+          stockTrackPositions: state.stockTrackPositions,
+        }
       );
 
       const remainingActions = player.pendingActionCards.filter(
@@ -1117,10 +1445,10 @@ export function applyStockpileAction(
       const updatedCurrentPlayer = shiftRes.nextPlayers[effectivePlayerId]!;
       const companyName = STOCKPILE_COMPANIES[effectiveAction.companyId].name;
       const eventSuffix = shiftRes.movement.triggeredSplit
-        ? ' (STOCK SPLIT! Shares doubled, price reset to $6)'
+        ? ` (STOCK SPLIT! Shares doubled, price reset to $${shiftRes.movement.finalPrice}K)`
         : shiftRes.movement.triggeredBankruptcy
-        ? ' (BANKRUPTCY! Shares wiped, price reset to $5)'
-        : '';
+          ? ` (BANKRUPTCY! Shares wiped, price reset to $${shiftRes.movement.finalPrice}K)`
+          : '';
 
       const summary = `${effectivePlayerId} played ${card.label} on ${companyName}: $${shiftRes.movement.previousPrice} → $${shiftRes.movement.finalPrice}${eventSuffix}`;
 
@@ -1141,6 +1469,7 @@ export function applyStockpileAction(
           ...state,
           turnNumber: state.turnNumber + 1,
           stockPrices: shiftRes.nextPrices,
+          stockTrackPositions: shiftRes.nextTrackPositions,
           players: nextPlayers,
           marketDiscard: nextDiscard,
           lastActionSummary: summary,
@@ -1164,6 +1493,7 @@ export function applyStockpileAction(
           turnNumber: state.turnNumber + 1,
           activePlayerIndex: nextActionPlayerIndex,
           stockPrices: shiftRes.nextPrices,
+          stockTrackPositions: shiftRes.nextTrackPositions,
           players: nextPlayers,
           marketDiscard: nextDiscard,
           lastActionSummary: summary,
@@ -1176,6 +1506,7 @@ export function applyStockpileAction(
         turnNumber: state.turnNumber + 1,
         activePlayerIndex: state.firstPlayerIndex,
         stockPrices: shiftRes.nextPrices,
+        stockTrackPositions: shiftRes.nextTrackPositions,
         players: nextPlayers,
         marketDiscard: nextDiscard,
         lastActionSummary: `${summary} — Entering Phase 5: Selling.`,
@@ -1244,10 +1575,12 @@ export function applyStockpileAction(
       const nextRound = state.roundNumber + 1;
       const nextFirstPlayerIndex = (state.firstPlayerIndex + 1) % n;
       return setupRoundPhase1And2(
+        state.boardMode,
         state.playerOrder,
         nextFirstPlayerIndex,
         nextRound,
         state.stockPrices,
+        state.stockTrackPositions,
         state.players,
         state.marketDeck,
         state.marketDiscard,
@@ -1304,6 +1637,7 @@ export function getStockpilePlayerPerspective(
 
   return {
     gameId: 'stockpile',
+    boardMode: state.boardMode,
     phase: state.phase,
     turnStep: state.turnStep,
     turnNumber: state.turnNumber,
@@ -1314,6 +1648,7 @@ export function getStockpilePlayerPerspective(
     activePlayerIndex: state.activePlayerIndex,
     activePlayerId: state.playerOrder[state.activePlayerIndex]!,
     stockPrices: state.stockPrices,
+    stockTrackPositions: state.stockTrackPositions,
     marketDeckCount: state.marketDeck.length,
     marketDiscardCount: state.marketDiscard.length,
     publicPairing: state.publicPairing,

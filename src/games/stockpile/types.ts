@@ -3,10 +3,28 @@ import { PRNGState } from '../../common/prng.js';
 export type StockpileCompanyId =
   | 'GLOBAL_TELECOM'
   | 'BIOTECH'
-  | 'ENERGY'
   | 'RAIL'
   | 'AUTOMOBILE'
-  | 'ELECTRONIC';
+  | 'ELECTRONIC'
+  | 'ENERGY';
+
+export type StockpileBoardMode = 'BASIC' | 'ADVANCED';
+
+export interface StockpileTrackSpace {
+  readonly id: string;
+  readonly index: number;
+  readonly price: number;
+  readonly displayLabel: string;
+  readonly dividendDollars: number; // e.g. 1000 for 1$, 2000 for 5$$
+}
+
+export interface StockpileCompanyTrack {
+  readonly companyId: StockpileCompanyId;
+  readonly spaces: readonly StockpileTrackSpace[];
+  readonly startSpaceIndex: number;
+  readonly bankruptcyResetIndex: number;
+  readonly splitResetIndex: number;
+}
 
 export interface StockpileCompanyMeta {
   readonly id: StockpileCompanyId;
@@ -26,13 +44,13 @@ export type StockpileTurnStep =
   | 'PHASE_6_MOVEMENT_SUMMARY'
   | 'GAME_OVER';
 
-export type ForecastType = 'CHANGE' | 'BANKRUPTCY';
+export type ForecastType = 'CHANGE' | 'DIVIDEND' | 'BANKRUPTCY';
 
 export interface StockpileForecastCard {
   readonly id: string;
   readonly type: ForecastType;
-  readonly delta: number; // e.g., +4, +3, +2, -2, -3, or 0 for BANKRUPTCY
-  readonly label: string; // e.g., "+3", "-2", "BANKRUPTCY"
+  readonly delta: number; // e.g., +4, +1, +2, -2, -3, or 0 for DIVIDEND
+  readonly label: string; // e.g., "+4", "+1", "+2", "-2", "-3", "DIVIDEND ($2K/sh)"
 }
 
 export interface StockpileInsiderPairing {
@@ -110,10 +128,16 @@ export interface StockpileMovementEvent {
   readonly finalPrice: number;
   readonly triggeredSplit: boolean;
   readonly triggeredBankruptcy: boolean;
+  readonly dividendPerShare?: number;
+}
+
+export interface StockpileInitOptions {
+  readonly boardMode?: StockpileBoardMode;
 }
 
 export interface StockpileGameState {
   readonly gameId: 'stockpile';
+  readonly boardMode: StockpileBoardMode;
   readonly phase: StockpilePhase;
   readonly turnStep: StockpileTurnStep;
   readonly turnNumber: number;
@@ -123,6 +147,7 @@ export interface StockpileGameState {
   readonly firstPlayerIndex: number;
   readonly activePlayerIndex: number;
   readonly stockPrices: Readonly<Record<StockpileCompanyId, number>>;
+  readonly stockTrackPositions: Readonly<Record<StockpileCompanyId, number>>;
   readonly marketDeck: readonly StockpileMarketCard[];
   readonly marketDiscard: readonly StockpileMarketCard[];
   readonly publicPairing: StockpileInsiderPairing;
@@ -137,6 +162,7 @@ export interface StockpileGameState {
 
 export interface StockpileSanitizedGameState {
   readonly gameId: 'stockpile';
+  readonly boardMode: StockpileBoardMode;
   readonly phase: StockpilePhase;
   readonly turnStep: StockpileTurnStep;
   readonly turnNumber: number;
@@ -147,6 +173,7 @@ export interface StockpileSanitizedGameState {
   readonly activePlayerIndex: number;
   readonly activePlayerId: string;
   readonly stockPrices: Readonly<Record<StockpileCompanyId, number>>;
+  readonly stockTrackPositions: Readonly<Record<StockpileCompanyId, number>>;
   readonly marketDeckCount: number;
   readonly marketDiscardCount: number;
   readonly publicPairing: StockpileInsiderPairing;
