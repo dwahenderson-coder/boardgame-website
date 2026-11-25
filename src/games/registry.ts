@@ -91,6 +91,16 @@ import {
   validatePowerGridAction,
 } from './power-grid/index.js';
 import {
+  applyRiskAction,
+  calculateRiskFinalScores,
+  getRiskPlayerPerspective,
+  initRiskGame,
+  RiskAction,
+  RiskGameState,
+  RiskSanitizedGameState,
+  validateRiskAction,
+} from './risk/index.js';
+import {
   applyStockpileAction,
   calculateStockpileFinalScores,
   getStockpilePlayerPerspective,
@@ -135,6 +145,7 @@ export type GameCategory = 'BOARD' | 'CARD';
 export type AnyGameState =
   | TTRGameState
   | CatanGameState
+  | RiskGameState
   | StockpileGameState
   | PowerGridGameState
   | ClueGameState
@@ -148,6 +159,7 @@ export type AnyGameState =
 export type AnySanitizedGameState =
   | TTRSanitizedGameState
   | CatanSanitizedGameState
+  | RiskSanitizedGameState
   | StockpileSanitizedGameState
   | SanitizedPowerGridState
   | ClueSanitizedGameState
@@ -161,6 +173,7 @@ export type AnySanitizedGameState =
 export type AnyGameAction =
   | TTRAction
   | CatanAction
+  | RiskAction
   | StockpileAction
   | PowerGridAction
   | ClueAction
@@ -307,6 +320,18 @@ export const GameRegistry: Readonly<
     applyAction: applyCatanAction,
     getPlayerPerspective: getCatanPlayerPerspective,
     calculateFinalScores: calculateCatanFinalScores,
+  },
+  risk: {
+    ...findMetadata('risk'),
+    initGame: (
+      playerIds: string[],
+      seed: number,
+      options?: GameSetupOptions
+    ) => initRiskGame(playerIds, seed, options),
+    validateAction: validateRiskAction,
+    applyAction: applyRiskAction,
+    getPlayerPerspective: getRiskPlayerPerspective,
+    calculateFinalScores: calculateRiskFinalScores,
   },
   stockpile: {
     ...findMetadata('stockpile'),

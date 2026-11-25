@@ -5,6 +5,7 @@ export type GameReleaseStage = 'polished' | 'playtesting' | 'in_development';
 export type GameId =
   | 'ttr'
   | 'catan'
+  | 'risk'
   | 'stockpile'
   | 'power_grid'
   | 'clue'

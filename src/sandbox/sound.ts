@@ -16,6 +16,9 @@ export type SoundEffectId =
   | 'ELIXIR_BUBBLE'
   | 'FINAL_ROUND_BELL'
   | 'TUNNEL_RUMBLE'
+  | 'CANNON_VOLLEY'
+  | 'MARCHING_DRUM'
+  | 'BUGLE_CALL'
   | 'ERROR_BUZZ'
   | 'VICTORY_FANFARE';
 
@@ -39,7 +42,7 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
     id: 'DICE_ROLL',
     name: 'Dice Roll Clatter',
     description: 'Multi-bounce wooden dice clatter across the board.',
-    gamesUsedIn: ['Catan', 'Clue', 'Dice Town'],
+    gamesUsedIn: ['Catan', 'Clue', 'Dice Town', 'Risk'],
     optionalFilePath: '/sounds/dice-roll.mp3',
   },
   {
@@ -142,6 +145,27 @@ export const SOUND_EFFECT_CATALOG: readonly SoundEffectDefinition[] = [
     description: 'Deep echoing stone rumble + 3-card flip cadence when uncovering cards for a Europe Mountain Tunnel.',
     gamesUsedIn: ['Ticket to Ride'],
     optionalFilePath: '/sounds/tunnel-rumble.mp3',
+  },
+  {
+    id: 'CANNON_VOLLEY',
+    name: 'Cannon Volley & Battle Dice',
+    description: 'Artillery thump followed by rapid combat dice clatter when declaring an attack in Risk.',
+    gamesUsedIn: ['Risk'],
+    optionalFilePath: '/sounds/cannon-volley.mp3',
+  },
+  {
+    id: 'MARCHING_DRUM',
+    name: 'Troop Deployment Snare',
+    description: 'Crisp military field-drum cadence when claiming territories, deploying reinforcements, advancing, or fortifying in Risk.',
+    gamesUsedIn: ['Risk'],
+    optionalFilePath: '/sounds/marching-drum.mp3',
+  },
+  {
+    id: 'BUGLE_CALL',
+    name: 'Cavalry Bugle Call',
+    description: 'Brass cavalry triad fanfare when trading in a Risk card set or establishing a Capital Headquarters.',
+    gamesUsedIn: ['Risk'],
+    optionalFilePath: '/sounds/bugle-call.mp3',
   },
   {
     id: 'ERROR_BUZZ',
@@ -450,6 +474,53 @@ export function playTunnelRumbleSound(): void {
 }
 
 /**
+ * 15b. Risk Cannon Volley & Battle Dice
+ */
+export function playCannonVolleySound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playTone(ctx, 115, now, 0.22, 'sine', 0.18, 42);
+  playNoiseBurst(ctx, now, 0.11, 420, 0.16);
+  playNoiseBurst(ctx, now + 0.09, 0.035, 1800, 0.12);
+  playNoiseBurst(ctx, now + 0.14, 0.035, 2200, 0.11);
+  playNoiseBurst(ctx, now + 0.19, 0.035, 2500, 0.1);
+}
+
+/**
+ * 15c. Risk Marching Snare Deployment
+ */
+export function playMarchingDrumSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  playTone(ctx, 165, now, 0.08, 'triangle', 0.13, 95);
+  playNoiseBurst(ctx, now, 0.045, 1450, 0.11);
+  playTone(ctx, 175, now + 0.085, 0.1, 'triangle', 0.14, 100);
+  playNoiseBurst(ctx, now + 0.085, 0.055, 1650, 0.12);
+}
+
+/**
+ * 15d. Risk Cavalry Bugle Call (G4 -> C5 -> E5 -> G5)
+ */
+export function playBugleCallSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const notes = [392.0, 523.25, 659.25, 783.99];
+  notes.forEach((freq, idx) => {
+    playTone(
+      ctx,
+      freq,
+      now + idx * 0.075,
+      idx === notes.length - 1 ? 0.28 : 0.12,
+      'triangle',
+      0.13
+    );
+  });
+}
+
+/**
  * 16. Invalid Move Error Buzz
  */
 export function playErrorBuzzSound(): void {
@@ -527,6 +598,15 @@ export function playSoundEffect(id: SoundEffectId): void {
     case 'TUNNEL_RUMBLE':
       playTunnelRumbleSound();
       break;
+    case 'CANNON_VOLLEY':
+      playCannonVolleySound();
+      break;
+    case 'MARCHING_DRUM':
+      playMarchingDrumSound();
+      break;
+    case 'BUGLE_CALL':
+      playBugleCallSound();
+      break;
     case 'ERROR_BUZZ':
       playErrorBuzzSound();
       break;
@@ -548,7 +628,27 @@ export function getSoundEffectForAction(
     case 'CATAN_ROLL_DICE':
     case 'CLUE_ROLL_DICE':
     case 'DT_ROLL_DICE':
+    case 'RISK_DEFEND_ROLL':
       return 'DICE_ROLL';
+
+    // Risk Warfare, Deployment & Bugle Calls
+    case 'RISK_DECLARE_ATTACK':
+      return 'CANNON_VOLLEY';
+    case 'RISK_CLAIM_TERRITORY':
+    case 'RISK_PLACE_INITIAL_ARMY':
+    case 'RISK_AUTO_FINISH_SETUP':
+    case 'RISK_PLACE_REINFORCEMENTS':
+    case 'RISK_MOVE_AFTER_CONQUEST':
+    case 'RISK_FORTIFY':
+      return 'MARCHING_DRUM';
+    case 'RISK_TRADE_CARDS':
+    case 'RISK_CHOOSE_CAPITAL':
+      return 'BUGLE_CALL';
+    case 'RISK_END_ATTACKS':
+    case 'RISK_END_TURN':
+      return 'TABLE_KNOCK';
+    case 'RISK_SET_DEFENSE_MODE':
+      return 'CARD_SNAP';
 
     // Route & Station Building (Ticket to Ride)
     case 'CLAIM_ROUTE':

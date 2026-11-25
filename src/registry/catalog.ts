@@ -155,6 +155,58 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
   },
   {
+    id: 'risk',
+    category: 'board',
+    releaseStage: 'playtesting',
+    icon: '🌍',
+    name: 'Risk',
+    subtitle: 'Global Conquest & Strategic Warfare',
+    description:
+      'Command armies across 42 territories and 6 continents. Roll White attacker dice against Red defender dice, trade Territory card sets, and conquer the globe via World Domination, Capital Risk, or Secret Missions.',
+    minPlayers: 2,
+    maxPlayers: 6,
+    estimatedMinutes: 75,
+    mechanicsLabel: 'Area Control, Dice Combat & Diplomacy',
+    badgeColor: 'rose',
+    availableColors: [
+      STANDARD_COLORS['red']!,
+      STANDARD_COLORS['blue']!,
+      STANDARD_COLORS['green']!,
+      STANDARD_COLORS['yellow']!,
+      STANDARD_COLORS['purple']!,
+      STANDARD_COLORS['orange']!,
+      STANDARD_COLORS['black']!,
+      STANDARD_COLORS['white']!,
+      STANDARD_COLORS['brown']!,
+    ],
+    expansions: [
+      {
+        id: 'auto_setup',
+        name: 'Fast Auto-Deal Setup',
+        description:
+          'Automatically deals all 42 territories evenly at random at the start of the game (instead of manual alternating territory claims), then commanders place their remaining starting armies.',
+      },
+      {
+        id: 'fixed_card_values',
+        name: 'Fixed Card Trade-In Values (4 / 6 / 8 / 10)',
+        description:
+          'Replaces classic escalating sets (4, 6, 8, 10, 12, 15, 20...) with fixed bonuses: +4 for 3 Infantry, +6 for 3 Cavalry, +8 for 3 Artillery, and +10 for 1 of each symbol.',
+      },
+      {
+        id: 'capital_risk',
+        name: 'Capital Risk Win Condition',
+        description:
+          'Each commander establishes 1 Capital Headquarters on an owned territory after setup. Capture and hold all World Capitals simultaneously to win immediately!',
+      },
+      {
+        id: 'secret_mission',
+        name: 'Secret Mission Win Condition',
+        description:
+          'Each commander is privately dealt a classified Secret Mission card (specific continents, 24 territories, 18 fortified territories, or eliminating a target rival). First to complete their mission wins!',
+      },
+    ],
+  },
+  {
     id: 'stockpile',
     category: 'board',
     releaseStage: 'playtesting',

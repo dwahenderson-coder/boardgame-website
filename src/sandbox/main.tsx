@@ -40,6 +40,12 @@ import {
   SanitizedPowerGridState,
 } from '../games/power-grid/index.js';
 import {
+  calculateRiskFinalScores,
+  getOwnedTerritories as getRiskOwnedTerritories,
+  RiskGameState,
+  RiskSanitizedGameState,
+} from '../games/risk/index.js';
+import {
   calculateStockpileNetWorth,
   StockpileGameState,
   StockpileSanitizedGameState,
@@ -102,6 +108,7 @@ import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
 import { PowerGridBoard } from './PowerGridBoard.js';
+import { RiskBoard } from './RiskBoard.js';
 import { StockpileBoard } from './StockpileBoard.js';
 import {
   DestinationTicketCardVisual,
@@ -279,7 +286,12 @@ export const SandboxApp: React.FC = () => {
     'gameId' in localGameState && localGameState.gameId === 'power_grid'
       ? getPowerGridActivePlayerId(localGameState as PowerGridGameState)
       : 'gameId' in localGameState &&
-          localGameState.gameId === 'clue' &&
+          localGameState.gameId === 'risk' &&
+          localGameState.turnStep === 'AWAITING_DEFENDER_DICE' &&
+          localGameState.pendingDefense?.defenderId
+        ? localGameState.pendingDefense.defenderId
+        : 'gameId' in localGameState &&
+            localGameState.gameId === 'clue' &&
           localGameState.turnStep === 'DISPROVING' &&
           localGameState.activeSuggestion?.disproverPlayerId
         ? localGameState.activeSuggestion.disproverPlayerId
@@ -327,6 +339,8 @@ export const SandboxApp: React.FC = () => {
 
   const isCatanActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'catan';
+  const isRiskActive =
+    'gameId' in activeSanitized && activeSanitized.gameId === 'risk';
   const isClueActive =
     'gameId' in activeSanitized && activeSanitized.gameId === 'clue';
   const isDiceTownActive =
@@ -351,6 +365,9 @@ export const SandboxApp: React.FC = () => {
       : null;
   const catanSanitized = isCatanActive
     ? (activeSanitized as CatanSanitizedGameState)
+    : null;
+  const riskSanitized = isRiskActive
+    ? (activeSanitized as RiskSanitizedGameState)
     : null;
   const clueSanitized = isClueActive
     ? (activeSanitized as ClueSanitizedGameState)
@@ -481,6 +498,25 @@ export const SandboxApp: React.FC = () => {
             ? b.totalScore - a.totalScore
             : b.ticketPoints - a.ticketPoints
         );
+    }
+    if ('gameId' in localGameState && localGameState.gameId === 'risk') {
+      const rs = localGameState as RiskGameState;
+      const scores = calculateRiskFinalScores(rs);
+      return rs.playerOrder
+        .map((pid) => {
+          const owned = getRiskOwnedTerritories(rs.territories, pid);
+          const totalArmies = owned.reduce((sum, t) => sum + t.armies, 0);
+          return {
+            playerId: pid,
+            name: pid,
+            routePoints: owned.length,
+            ticketPoints: rs.winnerId === pid ? 1 : 0,
+            totalScore: scores[pid] ?? owned.length,
+            trainsRemaining: totalArmies,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
     }
     if ('gameId' in localGameState && localGameState.gameId === 'stockpile') {
       const sps = localGameState as StockpileGameState;
@@ -954,6 +990,13 @@ export const SandboxApp: React.FC = () => {
       let next = exists
         ? prev.filter((id) => id !== expansionId)
         : [...prev, expansionId];
+      if (localStagedGameDef.id === 'risk' && !exists) {
+        if (expansionId === 'capital_risk') {
+          next = next.filter((id) => id !== 'secret_mission');
+        } else if (expansionId === 'secret_mission') {
+          next = next.filter((id) => id !== 'capital_risk');
+        }
+      }
       if (localStagedGameDef.id === 'ttr') {
         const activeMapId: 'USA' | 'EUROPE' = next.includes('europe_map')
           ? 'EUROPE'
@@ -1784,6 +1827,19 @@ export const SandboxApp: React.FC = () => {
                 dispatchEngineAction(actorId, action)
               }
             />
+          ) : riskSanitized ? (
+            /* Mount <RiskBoard /> when `selectedGameId === 'risk'` */
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-950">
+              <RiskBoard
+                state={riskSanitized}
+                viewingPlayerId={viewedPlayerId}
+                playerNames={runnerMode === 'MULTIPLAYER' ? mp.playerNames : {}}
+                isSpectator={false}
+                onDispatchAction={(action) =>
+                  dispatchEngineAction(viewedPlayerId, action)
+                }
+              />
+            </div>
           ) : stockpileSanitized ? (
             /* Mount <StockpileBoard /> when `selectedGameId === 'stockpile'` */
             <div className="flex-1 overflow-y-auto p-4 bg-slate-950">
@@ -3556,9 +3612,5 @@ export const SandboxApp: React.FC = () => {
 // Mount application when running in browser DOM
 const rootElement = document.getElementById('root');
 if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <SandboxApp />
-    </React.StrictMode>
-  );
+  createRoot(rootElement).render(<SandboxApp />);
 }

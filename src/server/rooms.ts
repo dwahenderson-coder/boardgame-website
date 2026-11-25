@@ -18,6 +18,11 @@ import {
   PowerGridGameState,
 } from '../games/power-grid/index.js';
 import {
+  calculateRiskFinalScores,
+  getOwnedTerritories,
+  RiskGameState,
+} from '../games/risk/index.js';
+import {
   calculateStockpileNetWorth,
   StockpileGameState,
 } from '../games/stockpile/index.js';
@@ -502,6 +507,29 @@ export class RoomManager {
             ticketPoints: 0,
             totalScore: p.victoryPoints,
             trainsRemaining: p.settlementsRemaining,
+            tickets: [],
+          };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore);
+    }
+
+    if (
+      room.selectedGameId === 'risk' ||
+      ('gameId' in room.gameState && room.gameState.gameId === 'risk')
+    ) {
+      const riskState = room.gameState as RiskGameState;
+      const scores = calculateRiskFinalScores(riskState);
+      return riskState.playerOrder
+        .map((playerId) => {
+          const owned = getOwnedTerritories(riskState.territories, playerId);
+          const totalArmies = owned.reduce((sum, t) => sum + t.armies, 0);
+          return {
+            playerId,
+            name: nameMap[playerId] ?? playerId,
+            routePoints: owned.length,
+            ticketPoints: riskState.winnerId === playerId ? 1 : 0,
+            totalScore: scores[playerId] ?? owned.length,
+            trainsRemaining: totalArmies,
             tickets: [],
           };
         })

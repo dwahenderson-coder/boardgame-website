@@ -1127,6 +1127,299 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     </div>
                   );
                 })()
+              ) : stagedGame.id === 'risk' ? (
+                <div className="space-y-4">
+                  {/* Option 1: Territory Setup Mode */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-rose-300 text-[11px]">
+                        🗺️ Option 1: Territory Setup Mode
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Selection' : 'Synced with Host'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {(() => {
+                        const isAutoSetup =
+                          selectedExpansions.includes('auto_setup');
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && isAutoSetup) {
+                                  onToggleExpansion('auto_setup');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                !isAutoSetup
+                                  ? 'bg-rose-950/40 border-rose-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  🚩 Manual Claim (Standard)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    !isAutoSetup
+                                      ? 'bg-rose-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {!isAutoSetup ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Commanders take turns claiming territories one
+                                by one, then deploy remaining starting armies.
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isAutoSetup) {
+                                  onToggleExpansion('auto_setup');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isAutoSetup
+                                  ? 'bg-rose-950/40 border-rose-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  ⚡ Fast Auto-Deal Setup
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    isAutoSetup
+                                      ? 'bg-rose-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {isAutoSetup ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Randomly deals all 42 territories evenly at the
+                                start, then commanders place remaining armies.
+                              </p>
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Option 2: Card Trade-In Values */}
+                  <div className="pt-3 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
+                        🃏 Option 2: Card Trade-In Values
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Selection' : 'Synced with Host'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {(() => {
+                        const isFixed =
+                          selectedExpansions.includes('fixed_card_values');
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && isFixed) {
+                                  onToggleExpansion('fixed_card_values');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                !isFixed
+                                  ? 'bg-amber-950/40 border-amber-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  📈 Escalating Sets (Standard)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    !isFixed
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {!isFixed ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Classic escalating bonuses: 4, 6, 8, 10, 12, 15,
+                                20, 25... (+5 per trade after the 6th set).
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isFixed) {
+                                  onToggleExpansion('fixed_card_values');
+                                }
+                              }}
+                              className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isFixed
+                                  ? 'bg-amber-950/40 border-amber-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-black text-slate-100 text-xs">
+                                  🔢 Fixed Sets (4 / 6 / 8 / 10)
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                    isFixed
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {isFixed ? '✓ Active' : 'Select'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                3 Infantry = +4, 3 Cavalry = +6, 3 Artillery =
+                                +8, and 1 of each symbol = +10 armies.
+                              </p>
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Option 3: Win Condition */}
+                  <div className="pt-3 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black uppercase tracking-wider text-emerald-300 text-[11px]">
+                        🏆 Option 3: Victory Condition
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {isHost ? 'Host Selection' : 'Synced with Host'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {(() => {
+                        const isCapital =
+                          selectedExpansions.includes('capital_risk');
+                        const isSecret =
+                          selectedExpansions.includes('secret_mission');
+                        const isWorldDom = !isCapital && !isSecret;
+
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (!isHost) return;
+                                if (isCapital) onToggleExpansion('capital_risk');
+                                if (isSecret)
+                                  onToggleExpansion('secret_mission');
+                              }}
+                              className={`p-2.5 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isWorldDom
+                                  ? 'bg-emerald-950/40 border-emerald-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-black text-slate-100 text-[11px]">
+                                  🌍 World Domination
+                                </span>
+                                {isWorldDom && (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[8px] uppercase">
+                                    ✓
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Eliminate all rivals &amp; conquer the map.
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isCapital) {
+                                  onToggleExpansion('capital_risk');
+                                }
+                              }}
+                              className={`p-2.5 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isCapital
+                                  ? 'bg-emerald-950/40 border-emerald-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-black text-slate-100 text-[11px]">
+                                  🏛️ Capital Risk
+                                </span>
+                                {isCapital && (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[8px] uppercase">
+                                    ✓
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Place 1 HQ; capture all Capitals to win!
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() => {
+                                if (isHost && !isSecret) {
+                                  onToggleExpansion('secret_mission');
+                                }
+                              }}
+                              className={`p-2.5 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                isSecret
+                                  ? 'bg-emerald-950/40 border-emerald-400 shadow-md'
+                                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                              } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-black text-slate-100 text-[11px]">
+                                  🕵️ Secret Mission
+                                </span>
+                                {isSecret && (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[8px] uppercase">
+                                    ✓
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                Complete your private classified objective!
+                              </p>
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
               ) : stagedGame.id === 'stockpile' ? (
                 <div className="space-y-4">
                   {/* Option 1: Basic Board vs Advanced Board Selector */}

@@ -914,10 +914,11 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
   // 8. Categorized Menu (Board vs Card Games), Euchre, Cribbage & Kings Corners
   // ---------------------------------------------------------------------------
   describe('Board vs Card Games Menu, Euchre, Cribbage & Kings Corners', () => {
-    it('splits GameRegistry into Board Games (ttr, catan, stockpile, power_grid, dominion, clue, dice_town) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
+    it('splits GameRegistry into Board Games (ttr, catan, risk, stockpile, power_grid, dominion, clue, dice_town) and Card Games (holdem, euchre, cribbage, kings_corners)', () => {
       expect(BOARD_GAME_METADATA_LIST.map((g) => g.id)).toEqual([
         'ttr',
         'catan',
+        'risk',
         'stockpile',
         'power_grid',
         'dominion',
@@ -1552,6 +1553,7 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
       expect(BOARD_GAMES_CATALOG.map((g) => g.id)).toEqual([
         'ttr',
         'catan',
+        'risk',
         'stockpile',
         'power_grid',
         'dominion',
@@ -1565,11 +1567,11 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
         'kings_corners',
       ]);
 
-      // All 11 games are currently marked as 'playtesting'
+      // All 12 games are currently marked as 'playtesting'
       expect(GAME_CATALOG.every((g) => g.releaseStage === 'playtesting')).toBe(
         true
       );
-      expect(PLAYTEST_GAMES_CATALOG).toHaveLength(11);
+      expect(PLAYTEST_GAMES_CATALOG).toHaveLength(12);
       expect(POLISHED_GAMES_CATALOG).toHaveLength(0);
 
       // Catan base bounds (3-4 players) vs 5-6 Player Extension override (3-6 players)

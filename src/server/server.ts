@@ -390,6 +390,15 @@ io.on('connection', (socket) => {
       ? ctx.room.selectedExpansions.filter((id) => id !== expansionId)
       : [...ctx.room.selectedExpansions, expansionId];
 
+    // Risk win condition options ('capital_risk' and 'secret_mission') are mutually exclusive
+    if (activeGameId === 'risk' && !isCurrentlyEnabled) {
+      if (expansionId === 'capital_risk') {
+        nextExpansions = nextExpansions.filter((id) => id !== 'secret_mission');
+      } else if (expansionId === 'secret_mission') {
+        nextExpansions = nextExpansions.filter((id) => id !== 'capital_risk');
+      }
+    }
+
     if (activeGameId === 'ttr' && expansionId === 'europe_map') {
       const nextMapId: 'USA' | 'EUROPE' = nextExpansions.includes('europe_map')
         ? 'EUROPE'
