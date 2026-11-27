@@ -19,6 +19,7 @@ import {
   PLAYTEST_GAMES_CATALOG,
   POLISHED_GAMES_CATALOG,
 } from '../src/registry/catalog.js';
+import { GAME_RULES_BY_ID } from '../src/registry/gameRules.js';
 import {
   getEffectivePlayerBounds,
   isExpansionCompatibleWithMap,
@@ -2158,6 +2159,22 @@ describe('Milestone 1: Core Game Engine & Shared Utilities', () => {
 
         const scores = GameRegistry[stateGameId].calculateFinalScores(state);
         expect(Object.keys(scores)).toHaveLength(meta.minPlayers);
+      }
+    });
+
+    it('provides complete structured rulebooks (Cheat Sheet, Turn Flow, Scoring & Variants) for all 12 catalog games', () => {
+      for (const game of GAME_CATALOG) {
+        const rules = GAME_RULES_BY_ID[game.id];
+        expect(rules).toBeDefined();
+        expect(rules.gameId).toBe(game.id);
+        expect(rules.objective.length).toBeGreaterThan(20);
+        expect(rules.quickSummaryBullets.length).toBeGreaterThanOrEqual(3);
+        expect(rules.referenceTables.length).toBeGreaterThanOrEqual(1);
+        expect(rules.turnFlowSteps.length).toBeGreaterThanOrEqual(2);
+        expect(rules.scoringAndEndGame.endTrigger.length).toBeGreaterThan(10);
+        expect(
+          rules.scoringAndEndGame.scoringRules.length
+        ).toBeGreaterThanOrEqual(1);
       }
     });
   });

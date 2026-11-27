@@ -107,6 +107,7 @@ import { DiceTownBoard } from './DiceTownBoard.js';
 import { DominionBoard } from './DominionBoard.js';
 import { EuchreBoard } from './EuchreBoard.js';
 import { GameLobby } from './GameLobby.js';
+import { GameRulesViewer, RulesDisplayMode } from './GameRulesViewer.js';
 import { HoldemBoard } from './HoldemBoard.js';
 import { InteractiveMap } from './InteractiveMap.js';
 import { KingsCornersBoard } from './KingsCornersBoard.js';
@@ -194,6 +195,17 @@ export const SandboxApp: React.FC = () => {
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showDebugger, setShowDebugger] = useState<boolean>(false);
+  const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
+  const [rulesOverrideGameId, setRulesOverrideGameId] = useState<GameId | null>(
+    null
+  );
+  const [rulesDisplayMode, setRulesDisplayMode] =
+    useState<RulesDisplayMode>('MODAL');
+
+  const handleOpenRules = (targetGameId?: GameId) => {
+    setRulesOverrideGameId(targetGameId ?? null);
+    setIsRulesOpen(true);
+  };
 
   const mp = useGameSocket(runnerMode === 'MULTIPLAYER');
 
@@ -399,6 +411,49 @@ export const SandboxApp: React.FC = () => {
   const powerGridSanitized = isPowerGridActive
     ? (activeSanitized as SanitizedPowerGridState)
     : null;
+
+  const effectiveRulesGameId: GameId =
+    rulesOverrideGameId ??
+    (runnerMode === 'MULTIPLAYER' && !isMultiplayerActive
+      ? mp.configuredGameId ?? (mp.roomId ? mp.selectedGameId : entrySelectedGameId)
+      : runnerMode === 'LOCAL' && isLocalSetupOpen && localConfiguredGameId
+        ? localConfiguredGameId
+        : activeGameId);
+
+  const activeRulesOptionIds = useMemo<readonly string[]>(() => {
+    const ids = new Set<string>(
+      runnerMode === 'MULTIPLAYER'
+        ? mp.selectedExpansions
+        : localSelectedExpansions
+    );
+    // Also infer active options directly from live game state
+    if (ttrSanitized) {
+      if (ttrSanitized.mapId === 'EUROPE') ids.add('europe_map');
+      if (ttrSanitized.alvinAndDexter?.enabled) ids.add('alvin_and_dexter');
+    }
+    if (riskSanitized) {
+      if (riskSanitized.setupMode === 'AUTO') ids.add('auto_setup');
+      if (riskSanitized.cardTradeMode === 'FIXED') ids.add('fixed_card_values');
+      if (riskSanitized.winCondition === 'CAPITAL') ids.add('capital_risk');
+      if (riskSanitized.winCondition === 'SECRET_MISSION')
+        ids.add('secret_mission');
+    }
+    if (stockpileSanitized && stockpileSanitized.boardMode === 'ADVANCED') {
+      ids.add('advanced_board');
+    }
+    if (powerGridSanitized && powerGridSanitized.mapId === 'GERMANY') {
+      ids.add('germany_map');
+    }
+    return [...ids];
+  }, [
+    runnerMode,
+    mp.selectedExpansions,
+    localSelectedExpansions,
+    ttrSanitized,
+    riskSanitized,
+    stockpileSanitized,
+    powerGridSanitized,
+  ]);
 
   // Determine whether the local user is allowed to act right now
   const isMyTurn = useMemo(() => {
@@ -1718,6 +1773,25 @@ export const SandboxApp: React.FC = () => {
               {activeSanitized.phase} / {activeSanitized.turnStep}
             </span>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (isRulesOpen) {
+                setIsRulesOpen(false);
+              } else {
+                handleOpenRules();
+              }
+            }}
+            className={`px-2.5 py-1 rounded border text-xs font-extrabold transition cursor-pointer ${
+              isRulesOpen
+                ? 'bg-amber-400 border-amber-300 text-slate-950 shadow'
+                : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/60 text-amber-200'
+            }`}
+            title="Open Game Rules, Cheat Sheet & Active Variants"
+          >
+            📖 Rules
+          </button>
 
           <button
             onClick={() => setSoundEnabled((s) => !s)}
@@ -3235,6 +3309,7 @@ export const SandboxApp: React.FC = () => {
                   onToggleReady={(ready) => mp.toggleReady(ready)}
                   onStartGame={() => mp.startGame()}
                   onLeaveRoom={() => mp.leaveRoom()}
+                  onOpenRules={(gid) => handleOpenRules(gid)}
                 />
               )}
             </div>
@@ -3333,6 +3408,7 @@ export const SandboxApp: React.FC = () => {
                 onToggleReady={() => {}}
                 onStartGame={() => handleStartNewLocalGame()}
                 onLeaveRoom={() => setIsLocalSetupOpen(false)}
+                onOpenRules={(gid) => handleOpenRules(gid)}
               />
             </div>
           )}
@@ -3650,6 +3726,18 @@ export const SandboxApp: React.FC = () => {
           </aside>
         )}
       </div>
+
+      {/* =====================================================================
+          UNIFIED IN-GAME & LOBBY RULEBOOK + CHEAT SHEET VIEWER
+         ===================================================================== */}
+      <GameRulesViewer
+        isOpen={isRulesOpen}
+        activeGameId={effectiveRulesGameId}
+        activeOptionIds={activeRulesOptionIds}
+        displayMode={rulesDisplayMode}
+        onChangeDisplayMode={(mode) => setRulesDisplayMode(mode)}
+        onClose={() => setIsRulesOpen(false)}
+      />
     </div>
   );
 };

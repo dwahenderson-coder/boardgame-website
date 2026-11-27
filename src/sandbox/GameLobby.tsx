@@ -49,6 +49,7 @@ export interface GameLobbyProps {
   readonly onToggleReady: (ready?: boolean) => void;
   readonly onStartGame: () => void;
   readonly onLeaveRoom: () => void;
+  readonly onOpenRules?: (gameId: GameId) => void;
 }
 
 export const GameLobby: React.FC<GameLobbyProps> = ({
@@ -69,6 +70,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   onToggleReady,
   onStartGame,
   onLeaveRoom,
+  onOpenRules,
 }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [localCategoryTab, setLocalCategoryTab] = useState<GameCategorySlug>(
@@ -305,17 +307,32 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 </div>
               </div>
             </div>
-            {isHost ? (
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] uppercase shrink-0">
-                Configure →
-              </span>
-            ) : (
-              isHighlighted && (
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px]">
-                  Host Viewing
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onOpenRules && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenRules(game.id);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-400/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                  title={`View ${game.name} Rules & Cheat Sheet`}
+                >
+                  📖 Rules
+                </button>
+              )}
+              {isHost ? (
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] uppercase shrink-0">
+                  Configure →
                 </span>
-              )
-            )}
+              ) : (
+                isHighlighted && (
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[10px]">
+                    Host Viewing
+                  </span>
+                )
+              )}
+            </div>
           </div>
 
           <p className="mt-2.5 text-slate-300 text-[11px] leading-relaxed">
@@ -653,15 +670,26 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               </div>
             </div>
 
-            {isHost && (
-              <button
-                type="button"
-                onClick={() => onSelectGame(null)}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold border border-slate-600 transition shrink-0"
-              >
-                ← Change Game
-              </button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {onOpenRules && (
+                <button
+                  type="button"
+                  onClick={() => onOpenRules(stagedGame.id)}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-extrabold border border-amber-400/60 transition cursor-pointer"
+                >
+                  📖 View Rules
+                </button>
+              )}
+              {isHost && (
+                <button
+                  type="button"
+                  onClick={() => onSelectGame(null)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold border border-slate-600 transition"
+                >
+                  ← Change Game
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
