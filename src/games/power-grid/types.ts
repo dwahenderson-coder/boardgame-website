@@ -101,6 +101,7 @@ export interface AuctionSubState {
 
 export interface PowerGridPlayerState {
   readonly id: string;
+  readonly color: string;
   readonly money: number; // Elektro
   readonly cities: readonly string[]; // Claimed city IDs
   readonly powerPlants: readonly OwnedPowerPlant[];
@@ -109,6 +110,7 @@ export interface PowerGridPlayerState {
 
 export interface SanitizedPowerGridPlayerState {
   readonly id: string;
+  readonly color: string;
   readonly money: number | null; // Hidden (null) for opponents when hideMoney option is enabled
   readonly cities: readonly string[];
   readonly cityCount: number;
@@ -120,6 +122,7 @@ export interface SanitizedPowerGridPlayerState {
 export interface PowerGridInitOptions {
   readonly mapId?: 'USA' | 'GERMANY';
   readonly mapRegionKeys?: readonly string[];
+  readonly playerColors?: Readonly<Record<string, string>>;
   readonly hideMoney?: boolean;
   /** Optional classic vs recharged setup flag */
   readonly ruleset?: 'CLASSIC' | 'RECHARGED';

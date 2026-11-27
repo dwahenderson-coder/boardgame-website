@@ -87,6 +87,7 @@ import {
   initPowerGridGame,
   PowerGridAction,
   PowerGridGameState,
+  resolvePowerGridRegionsFromExpansions,
   SanitizedPowerGridState,
   validatePowerGridAction,
 } from './power-grid/index.js';
@@ -356,14 +357,25 @@ export const GameRegistry: Readonly<
       playerIds: string[],
       seed: number,
       options?: GameSetupOptions
-    ) =>
-      initPowerGridGame(
-        playerIds,
-        seed,
+    ) => {
+      const mapId: 'USA' | 'GERMANY' =
+        options?.selectedExpansions?.includes('germany_map')
+          ? 'GERMANY'
+          : 'USA';
+      const mapRegionKeys = resolvePowerGridRegionsFromExpansions(
+        mapId,
+        playerIds.length,
+        options?.selectedExpansions,
         options?.mapRegionKeys
-          ? { mapRegionKeys: [...options.mapRegionKeys] }
-          : undefined
-      ),
+      );
+      return initPowerGridGame(playerIds, seed, {
+        mapId,
+        mapRegionKeys,
+        ...(options?.playerColors
+          ? { playerColors: options.playerColors }
+          : {}),
+      });
+    },
     validateAction: validatePowerGridAction,
     applyAction: applyPowerGridAction,
     getPlayerPerspective: getPowerGridPlayerPerspective,

@@ -1,4 +1,8 @@
-import { CITY_SLOT_COSTS, POWER_GRID_MAPS } from './constants.js';
+import {
+  CITY_SLOT_COSTS,
+  PLAYER_COUNT_CONFIGS,
+  POWER_GRID_MAPS,
+} from './constants.js';
 import {
   CityOccupancyState,
   PowerGridMapDefinition,
@@ -36,6 +40,62 @@ export function areRegionsContiguous(
   }
 
   return visited.size === activeSet.size;
+}
+
+export function getDefaultActiveRegions(
+  mapId: 'USA' | 'GERMANY',
+  playerCount: number
+): readonly string[] {
+  const map = POWER_GRID_MAPS[mapId];
+  const cfg = PLAYER_COUNT_CONFIGS[playerCount] ?? PLAYER_COUNT_CONFIGS[4]!;
+  return map.regions.slice(0, cfg.activeRegionsCount);
+}
+
+export function extractManualRegionsFromExpansions(
+  mapId: 'USA' | 'GERMANY',
+  selectedExpansions?: readonly string[]
+): readonly string[] {
+  if (!selectedExpansions || selectedExpansions.length === 0) {
+    return [];
+  }
+  const map = POWER_GRID_MAPS[mapId];
+  return selectedExpansions
+    .filter((id) => id.startsWith('region:'))
+    .map((id) => id.slice('region:'.length))
+    .filter((rid) => map.regions.includes(rid));
+}
+
+export function resolvePowerGridRegionsFromExpansions(
+  mapId: 'USA' | 'GERMANY',
+  playerCount: number,
+  selectedExpansions?: readonly string[],
+  explicitRegions?: readonly string[]
+): readonly string[] {
+  const map = POWER_GRID_MAPS[mapId];
+  const cfg = PLAYER_COUNT_CONFIGS[playerCount] ?? PLAYER_COUNT_CONFIGS[4]!;
+  const requiredCount = cfg.activeRegionsCount;
+
+  if (explicitRegions && explicitRegions.length > 0) {
+    if (!areRegionsContiguous(map, explicitRegions)) {
+      throw new Error(
+        `Selected map regions (${explicitRegions.join(', ')}) are not contiguous on map ${map.id}.`
+      );
+    }
+    return [...explicitRegions];
+  }
+
+  const manualRegions = extractManualRegionsFromExpansions(
+    mapId,
+    selectedExpansions
+  );
+  if (
+    manualRegions.length === requiredCount &&
+    areRegionsContiguous(map, manualRegions)
+  ) {
+    return manualRegions;
+  }
+
+  return map.regions.slice(0, requiredCount);
 }
 
 /**

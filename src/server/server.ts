@@ -6,6 +6,13 @@ import { createServer } from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
+import {
+  areRegionsContiguous,
+  extractManualRegionsFromExpansions,
+  getDefaultActiveRegions,
+  PLAYER_COUNT_CONFIGS as PG_PLAYER_COUNT_CONFIGS,
+  POWER_GRID_MAPS,
+} from '../games/power-grid/index.js';
 import { GameId, GameRegistry } from '../games/registry.js';
 import {
   ClientToServerEvents,
@@ -360,6 +367,57 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Power Grid virtual region selection tokens ('region:RESET' | 'region:<ID>')
+    if (activeGameId === 'power_grid' && expansionId.startsWith('region:')) {
+      const currentMapId: 'USA' | 'GERMANY' =
+        ctx.room.selectedExpansions.includes('germany_map') ? 'GERMANY' : 'USA';
+      const mapDef = POWER_GRID_MAPS[currentMapId];
+      const connectedCount = Math.max(
+        2,
+        Array.from(ctx.room.players.values()).filter((p) => p.connected).length
+      );
+
+      if (expansionId === 'region:RESET') {
+        ctx.room.selectedExpansions = ctx.room.selectedExpansions.filter(
+          (id) => !id.startsWith('region:')
+        );
+        broadcastRoomLobby(ctx.room);
+        return;
+      }
+
+      const targetRegionId = expansionId.slice('region:'.length);
+      if (!mapDef.regions.includes(targetRegionId)) {
+        return;
+      }
+
+      const nonRegionTokens = ctx.room.selectedExpansions.filter(
+        (id) => !id.startsWith('region:')
+      );
+      const existingManual = extractManualRegionsFromExpansions(
+        currentMapId,
+        ctx.room.selectedExpansions
+      );
+      const hasAnyRegionToken = ctx.room.selectedExpansions.some((id) =>
+        id.startsWith('region:')
+      );
+      const workingRegions = hasAnyRegionToken
+        ? [...existingManual]
+        : [...getDefaultActiveRegions(currentMapId, connectedCount)];
+
+      const nextRegions = workingRegions.includes(targetRegionId)
+        ? workingRegions.filter((r) => r !== targetRegionId)
+        : [...workingRegions, targetRegionId];
+
+      // Store 'region:CUSTOM' marker so an empty manual selection doesn't snap back to defaults mid-edit
+      ctx.room.selectedExpansions = [
+        ...nonRegionTokens,
+        'region:CUSTOM',
+        ...nextRegions.map((r) => `region:${r}`),
+      ];
+      broadcastRoomLobby(ctx.room);
+      return;
+    }
+
     const expansion = catalogEntry.expansions.find(
       (e) => e.id === expansionId
     );
@@ -397,6 +455,10 @@ io.on('connection', (socket) => {
       } else if (expansionId === 'secret_mission') {
         nextExpansions = nextExpansions.filter((id) => id !== 'capital_risk');
       }
+    }
+
+    if (activeGameId === 'power_grid' && expansionId === 'germany_map') {
+      nextExpansions = nextExpansions.filter((id) => !id.startsWith('region:'));
     }
 
     if (activeGameId === 'ttr' && expansionId === 'europe_map') {
@@ -600,6 +662,35 @@ io.on('connection', (socket) => {
         if (selectedCardCount !== 10) {
           socket.emit('action_error', {
             message: `Please select 10 Kingdom cards before starting (${selectedCardCount}/10 selected).`,
+          });
+          return;
+        }
+      }
+      if (
+        gameId === 'power_grid' &&
+        ctx.room.selectedExpansions.some((id) => id.startsWith('region:'))
+      ) {
+        const pgMapId: 'USA' | 'GERMANY' =
+          ctx.room.selectedExpansions.includes('germany_map')
+            ? 'GERMANY'
+            : 'USA';
+        const pgMap = POWER_GRID_MAPS[pgMapId];
+        const reqCount =
+          PG_PLAYER_COUNT_CONFIGS[currentCount]?.activeRegionsCount ?? 4;
+        const chosenRegions = extractManualRegionsFromExpansions(
+          pgMapId,
+          ctx.room.selectedExpansions
+        );
+        if (chosenRegions.length !== reqCount) {
+          socket.emit('action_error', {
+            message: `Power Grid with ${currentCount} players requires exactly ${reqCount} active regions (${chosenRegions.length} selected).`,
+          });
+          return;
+        }
+        if (!areRegionsContiguous(pgMap, chosenRegions)) {
+          socket.emit('action_error', {
+            message:
+              'Selected Power Grid regions must be contiguous (all connected to one another).',
           });
           return;
         }

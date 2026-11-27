@@ -6,6 +6,14 @@ import {
   getAvailableDominionKingdomPool,
 } from '../games/dominion/index.js';
 import {
+  areRegionsContiguous,
+  extractManualRegionsFromExpansions,
+  getDefaultActiveRegions,
+  PLAYER_COUNT_CONFIGS as PG_PLAYER_COUNT_CONFIGS,
+  POWER_GRID_MAPS,
+  POWER_GRID_VISUAL_LAYOUTS,
+} from '../games/power-grid/index.js';
+import {
   PlayerLobbySettings,
   RoomPlayerSummary,
 } from '../network/socketTypes.js';
@@ -178,6 +186,34 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         return {
           canStart: false,
           reason: `Dominion Custom Kingdom requires 10 cards selected (${selectedCardCount}/10 selected).`,
+        };
+      }
+    }
+
+    if (
+      stagedGame.id === 'power_grid' &&
+      selectedExpansions.some((e) => e.startsWith('region:'))
+    ) {
+      const pgMapId: 'USA' | 'GERMANY' =
+        selectedExpansions.includes('germany_map') ? 'GERMANY' : 'USA';
+      const pgMap = POWER_GRID_MAPS[pgMapId];
+      const reqCount =
+        PG_PLAYER_COUNT_CONFIGS[count]?.activeRegionsCount ?? 4;
+      const chosen = extractManualRegionsFromExpansions(
+        pgMapId,
+        selectedExpansions
+      );
+      if (chosen.length !== reqCount) {
+        return {
+          canStart: false,
+          reason: `Power Grid (${count} players) requires ${reqCount} active regions (${chosen.length}/${reqCount} selected).`,
+        };
+      }
+      if (!areRegionsContiguous(pgMap, chosen)) {
+        return {
+          canStart: false,
+          reason:
+            'Selected Power Grid regions must all be contiguous (connected).',
         };
       }
     }
@@ -1420,6 +1456,230 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     </div>
                   </div>
                 </div>
+              ) : stagedGame.id === 'power_grid' ? (
+                (() => {
+                  const isGermany = selectedExpansions.includes('germany_map');
+                  const pgMapId: 'USA' | 'GERMANY' = isGermany
+                    ? 'GERMANY'
+                    : 'USA';
+                  const pgMap = POWER_GRID_MAPS[pgMapId];
+                  const pgVisual = POWER_GRID_VISUAL_LAYOUTS[pgMapId];
+                  const effectiveSeatCount = Math.max(
+                    2,
+                    Math.min(6, connectedPlayers.length)
+                  );
+                  const reqRegions =
+                    PG_PLAYER_COUNT_CONFIGS[effectiveSeatCount]
+                      ?.activeRegionsCount ?? 4;
+                  const hasCustomRegionTokens = selectedExpansions.some((id) =>
+                    id.startsWith('region:')
+                  );
+                  const activeRegionsList = hasCustomRegionTokens
+                    ? extractManualRegionsFromExpansions(
+                        pgMapId,
+                        selectedExpansions
+                      )
+                    : getDefaultActiveRegions(pgMapId, effectiveSeatCount);
+                  const isContiguous = areRegionsContiguous(
+                    pgMap,
+                    activeRegionsList
+                  );
+                  const isRegionCountExact =
+                    activeRegionsList.length === reqRegions;
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Option 1: Select Map (USA vs Germany, matching Ticket to Ride) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
+                            🗺️ Option 1: Select Map
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {isHost ? 'Host Selection' : 'Synced with Host'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost && isGermany) {
+                                onToggleExpansion('germany_map');
+                              }
+                            }}
+                            className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                              !isGermany
+                                ? 'bg-amber-950/40 border-amber-400 shadow-md'
+                                : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-black text-slate-100 text-xs">
+                                🗽 United States (Base Map)
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                  !isGermany
+                                    ? 'bg-amber-400 text-slate-950'
+                                    : 'bg-slate-800 text-slate-400'
+                                }`}
+                              >
+                                {!isGermany ? '✓ Active' : 'Select'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                              42 North American cities across 6 regions with
+                              classic $0 twin-city links (Denver–Cheyenne,
+                              NY–Philadelphia, Savannah–Jacksonville).
+                            </p>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!isHost}
+                            onClick={() => {
+                              if (isHost && !isGermany) {
+                                onToggleExpansion('germany_map');
+                              }
+                            }}
+                            className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                              isGermany
+                                ? 'bg-amber-950/40 border-amber-400 shadow-md'
+                                : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-black text-slate-100 text-xs">
+                                🏰 Germany (Double-Sided Map)
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                  isGermany
+                                    ? 'bg-amber-400 text-slate-950'
+                                    : 'bg-slate-800 text-slate-400'
+                                }`}
+                              >
+                                {isGermany ? '✓ Active' : 'Select'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                              42 German industrial cities across 6 regions with
+                              tight Ruhr Valley &amp; Saxony $0 twin-city links
+                              (Duisburg–Essen, Halle–Leipzig, Wiesbaden–Frankfurt).
+                            </p>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Option 2: Active Regions Selection (Defaults + Manual Override) */}
+                      <div className="pt-3 border-t border-slate-800/80">
+                        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                          <div>
+                            <span className="font-black uppercase tracking-wider text-cyan-300 text-[11px] block">
+                              📍 Option 2: Active Map Regions ({reqRegions}{' '}
+                              Required for {effectiveSeatCount}P)
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              Defaults set automatically — click regions to
+                              customize (inactive regions show greyed out on
+                              board).
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
+                                isRegionCountExact && isContiguous
+                                  ? 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+                                  : 'bg-amber-500/20 border border-amber-400 text-amber-300'
+                              }`}
+                            >
+                              {isRegionCountExact && isContiguous
+                                ? `✓ ${activeRegionsList.length}/${reqRegions} Contiguous`
+                                : !isRegionCountExact
+                                  ? `${activeRegionsList.length}/${reqRegions} Selected`
+                                  : '⚠️ Must Touch'}
+                            </span>
+                            {isHost && hasCustomRegionTokens && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onToggleExpansion('region:RESET')
+                                }
+                                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[10px] font-bold text-slate-200 cursor-pointer"
+                              >
+                                ↺ Reset Default
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {pgMap.regions.map((rid) => {
+                            const isSelected = activeRegionsList.includes(rid);
+                            const rVis = pgVisual.regions[rid];
+                            const sampleCities = pgMap.cities
+                              .filter((c) => c.regionId === rid)
+                              .slice(0, 3)
+                              .map((c) => c.name)
+                              .join(', ');
+
+                            return (
+                              <button
+                                key={rid}
+                                type="button"
+                                disabled={!isHost}
+                                onClick={() => {
+                                  if (isHost) {
+                                    onToggleExpansion(`region:${rid}`);
+                                  }
+                                }}
+                                className={`p-2.5 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                  isSelected
+                                    ? 'bg-slate-900 border-emerald-400 shadow-md'
+                                    : 'bg-slate-950/60 border-slate-800 opacity-60 hover:opacity-90'
+                                } ${
+                                  isHost ? 'cursor-pointer' : 'cursor-default'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span
+                                      className="w-3 h-3 rounded-full shrink-0 border"
+                                      style={{
+                                        backgroundColor:
+                                          rVis?.badgeHex ?? '#475569',
+                                        borderColor:
+                                          rVis?.borderHex ?? '#94a3b8',
+                                      }}
+                                    />
+                                    <span className="font-black text-[11px] text-slate-100 truncate">
+                                      {rVis?.label ?? rid}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase shrink-0 ${
+                                      isSelected
+                                        ? 'bg-emerald-400 text-slate-950'
+                                        : 'bg-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {isSelected ? 'Active' : 'Greyed'}
+                                  </span>
+                                </div>
+                                <div className="text-[9px] text-slate-400 mt-1 truncate">
+                                  {sampleCities}…
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()
               ) : stagedGame.id === 'stockpile' ? (
                 <div className="space-y-4">
                   {/* Option 1: Basic Board vs Advanced Board Selector */}

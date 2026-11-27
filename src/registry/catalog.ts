@@ -266,6 +266,12 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
     ],
     expansions: [
       {
+        id: 'germany_map',
+        name: 'Germany (Double-Sided Base Map)',
+        description:
+          'Flips the Power Grid board to Germany across 6 regions (North, East, West, Center, South-West, South-East) and 42 cities with authentic pipe costs.',
+      },
+      {
         id: 'benelux_central_europe',
         name: 'Benelux / Central Europe Map',
         description:

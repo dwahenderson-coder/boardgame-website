@@ -35,7 +35,10 @@ import {
 } from '../games/kings-corners/index.js';
 import {
   calculateMaxPoweredCities,
+  extractManualRegionsFromExpansions,
   getActivePlayerId as getPowerGridActivePlayerId,
+  getDefaultActiveRegions,
+  POWER_GRID_MAPS,
   PowerGridGameState,
   SanitizedPowerGridState,
 } from '../games/power-grid/index.js';
@@ -986,10 +989,52 @@ export const SandboxApp: React.FC = () => {
         }
       }
 
+      if (
+        localStagedGameDef.id === 'power_grid' &&
+        expansionId.startsWith('region:')
+      ) {
+        const currentMapId: 'USA' | 'GERMANY' = prev.includes('germany_map')
+          ? 'GERMANY'
+          : 'USA';
+        const mapDef = POWER_GRID_MAPS[currentMapId];
+
+        if (expansionId === 'region:RESET') {
+          return prev.filter((id) => !id.startsWith('region:'));
+        }
+
+        const targetRegionId = expansionId.slice('region:'.length);
+        if (!mapDef.regions.includes(targetRegionId)) {
+          return prev;
+        }
+
+        const nonRegionTokens = prev.filter((id) => !id.startsWith('region:'));
+        const existingManual = extractManualRegionsFromExpansions(
+          currentMapId,
+          prev
+        );
+        const hasAnyRegionToken = prev.some((id) => id.startsWith('region:'));
+        const workingRegions = hasAnyRegionToken
+          ? [...existingManual]
+          : [...getDefaultActiveRegions(currentMapId, localClampedPlayerCount)];
+
+        const nextRegions = workingRegions.includes(targetRegionId)
+          ? workingRegions.filter((r) => r !== targetRegionId)
+          : [...workingRegions, targetRegionId];
+
+        return [
+          ...nonRegionTokens,
+          'region:CUSTOM',
+          ...nextRegions.map((r) => `region:${r}`),
+        ];
+      }
+
       const exists = prev.includes(expansionId);
       let next = exists
         ? prev.filter((id) => id !== expansionId)
         : [...prev, expansionId];
+      if (localStagedGameDef.id === 'power_grid' && expansionId === 'germany_map') {
+        next = next.filter((id) => !id.startsWith('region:'));
+      }
       if (localStagedGameDef.id === 'risk' && !exists) {
         if (expansionId === 'capital_risk') {
           next = next.filter((id) => id !== 'secret_mission');

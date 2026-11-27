@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GameRegistry } from '../registry.js';
 import {
   applyAction,
   calculateCityBuildCost,
@@ -9,8 +10,11 @@ import {
   getNextUnitCost,
   getPlayerPerspective,
   initGame,
+  POWER_GRID_MAPS,
+  POWER_GRID_VISUAL_LAYOUTS,
   PowerGridGameState,
   PowerGridPhase,
+  resolvePowerGridRegionsFromExpansions,
   STANDARD_POWER_PLANTS,
   STEP_3_CARD,
   validateAction,
@@ -523,6 +527,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
         players: {
           p1: {
             id: 'p1',
+            color: 'red',
             money: 10,
             cities: ['SEATTLE', 'PORTLAND', 'BOISE'], // 3 connected cities
             powerPlants: [
@@ -539,6 +544,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
           },
           p2: {
             id: 'p2',
+            color: 'blue',
             money: 20,
             cities: ['SAN_FRANCISCO'],
             powerPlants: [],
@@ -546,6 +552,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
           },
           p3: {
             id: 'p3',
+            color: 'yellow',
             money: 30,
             cities: [],
             powerPlants: [],
@@ -618,6 +625,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
         players: {
           p1: {
             id: 'p1',
+            color: 'red',
             money: 120,
             cities: makeCities(17, 'C_P1'), // 17 connected cities!
             powerPlants: [
@@ -638,6 +646,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
           },
           p2: {
             id: 'p2',
+            color: 'blue',
             money: 85,
             cities: makeCities(15, 'C_P2'), // 15 connected cities
             powerPlants: [
@@ -658,6 +667,7 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
           },
           p3: {
             id: 'p3',
+            color: 'green',
             money: 40,
             cities: makeCities(15, 'C_P3'), // 15 connected cities
             powerPlants: [
@@ -701,6 +711,69 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
       const p1Perspective = getPlayerPerspective(state, 'p1');
       expect(p1Perspective.self.money).toBe(50);
       expect(p1Perspective.opponents['p2']!.money).toBeNull();
+    });
+
+    it('provides complete visual map coordinates for all 42 cities & 6 regions on both USA and Germany, and supports lobby map/region/color options', () => {
+      for (const mapId of ['USA', 'GERMANY'] as const) {
+        const mapDef = POWER_GRID_MAPS[mapId];
+        const layout = POWER_GRID_VISUAL_LAYOUTS[mapId];
+        expect(mapDef.cities).toHaveLength(42);
+        expect(mapDef.regions).toHaveLength(6);
+
+        for (const rid of mapDef.regions) {
+          expect(layout.regions[rid]).toBeDefined();
+          expect(layout.regions[rid]!.polygonPath.length).toBeGreaterThan(10);
+        }
+        for (const city of mapDef.cities) {
+          const coord = layout.cities[city.id];
+          expect(coord).toBeDefined();
+          expect(coord!.x).toBeGreaterThan(0);
+          expect(coord!.y).toBeGreaterThan(0);
+        }
+      }
+
+      // Default vs custom contiguous regions via expansion tokens
+      expect(resolvePowerGridRegionsFromExpansions('USA', 3, [])).toEqual([
+        'NORTHWEST',
+        'SOUTHWEST',
+        'MIDWEST',
+      ]);
+      expect(
+        resolvePowerGridRegionsFromExpansions('GERMANY', 3, [
+          'germany_map',
+          'region:CUSTOM',
+          'region:CENTER',
+          'region:SOUTH_WEST',
+          'region:SOUTH_EAST',
+        ])
+      ).toEqual(['CENTER', 'SOUTH_WEST', 'SOUTH_EAST']);
+
+      // Verify GameRegistry.power_grid.initGame honors germany_map, custom regions, and lobby colors
+      const regState = GameRegistry.power_grid.initGame(
+        ['p1', 'p2', 'p3'],
+        99,
+        {
+          selectedExpansions: [
+            'germany_map',
+            'region:CUSTOM',
+            'region:WEST',
+            'region:SOUTH_WEST',
+            'region:SOUTH_EAST',
+          ],
+          playerColors: { p1: 'purple', p2: 'green', p3: 'yellow' },
+        }
+      ) as PowerGridGameState;
+
+      expect(regState.mapId).toBe('GERMANY');
+      expect(regState.activeRegions).toEqual([
+        'WEST',
+        'SOUTH_WEST',
+        'SOUTH_EAST',
+      ]);
+      expect(Object.keys(regState.cityBoard)).toHaveLength(21);
+      expect(regState.players['p1']!.color).toBe('purple');
+      expect(regState.players['p2']!.color).toBe('green');
+      expect(regState.players['p3']!.color).toBe('yellow');
     });
   });
 });

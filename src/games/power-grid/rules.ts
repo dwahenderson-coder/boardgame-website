@@ -219,10 +219,29 @@ export function initPowerGridGame(
   const cityBoard = createInitialCityBoard(mapId, activeRegions);
   const resourceMarket = createInitialResourceMarket();
 
+  const defaultColors = ['red', 'blue', 'yellow', 'green', 'purple', 'black'];
+  const usedColors = new Set<string>();
+  const resolvedColors: Record<string, string> = {};
+  for (const pid of playerIds) {
+    const chosen = options?.playerColors?.[pid];
+    if (chosen && !usedColors.has(chosen)) {
+      resolvedColors[pid] = chosen;
+      usedColors.add(chosen);
+    }
+  }
+  for (const pid of playerIds) {
+    if (!resolvedColors[pid]) {
+      const next = defaultColors.find((c) => !usedColors.has(c)) ?? 'red';
+      resolvedColors[pid] = next;
+      usedColors.add(next);
+    }
+  }
+
   const players: Record<string, PowerGridPlayerState> = {};
   for (const pid of playerIds) {
     players[pid] = {
       id: pid,
+      color: resolvedColors[pid]!,
       money: STARTING_ELEKTRO,
       cities: [],
       powerPlants: [],
@@ -1700,6 +1719,7 @@ export function getPowerGridPlayerPerspective(
     isSelf: boolean
   ): SanitizedPowerGridPlayerState => ({
     id: p.id,
+    color: p.color,
     money:
       isSelf || !state.hideMoney || state.phase === PowerGridPhase.GAME_OVER
         ? p.money
