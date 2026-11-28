@@ -445,6 +445,28 @@ export const GAME_RULES_BY_ID: Readonly<Record<GameId, GameRulebook>> = {
         ],
       },
       {
+        id: 'quebec_map',
+        title: 'Québec Map (Hydro Expansion)',
+        summary: '42 cities across 6 Québec regions with Ecological deck stack & Hydro market retention.',
+        details: [
+          'Deck Setup: Ecological plants #13, #18, and #22 are placed on top of the draw pile in that exact order (#13 on top).',
+          'Hydro / Ecological Market Rule: Ecological (green) plants are NEVER cycled under the draw deck during Phase 5 Bureaucracy—instead, the highest-numbered non-ecological plant in the Future Market is placed under the deck.',
+          'Multi-District Hubs: Greater Montréal (Laval, Longueuil, Pointe-Claire, Montréal) and Québec City (Charlesbourg, Beauport, Québec) feature $0 internal links.',
+          'Uses the custom Québec Resource Replenishment Table.',
+        ],
+      },
+      {
+        id: 'baden_wuerttemberg_map',
+        title: 'Baden-Württemberg Map (Transregional Expansion)',
+        summary: '5 regions + 5 Transregional border cities, swapped Phase 2 → Phase 1, and faster Step 2.',
+        details: [
+          'Swapped Phase 1 & Phase 2: Every round runs Phase 2 (Auction Power Plants) FIRST, then re-determines Turn Order (Phase 1) before buying fuel and building cities!',
+          'Transregional Cities (Ludwigshafen, Strasbourg, Nürnberg, Basel, Augsburg): Locked during Step 1; open in Step 2 starting at the $15 slot ($15 in Step 2, $15 & $20 in Step 3).',
+          'Market Stagnation: If zero plants are bought in Phase 2, the 2 lowest-numbered plants are removed from the market instead of 1.',
+          'Accelerated Step 2: Triggers at 9 cities (2P), 6 cities (3–5P), or 5 cities (6P).',
+        ],
+      },
+      {
         id: 'region:CUSTOM',
         title: 'Custom Contiguous Region Setup',
         summary: 'Host manually chose custom contiguous regions instead of standard defaults.',

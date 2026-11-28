@@ -272,6 +272,18 @@ export const GAME_CATALOG: readonly GameDefinition[] = [
           'Flips the Power Grid board to Germany across 6 regions (North, East, West, Center, South-West, South-East) and 42 cities with authentic pipe costs.',
       },
       {
+        id: 'quebec_map',
+        name: 'Québec (Hydro Expansion Map)',
+        description:
+          '42 cities across 6 Québec regions with Montréal & Québec City multi-districts, Ecological plants #13/#18/#22 stacked on top of the deck, and permanent Hydro/Ecological market retention.',
+      },
+      {
+        id: 'baden_wuerttemberg_map',
+        name: 'Baden-Württemberg (Transregional Expansion Map)',
+        description:
+          '5 regions (30 cities + 5 Transregional border cities opening in Step 2 at $15/$20), swapped Phase 2 → Phase 1 turn order, earlier Step 2 triggers (9/6/5), and 2-plant market stagnation removal.',
+      },
+      {
         id: 'benelux_central_europe',
         name: 'Benelux / Central Europe Map',
         description:

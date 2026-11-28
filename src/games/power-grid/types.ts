@@ -34,10 +34,20 @@ export interface OwnedPowerPlant {
   readonly storedResources: Readonly<Record<PowerGridResource, number>>;
 }
 
+export type PowerGridMapId =
+  | 'USA'
+  | 'GERMANY'
+  | 'QUEBEC'
+  | 'BADEN_WUERTTEMBERG';
+
 export interface CityNodeDefinition {
   readonly id: string;
   readonly name: string;
   readonly regionId: string;
+  /** True for Baden-Württemberg transregional border cities (open in Step 2 at $15/$20) */
+  readonly isTransregional?: boolean;
+  /** Optional metropolitan multi-district label (e.g. 'MONTREAL' or 'QUEBEC_CITY') */
+  readonly districtGroup?: string;
 }
 
 export interface CityEdgeDefinition {
@@ -47,7 +57,7 @@ export interface CityEdgeDefinition {
 }
 
 export interface PowerGridMapDefinition {
-  readonly id: 'USA' | 'GERMANY';
+  readonly id: PowerGridMapId;
   readonly name: string;
   readonly regions: readonly string[];
   readonly regionAdjacency: Readonly<Record<string, readonly string[]>>;
@@ -120,7 +130,7 @@ export interface SanitizedPowerGridPlayerState {
 }
 
 export interface PowerGridInitOptions {
-  readonly mapId?: 'USA' | 'GERMANY';
+  readonly mapId?: PowerGridMapId;
   readonly mapRegionKeys?: readonly string[];
   readonly playerColors?: Readonly<Record<string, string>>;
   readonly hideMoney?: boolean;
@@ -130,7 +140,7 @@ export interface PowerGridInitOptions {
 
 export interface PowerGridGameState {
   readonly gameId: 'power_grid';
-  readonly mapId: 'USA' | 'GERMANY';
+  readonly mapId: PowerGridMapId;
   readonly activeRegions: readonly string[];
   readonly ruleset: 'CLASSIC' | 'RECHARGED';
   readonly hideMoney: boolean;
@@ -169,7 +179,7 @@ export interface PowerGridGameState {
 
 export interface SanitizedPowerGridState {
   readonly gameId: 'power_grid';
-  readonly mapId: 'USA' | 'GERMANY';
+  readonly mapId: PowerGridMapId;
   readonly activeRegions: readonly string[];
   readonly turnNumber: number;
   readonly roundNumber: number;

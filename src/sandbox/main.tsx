@@ -38,8 +38,10 @@ import {
   extractManualRegionsFromExpansions,
   getActivePlayerId as getPowerGridActivePlayerId,
   getDefaultActiveRegions,
+  POWER_GRID_MAP_EXPANSION_IDS,
   POWER_GRID_MAPS,
   PowerGridGameState,
+  resolvePowerGridMapIdFromExpansions,
   SanitizedPowerGridState,
 } from '../games/power-grid/index.js';
 import {
@@ -441,8 +443,12 @@ export const SandboxApp: React.FC = () => {
     if (stockpileSanitized && stockpileSanitized.boardMode === 'ADVANCED') {
       ids.add('advanced_board');
     }
-    if (powerGridSanitized && powerGridSanitized.mapId === 'GERMANY') {
-      ids.add('germany_map');
+    if (powerGridSanitized) {
+      if (powerGridSanitized.mapId === 'GERMANY') ids.add('germany_map');
+      if (powerGridSanitized.mapId === 'QUEBEC') ids.add('quebec_map');
+      if (powerGridSanitized.mapId === 'BADEN_WUERTTEMBERG') {
+        ids.add('baden_wuerttemberg_map');
+      }
     }
     return [...ids];
   }, [
@@ -1048,9 +1054,7 @@ export const SandboxApp: React.FC = () => {
         localStagedGameDef.id === 'power_grid' &&
         expansionId.startsWith('region:')
       ) {
-        const currentMapId: 'USA' | 'GERMANY' = prev.includes('germany_map')
-          ? 'GERMANY'
-          : 'USA';
+        const currentMapId = resolvePowerGridMapIdFromExpansions(prev);
         const mapDef = POWER_GRID_MAPS[currentMapId];
 
         if (expansionId === 'region:RESET') {
@@ -1087,7 +1091,19 @@ export const SandboxApp: React.FC = () => {
       let next = exists
         ? prev.filter((id) => id !== expansionId)
         : [...prev, expansionId];
-      if (localStagedGameDef.id === 'power_grid' && expansionId === 'germany_map') {
+      if (
+        localStagedGameDef.id === 'power_grid' &&
+        (POWER_GRID_MAP_EXPANSION_IDS as readonly string[]).includes(
+          expansionId
+        )
+      ) {
+        if (!exists) {
+          next = next.filter(
+            (id) =>
+              id === expansionId ||
+              !(POWER_GRID_MAP_EXPANSION_IDS as readonly string[]).includes(id)
+          );
+        }
         next = next.filter((id) => !id.startsWith('region:'));
       }
       if (localStagedGameDef.id === 'risk' && !exists) {

@@ -10,8 +10,10 @@ import {
   extractManualRegionsFromExpansions,
   getDefaultActiveRegions,
   PLAYER_COUNT_CONFIGS as PG_PLAYER_COUNT_CONFIGS,
+  POWER_GRID_MAP_EXPANSION_IDS,
   POWER_GRID_MAPS,
   POWER_GRID_VISUAL_LAYOUTS,
+  resolvePowerGridMapIdFromExpansions,
 } from '../games/power-grid/index.js';
 import {
   PlayerLobbySettings,
@@ -196,8 +198,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       stagedGame.id === 'power_grid' &&
       selectedExpansions.some((e) => e.startsWith('region:'))
     ) {
-      const pgMapId: 'USA' | 'GERMANY' =
-        selectedExpansions.includes('germany_map') ? 'GERMANY' : 'USA';
+      const pgMapId = resolvePowerGridMapIdFromExpansions(selectedExpansions);
       const pgMap = POWER_GRID_MAPS[pgMapId];
       const reqCount =
         PG_PLAYER_COUNT_CONFIGS[count]?.activeRegionsCount ?? 4;
@@ -1486,10 +1487,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 </div>
               ) : stagedGame.id === 'power_grid' ? (
                 (() => {
-                  const isGermany = selectedExpansions.includes('germany_map');
-                  const pgMapId: 'USA' | 'GERMANY' = isGermany
-                    ? 'GERMANY'
-                    : 'USA';
+                  const pgMapId =
+                    resolvePowerGridMapIdFromExpansions(selectedExpansions);
+                  const activeMapExpansionId =
+                    selectedExpansions.find((id) =>
+                      (
+                        POWER_GRID_MAP_EXPANSION_IDS as readonly string[]
+                      ).includes(id)
+                    ) ?? null;
                   const pgMap = POWER_GRID_MAPS[pgMapId];
                   const pgVisual = POWER_GRID_VISUAL_LAYOUTS[pgMapId];
                   const effectiveSeatCount = Math.max(
@@ -1515,9 +1520,41 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                   const isRegionCountExact =
                     activeRegionsList.length === reqRegions;
 
+                  const mapOptions: ReadonlyArray<{
+                    readonly mapId: 'USA' | 'GERMANY' | 'QUEBEC' | 'BADEN_WUERTTEMBERG';
+                    readonly expId: string | null;
+                    readonly title: string;
+                    readonly desc: string;
+                  }> = [
+                    {
+                      mapId: 'USA',
+                      expId: null,
+                      title: '🗽 United States (Base Map)',
+                      desc: '42 North American cities across 6 regions with classic $0 twin-city links (Denver–Cheyenne, NY–Philadelphia, Savannah–Jacksonville).',
+                    },
+                    {
+                      mapId: 'GERMANY',
+                      expId: 'germany_map',
+                      title: '🏰 Germany (Double-Sided Map)',
+                      desc: '42 German industrial cities across 6 regions with tight Ruhr Valley & Saxony $0 twin-city links (Duisburg–Essen, Halle–Leipzig).',
+                    },
+                    {
+                      mapId: 'QUEBEC',
+                      expId: 'quebec_map',
+                      title: '⚜️ Québec (Hydro Expansion)',
+                      desc: '42 cities across 6 regions, Montréal & Québec City multi-districts, Eco plants #13/#18/#22 on top of deck, and Ecological plants never cycle out.',
+                    },
+                    {
+                      mapId: 'BADEN_WUERTTEMBERG',
+                      expId: 'baden_wuerttemberg_map',
+                      title: '🌲 Baden-Württemberg (Expansion)',
+                      desc: '5 regions + 5 Transregional border cities (open Step 2 @ $15/$20), Phase 2 Auctions run BEFORE Phase 1 Turn Order, and Step 2 at 9/6/5 cities.',
+                    },
+                  ];
+
                   return (
                     <div className="space-y-4">
-                      {/* Option 1: Select Map (USA vs Germany, matching Ticket to Ride) */}
+                      {/* Option 1: Select Map (USA / Germany / Québec / Baden-Württemberg) */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-black uppercase tracking-wider text-amber-300 text-[11px]">
@@ -1529,75 +1566,51 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <button
-                            type="button"
-                            disabled={!isHost}
-                            onClick={() => {
-                              if (isHost && isGermany) {
-                                onToggleExpansion('germany_map');
-                              }
-                            }}
-                            className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
-                              !isGermany
-                                ? 'bg-amber-950/40 border-amber-400 shadow-md'
-                                : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-black text-slate-100 text-xs">
-                                🗽 United States (Base Map)
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
-                                  !isGermany
-                                    ? 'bg-amber-400 text-slate-950'
-                                    : 'bg-slate-800 text-slate-400'
+                          {mapOptions.map((opt) => {
+                            const isActiveMap = pgMapId === opt.mapId;
+                            return (
+                              <button
+                                key={opt.mapId}
+                                type="button"
+                                disabled={!isHost}
+                                onClick={() => {
+                                  if (!isHost || isActiveMap) return;
+                                  if (opt.expId === null) {
+                                    if (activeMapExpansionId) {
+                                      onToggleExpansion(activeMapExpansionId);
+                                    }
+                                  } else {
+                                    onToggleExpansion(opt.expId);
+                                  }
+                                }}
+                                className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
+                                  isActiveMap
+                                    ? 'bg-amber-950/40 border-amber-400 shadow-md'
+                                    : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                                } ${
+                                  isHost ? 'cursor-pointer' : 'cursor-default'
                                 }`}
                               >
-                                {!isGermany ? '✓ Active' : 'Select'}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 mt-1 leading-snug">
-                              42 North American cities across 6 regions with
-                              classic $0 twin-city links (Denver–Cheyenne,
-                              NY–Philadelphia, Savannah–Jacksonville).
-                            </p>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={!isHost}
-                            onClick={() => {
-                              if (isHost && !isGermany) {
-                                onToggleExpansion('germany_map');
-                              }
-                            }}
-                            className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between ${
-                              isGermany
-                                ? 'bg-amber-950/40 border-amber-400 shadow-md'
-                                : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-                            } ${isHost ? 'cursor-pointer' : 'cursor-default'}`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-black text-slate-100 text-xs">
-                                🏰 Germany (Double-Sided Map)
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase ${
-                                  isGermany
-                                    ? 'bg-amber-400 text-slate-950'
-                                    : 'bg-slate-800 text-slate-400'
-                                }`}
-                              >
-                                {isGermany ? '✓ Active' : 'Select'}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 mt-1 leading-snug">
-                              42 German industrial cities across 6 regions with
-                              tight Ruhr Valley &amp; Saxony $0 twin-city links
-                              (Duisburg–Essen, Halle–Leipzig, Wiesbaden–Frankfurt).
-                            </p>
-                          </button>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-black text-slate-100 text-xs">
+                                    {opt.title}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full font-black text-[9px] uppercase shrink-0 ${
+                                      isActiveMap
+                                        ? 'bg-amber-400 text-slate-950'
+                                        : 'bg-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {isActiveMap ? '✓ Active' : 'Select'}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                                  {opt.desc}
+                                </p>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
 

@@ -3,7 +3,7 @@ import { ValidationResult } from '../ticket-to-ride/types.js';
 import {
   ALL_POWER_GRID_RESOURCES,
   getBureaucracyPayout,
-  PLAYER_COUNT_CONFIGS,
+  getEffectivePlayerCountConfig,
   POWER_GRID_MAPS,
   STARTING_ELEKTRO,
   STEP_3_CARD_ID,
@@ -190,8 +190,8 @@ export function initPowerGridGame(
     );
   }
 
-  const cfg = PLAYER_COUNT_CONFIGS[playerIds.length]!;
   const mapId = options?.mapId ?? 'USA';
+  const cfg = getEffectivePlayerCountConfig(playerIds.length, mapId);
   const ruleset = options?.ruleset ?? 'RECHARGED';
   const hideMoney = options?.hideMoney ?? false;
   const mapDef = POWER_GRID_MAPS[mapId];
@@ -212,7 +212,8 @@ export function initPowerGridGame(
   const marketSetup = setupPowerPlantDeckAndMarkets(
     playerIds.length,
     prng,
-    ruleset
+    ruleset,
+    mapId
   );
   prng = marketSetup.prng;
 
@@ -777,21 +778,27 @@ function advanceOrCompletePhase2Auction(
   let nextStep = state.step;
   let nextPrng = state.prng;
 
-  // Rule: If NO plant was bought in the round, discard the lowest plant in Actual Market and draw replacement
+  // Rule: If NO plant was bought in the round, discard the lowest plant(s) in Actual Market and draw replacement(s)
+  // (Baden-Württemberg Market Stagnation removes the 2 lowest plants instead of 1!)
   if (!auction.anyPlantPurchasedThisRound && nextActual.length > 0) {
-    const remainingActual = nextActual.slice(1);
+    const stagnationRemovals =
+      state.mapId === 'BADEN_WUERTTEMBERG' ? 2 : 1;
     const highestCities = getHighestCityCount(state.players);
-    const drawRes = drawAndInsertReplacementPlant(
-      remainingActual,
-      nextFuture,
-      nextDeck,
-      nextStep,
-      highestCities
-    );
-    nextActual = drawRes.actualMarket;
-    nextFuture = drawRes.futureMarket;
-    nextDeck = drawRes.drawDeck;
-    step3Flag = step3Flag || drawRes.step3Triggered;
+
+    for (let r = 0; r < stagnationRemovals && nextActual.length > 0; r++) {
+      const remainingActual = nextActual.slice(1);
+      const drawRes = drawAndInsertReplacementPlant(
+        remainingActual,
+        nextFuture,
+        nextDeck,
+        nextStep,
+        highestCities
+      );
+      nextActual = drawRes.actualMarket;
+      nextFuture = drawRes.futureMarket;
+      nextDeck = drawRes.drawDeck;
+      step3Flag = step3Flag || drawRes.step3Triggered;
+    }
   }
 
   // If Step 3 card was drawn during Phase 2, transition to Step 3 now
@@ -810,10 +817,14 @@ function advanceOrCompletePhase2Auction(
     step3Flag = false;
   }
 
-  // Round 1 special rule: Re-determine turn order after all players buy their first power plant!
+  // Round 1 special rule (or EVERY round on Baden-Württemberg, where Phase 2 runs before Phase 1!):
+  // Re-determine turn order after all players finish Phase 2 auctions!
   let nextTurnOrder = state.turnOrder;
   let nextFirstRoundRecomputed = state.firstRoundOrderRecomputed;
-  if (state.roundNumber === 1 && !state.firstRoundOrderRecomputed) {
+  if (
+    state.mapId === 'BADEN_WUERTTEMBERG' ||
+    (state.roundNumber === 1 && !state.firstRoundOrderRecomputed)
+  ) {
     nextTurnOrder = determineTurnOrder(state.players, state.turnOrder);
     nextFirstRoundRecomputed = true;
   }
@@ -1023,8 +1034,10 @@ export function applyPowerGridAction(
     throw new Error(validation.reason ?? 'Invalid Power Grid action.');
   }
 
-  const cfg =
-    PLAYER_COUNT_CONFIGS[state.turnOrder.length] ?? PLAYER_COUNT_CONFIGS[4]!;
+  const cfg = getEffectivePlayerCountConfig(
+    state.turnOrder.length,
+    state.mapId
+  );
   const player = state.players[effectivePlayerId]!;
   playerId = effectivePlayerId;
   action = effectiveAction;
@@ -1608,15 +1621,18 @@ export function applyPowerGridAction(
       }
 
       // All players have powered cities in Phase 5!
-      // 1. Replenish Resource Market according to Step and player count
+      // 1. Replenish Resource Market according to Step, player count, and map table
       workingResourceMarket = replenishResourceMarket(
         workingResourceMarket,
         state.turnOrder.length,
-        state.step
+        state.step,
+        state.mapId
       );
 
       // 2. Power Plant Market Maintenance:
       // - In Step 1 & Step 2: Place highest plant from Future Market under the draw deck, draw replacement.
+      //   * Québec Hydro Rule: Ecological plants are NEVER cycled under the draw deck—instead, the highest
+      //     non-ecological plant in the Future Market is placed under the deck.
       // - In Step 3: Remove lowest plant from Actual Market from the game, draw replacement.
       let nextStep = state.step;
       let nextActual = [...state.actualMarket];
@@ -1643,13 +1659,31 @@ export function applyPowerGridAction(
         const combined = [...nextActual, ...nextFuture].sort(
           (a, b) => a.id - b.id
         );
-        if (combined.length > 0) {
-          const highestPlant = combined.pop()!;
-          const splitBeforeDraw = splitSortedMarket(combined, nextStep);
+        let cycledPlant: PowerPlantCard | null = null;
+
+        if (state.mapId === 'QUEBEC') {
+          const nonEcoInFuture = [...nextFuture]
+            .filter((c) => c.resourceType !== 'ECOLOGICAL')
+            .sort((a, b) => a.id - b.id);
+          if (nonEcoInFuture.length > 0) {
+            cycledPlant = nonEcoInFuture[nonEcoInFuture.length - 1]!;
+          }
+        } else if (combined.length > 0) {
+          cycledPlant = combined[combined.length - 1]!;
+        }
+
+        if (cycledPlant) {
+          const remainingCombined = combined.filter(
+            (c) => c.id !== cycledPlant!.id
+          );
+          const splitBeforeDraw = splitSortedMarket(
+            remainingCombined,
+            nextStep
+          );
           const drawRes = drawAndInsertReplacementPlant(
             splitBeforeDraw.actualMarket,
             splitBeforeDraw.futureMarket,
-            [...nextDeck, highestPlant],
+            [...nextDeck, cycledPlant],
             nextStep,
             highestCities
           );
@@ -1673,9 +1707,14 @@ export function applyPowerGridAction(
         }
       }
 
-      // 3. Advance to Next Round & Phase 1 Turn Order Determination -> Phase 2 Auction
+      // 3. Advance to Next Round
+      // Standard maps run Phase 1 (Determine Turn Order) before Phase 2;
+      // Baden-Württemberg swaps Phase 1 & Phase 2, keeping current turnOrder into Phase 2 Auctions!
       const nextRound = state.roundNumber + 1;
-      const nextTurnOrder = determineTurnOrder(nextPlayers, state.turnOrder);
+      const nextTurnOrder =
+        state.mapId === 'BADEN_WUERTTEMBERG'
+          ? state.turnOrder
+          : determineTurnOrder(nextPlayers, state.turnOrder);
 
       return {
         ...state,

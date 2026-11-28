@@ -1,10 +1,10 @@
 import { PRNGState, shuffleArray } from '../../common/prng.js';
 import {
   ALL_POWER_GRID_RESOURCES,
+  getMapResourceRestockRow,
   INITIAL_MARKET_INVENTORY,
   PLAYER_COUNT_CONFIGS,
   RESOURCE_PRICE_SLOTS,
-  RESOURCE_RESTOCK_TABLE,
   STANDARD_POWER_PLANTS,
   STEP_3_CARD,
   STEP_3_CARD_ID,
@@ -12,6 +12,7 @@ import {
 } from './constants.js';
 import {
   OwnedPowerPlant,
+  PowerGridMapId,
   PowerGridResource,
   PowerGridStep,
   PowerPlantCard,
@@ -152,11 +153,10 @@ export function returnResourcesToSupply(
 export function replenishResourceMarket(
   market: ResourceMarketState,
   playerCount: number,
-  step: PowerGridStep
+  step: PowerGridStep,
+  mapId: PowerGridMapId = 'USA'
 ): ResourceMarketState {
-  const restockRow =
-    RESOURCE_RESTOCK_TABLE[playerCount]?.[step] ??
-    RESOURCE_RESTOCK_TABLE[4]![step];
+  const restockRow = getMapResourceRestockRow(mapId, playerCount, step);
 
   const nextInventory: Record<PowerGridResource, number> = {
     ...market.inventory,
@@ -268,7 +268,8 @@ export function splitSortedMarket(
 export function setupPowerPlantDeckAndMarkets(
   playerCount: number,
   prng: PRNGState,
-  ruleset: 'CLASSIC' | 'RECHARGED' = 'RECHARGED'
+  ruleset: 'CLASSIC' | 'RECHARGED' = 'RECHARGED',
+  mapId: PowerGridMapId = 'USA'
 ): {
   readonly actualMarket: PowerPlantCard[];
   readonly futureMarket: PowerPlantCard[];
@@ -290,6 +291,42 @@ export function setupPowerPlantDeckAndMarkets(
   const lightCards = STANDARD_POWER_PLANTS.filter((p) => p.id >= 16);
 
   let currentPrng = prng;
+
+  // Québec special setup: Set aside Ecological plants #13, #18, #22 and place them on top of the draw pile in that order (#13 on top).
+  if (mapId === 'QUEBEC') {
+    const plant13 = STANDARD_POWER_PLANTS.find((p) => p.id === 13)!;
+    const plant18 = STANDARD_POWER_PLANTS.find((p) => p.id === 18)!;
+    const plant22 = STANDARD_POWER_PLANTS.find((p) => p.id === 22)!;
+
+    const remainingDarkPool = darkCards.filter((p) => p.id !== 13);
+    const remainingLightPool = lightCards.filter(
+      (p) => p.id !== 18 && p.id !== 22
+    );
+
+    const shuffledDark = shuffleArray(remainingDarkPool, currentPrng);
+    currentPrng = shuffledDark.prng;
+    const keptDark = shuffledDark.value.slice(cfg.randomlyRemovedDarkCards);
+
+    const shuffledLight = shuffleArray(remainingLightPool, currentPrng);
+    currentPrng = shuffledLight.prng;
+    const keptLight = shuffledLight.value.slice(cfg.randomlyRemovedLightCards);
+
+    const shuffledBody = shuffleArray([...keptDark, ...keptLight], currentPrng);
+    currentPrng = shuffledBody.prng;
+
+    return {
+      actualMarket,
+      futureMarket,
+      drawDeck: [
+        plant13,
+        plant18,
+        plant22,
+        ...shuffledBody.value,
+        STEP_3_CARD,
+      ],
+      prng: currentPrng,
+    };
+  }
 
   if (ruleset === 'CLASSIC') {
     // Classic rules: Plant 13 goes on top of the deck; remove random cards from remaining deck

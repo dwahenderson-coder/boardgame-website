@@ -1,6 +1,7 @@
 import {
   PlayerCountConfig,
   PowerGridMapDefinition,
+  PowerGridMapId,
   PowerGridResource,
   PowerGridStep,
   PowerPlantCard,
@@ -197,6 +198,102 @@ export const RESOURCE_RESTOCK_TABLE: Readonly<
     STEP_3: { COAL: 6, OIL: 7, GARBAGE: 6, URANIUM: 3 },
   },
 };
+
+export const QUEBEC_RESOURCE_RESTOCK_TABLE: Readonly<
+  Record<
+    number,
+    Readonly<Record<PowerGridStep, Readonly<Record<PowerGridResource, number>>>>
+  >
+> = {
+  2: {
+    STEP_1: { COAL: 3, OIL: 2, GARBAGE: 1, URANIUM: 1 },
+    STEP_2: { COAL: 3, OIL: 2, GARBAGE: 2, URANIUM: 1 },
+    STEP_3: { COAL: 3, OIL: 3, GARBAGE: 3, URANIUM: 1 },
+  },
+  3: {
+    STEP_1: { COAL: 4, OIL: 2, GARBAGE: 1, URANIUM: 1 },
+    STEP_2: { COAL: 4, OIL: 3, GARBAGE: 2, URANIUM: 1 },
+    STEP_3: { COAL: 3, OIL: 3, GARBAGE: 3, URANIUM: 1 },
+  },
+  4: {
+    STEP_1: { COAL: 5, OIL: 3, GARBAGE: 2, URANIUM: 1 },
+    STEP_2: { COAL: 4, OIL: 4, GARBAGE: 3, URANIUM: 2 },
+    STEP_3: { COAL: 4, OIL: 4, GARBAGE: 4, URANIUM: 2 },
+  },
+  5: {
+    STEP_1: { COAL: 5, OIL: 4, GARBAGE: 3, URANIUM: 2 },
+    STEP_2: { COAL: 5, OIL: 5, GARBAGE: 3, URANIUM: 3 },
+    STEP_3: { COAL: 5, OIL: 4, GARBAGE: 5, URANIUM: 2 },
+  },
+  6: {
+    STEP_1: { COAL: 7, OIL: 5, GARBAGE: 3, URANIUM: 2 },
+    STEP_2: { COAL: 6, OIL: 6, GARBAGE: 5, URANIUM: 3 },
+    STEP_3: { COAL: 6, OIL: 5, GARBAGE: 6, URANIUM: 3 },
+  },
+};
+
+export const BADEN_WUERTTEMBERG_RESOURCE_RESTOCK_TABLE: Readonly<
+  Record<
+    number,
+    Readonly<Record<PowerGridStep, Readonly<Record<PowerGridResource, number>>>>
+  >
+> = {
+  2: {
+    STEP_1: { COAL: 3, OIL: 2, GARBAGE: 1, URANIUM: 1 },
+    STEP_2: { COAL: 4, OIL: 2, GARBAGE: 2, URANIUM: 1 },
+    STEP_3: { COAL: 3, OIL: 4, GARBAGE: 3, URANIUM: 1 },
+  },
+  3: {
+    STEP_1: { COAL: 4, OIL: 2, GARBAGE: 1, URANIUM: 1 },
+    STEP_2: { COAL: 5, OIL: 3, GARBAGE: 2, URANIUM: 1 },
+    STEP_3: { COAL: 3, OIL: 4, GARBAGE: 3, URANIUM: 1 },
+  },
+  4: {
+    STEP_1: { COAL: 5, OIL: 3, GARBAGE: 2, URANIUM: 1 },
+    STEP_2: { COAL: 6, OIL: 4, GARBAGE: 3, URANIUM: 2 },
+    STEP_3: { COAL: 4, OIL: 5, GARBAGE: 4, URANIUM: 2 },
+  },
+  5: {
+    STEP_1: { COAL: 5, OIL: 4, GARBAGE: 3, URANIUM: 2 },
+    STEP_2: { COAL: 7, OIL: 5, GARBAGE: 3, URANIUM: 3 },
+    STEP_3: { COAL: 5, OIL: 6, GARBAGE: 5, URANIUM: 2 },
+  },
+  6: {
+    STEP_1: { COAL: 7, OIL: 5, GARBAGE: 3, URANIUM: 2 },
+    STEP_2: { COAL: 9, OIL: 6, GARBAGE: 5, URANIUM: 3 },
+    STEP_3: { COAL: 6, OIL: 7, GARBAGE: 6, URANIUM: 3 },
+  },
+};
+
+export function getMapResourceRestockRow(
+  mapId: PowerGridMapId,
+  playerCount: number,
+  step: PowerGridStep
+): Readonly<Record<PowerGridResource, number>> {
+  const table =
+    mapId === 'QUEBEC'
+      ? QUEBEC_RESOURCE_RESTOCK_TABLE
+      : mapId === 'BADEN_WUERTTEMBERG'
+        ? BADEN_WUERTTEMBERG_RESOURCE_RESTOCK_TABLE
+        : RESOURCE_RESTOCK_TABLE;
+  return table[playerCount]?.[step] ?? table[4]![step];
+}
+
+export function getEffectivePlayerCountConfig(
+  playerCount: number,
+  mapId: PowerGridMapId = 'USA'
+): PlayerCountConfig {
+  const base = PLAYER_COUNT_CONFIGS[playerCount] ?? PLAYER_COUNT_CONFIGS[4]!;
+  if (mapId === 'BADEN_WUERTTEMBERG') {
+    const bwStep2Cities =
+      playerCount === 2 ? 9 : playerCount === 6 ? 5 : 6;
+    return {
+      ...base,
+      step2TriggerCities: bwStep2Cities,
+    };
+  }
+  return base;
+}
 
 /**
  * Standard 42 Power Plant Cards (03 to 50) + Step 3 Card (id: 99).
@@ -573,8 +670,367 @@ export const GERMANY_MAP: PowerGridMapDefinition = {
   ],
 };
 
-export const POWER_GRID_MAPS: Readonly<Record<'USA' | 'GERMANY', PowerGridMapDefinition>> = {
+/**
+ * Québec Expansion Map Definition (6 Regions, 42 Cities, Hydro/Ecological Market Rules).
+ */
+export const QUEBEC_MAP: PowerGridMapDefinition = {
+  id: 'QUEBEC',
+  name: 'Québec',
+  regions: [
+    'NORTHWEST',
+    'CENTRAL_HEARTLAND',
+    'SOUTHWEST_METRO',
+    'CENTRAL_EAST',
+    'NORTH',
+    'EAST',
+  ],
+  regionAdjacency: {
+    NORTHWEST: ['CENTRAL_HEARTLAND'],
+    CENTRAL_HEARTLAND: [
+      'NORTHWEST',
+      'SOUTHWEST_METRO',
+      'NORTH',
+      'CENTRAL_EAST',
+    ],
+    SOUTHWEST_METRO: ['CENTRAL_HEARTLAND', 'CENTRAL_EAST'],
+    CENTRAL_EAST: ['SOUTHWEST_METRO', 'NORTH', 'CENTRAL_HEARTLAND', 'EAST'],
+    NORTH: ['CENTRAL_HEARTLAND', 'CENTRAL_EAST'],
+    EAST: ['CENTRAL_EAST'],
+  },
+  cities: [
+    // NORTHWEST (7 — Violet)
+    { id: 'HULL', name: 'Hull', regionId: 'NORTHWEST' },
+    { id: 'GATINEAU', name: 'Gatineau', regionId: 'NORTHWEST' },
+    { id: 'MANIWAKI', name: 'Maniwaki', regionId: 'NORTHWEST' },
+    { id: 'MONT_LAURIER', name: 'Mont-Laurier', regionId: 'NORTHWEST' },
+    { id: 'VAL_DOR', name: "Val-d'Or", regionId: 'NORTHWEST' },
+    { id: 'AMOS', name: 'Amos', regionId: 'NORTHWEST' },
+    { id: 'ROUYN_NORANDA', name: 'Rouyn-Noranda', regionId: 'NORTHWEST' },
+    // CENTRAL_HEARTLAND (7 — Yellow)
+    { id: 'SHAWINIGAN', name: 'Shawinigan', regionId: 'CENTRAL_HEARTLAND' },
+    {
+      id: 'TROIS_RIVIERES',
+      name: 'Trois-Rivières',
+      regionId: 'CENTRAL_HEARTLAND',
+    },
+    { id: 'REPENTIGNY', name: 'Repentigny', regionId: 'CENTRAL_HEARTLAND' },
+    { id: 'LACHUTE', name: 'Lachute', regionId: 'CENTRAL_HEARTLAND' },
+    {
+      id: 'LAVAL',
+      name: 'Laval',
+      regionId: 'CENTRAL_HEARTLAND',
+      districtGroup: 'MONTREAL',
+    },
+    {
+      id: 'LONGUEUIL',
+      name: 'Longueuil',
+      regionId: 'CENTRAL_HEARTLAND',
+      districtGroup: 'MONTREAL',
+    },
+    {
+      id: 'DRUMMONDVILLE',
+      name: 'Drummondville',
+      regionId: 'CENTRAL_HEARTLAND',
+    },
+    // SOUTHWEST_METRO (7 — Red)
+    {
+      id: 'POINTE_CLAIRE',
+      name: 'Pointe-Claire',
+      regionId: 'SOUTHWEST_METRO',
+      districtGroup: 'MONTREAL',
+    },
+    {
+      id: 'MONTREAL',
+      name: 'Montréal',
+      regionId: 'SOUTHWEST_METRO',
+      districtGroup: 'MONTREAL',
+    },
+    {
+      id: 'VAUDREUIL_DORION',
+      name: 'Vaudreuil-Dorion',
+      regionId: 'SOUTHWEST_METRO',
+    },
+    { id: 'VALLEYFIELD', name: 'Valleyfield', regionId: 'SOUTHWEST_METRO' },
+    { id: 'BROSSARD', name: 'Brossard', regionId: 'SOUTHWEST_METRO' },
+    { id: 'ST_HYACINTHE', name: 'St-Hyacinthe', regionId: 'SOUTHWEST_METRO' },
+    { id: 'GRANBY', name: 'Granby', regionId: 'SOUTHWEST_METRO' },
+    // CENTRAL_EAST (7 — Pink)
+    { id: 'SHERBROOKE', name: 'Sherbrooke', regionId: 'CENTRAL_EAST' },
+    { id: 'VICTORIAVILLE', name: 'Victoriaville', regionId: 'CENTRAL_EAST' },
+    { id: 'ST_GEORGES', name: 'St-Georges', regionId: 'CENTRAL_EAST' },
+    { id: 'ST_SIMEON', name: 'St-Siméon', regionId: 'CENTRAL_EAST' },
+    {
+      id: 'QUEBEC',
+      name: 'Québec',
+      regionId: 'CENTRAL_EAST',
+      districtGroup: 'QUEBEC_CITY',
+    },
+    {
+      id: 'CHARLESBOURG',
+      name: 'Charlesbourg',
+      regionId: 'CENTRAL_EAST',
+      districtGroup: 'QUEBEC_CITY',
+    },
+    {
+      id: 'BEAUPORT',
+      name: 'Beauport',
+      regionId: 'CENTRAL_EAST',
+      districtGroup: 'QUEBEC_CITY',
+    },
+    // NORTH (7 — Green)
+    { id: 'ROBERVAL', name: 'Roberval', regionId: 'NORTH' },
+    { id: 'ALMA', name: 'Alma', regionId: 'NORTH' },
+    { id: 'JONQUIERE', name: 'Jonquière', regionId: 'NORTH' },
+    { id: 'CHICOUTIMI', name: 'Chicoutimi', regionId: 'NORTH' },
+    { id: 'BAIE_COMEAU', name: 'Baie-Comeau', regionId: 'NORTH' },
+    { id: 'PORT_CARTIER', name: 'Port-Cartier', regionId: 'NORTH' },
+    { id: 'SEPT_ILES', name: 'Sept-Îles', regionId: 'NORTH' },
+    // EAST (7 — Brown)
+    { id: 'MONTMAGNY', name: 'Montmagny', regionId: 'EAST' },
+    { id: 'RIVIERE_DU_LOUP', name: 'Rivière-du-Loup', regionId: 'EAST' },
+    { id: 'RIMOUSKI', name: 'Rimouski', regionId: 'EAST' },
+    { id: 'MATANE', name: 'Matane', regionId: 'EAST' },
+    { id: 'POINTE_A_LA_CROIX', name: 'Pointe-à-la-Croix', regionId: 'EAST' },
+    { id: 'STE_ANNE_DES_MONTS', name: 'Ste-Anne-des-Monts', regionId: 'EAST' },
+    { id: 'GASPE', name: 'Gaspé', regionId: 'EAST' },
+  ],
+  connections: [
+    { from: 'ROUYN_NORANDA', to: 'AMOS', cost: 9 },
+    { from: 'ROUYN_NORANDA', to: 'VAL_DOR', cost: 12 },
+    { from: 'AMOS', to: 'VAL_DOR', cost: 8 },
+    { from: 'VAL_DOR', to: 'MANIWAKI', cost: 24 },
+    { from: 'MANIWAKI', to: 'HULL', cost: 15 },
+    { from: 'HULL', to: 'GATINEAU', cost: 0 },
+    { from: 'MANIWAKI', to: 'MONT_LAURIER', cost: 5 },
+    { from: 'MONT_LAURIER', to: 'GATINEAU', cost: 16 },
+    { from: 'MONT_LAURIER', to: 'LACHUTE', cost: 18 },
+    { from: 'GATINEAU', to: 'LACHUTE', cost: 14 },
+    { from: 'LACHUTE', to: 'LAVAL', cost: 6 },
+    { from: 'LONGUEUIL', to: 'REPENTIGNY', cost: 3 },
+    { from: 'POINTE_CLAIRE', to: 'VAUDREUIL_DORION', cost: 3 },
+    { from: 'MONTREAL', to: 'BROSSARD', cost: 4 },
+    { from: 'MONT_LAURIER', to: 'SHAWINIGAN', cost: 28 },
+    { from: 'LAVAL', to: 'LONGUEUIL', cost: 0 },
+    { from: 'LAVAL', to: 'POINTE_CLAIRE', cost: 0 },
+    { from: 'POINTE_CLAIRE', to: 'MONTREAL', cost: 0 },
+    { from: 'MONTREAL', to: 'LONGUEUIL', cost: 0 },
+    { from: 'SHAWINIGAN', to: 'ROBERVAL', cost: 25 },
+    { from: 'SHAWINIGAN', to: 'BEAUPORT', cost: 14 },
+    { from: 'SHAWINIGAN', to: 'TROIS_RIVIERES', cost: 3 },
+    { from: 'TROIS_RIVIERES', to: 'REPENTIGNY', cost: 13 },
+    { from: 'REPENTIGNY', to: 'ST_HYACINTHE', cost: 7 },
+    { from: 'TROIS_RIVIERES', to: 'DRUMMONDVILLE', cost: 9 },
+    { from: 'TROIS_RIVIERES', to: 'VICTORIAVILLE', cost: 9 },
+    { from: 'TROIS_RIVIERES', to: 'BEAUPORT', cost: 15 },
+    { from: 'DRUMMONDVILLE', to: 'ST_HYACINTHE', cost: 6 },
+    { from: 'DRUMMONDVILLE', to: 'GRANBY', cost: 4 },
+    { from: 'DRUMMONDVILLE', to: 'SHERBROOKE', cost: 9 },
+    { from: 'DRUMMONDVILLE', to: 'VICTORIAVILLE', cost: 6 },
+    { from: 'VAUDREUIL_DORION', to: 'VALLEYFIELD', cost: 4 },
+    { from: 'VALLEYFIELD', to: 'BROSSARD', cost: 8 },
+    { from: 'BROSSARD', to: 'ST_HYACINTHE', cost: 5 },
+    { from: 'ST_HYACINTHE', to: 'GRANBY', cost: 4 },
+    { from: 'GRANBY', to: 'SHERBROOKE', cost: 8 },
+    { from: 'SHERBROOKE', to: 'VICTORIAVILLE', cost: 9 },
+    { from: 'SHERBROOKE', to: 'ST_GEORGES', cost: 15 },
+    { from: 'VICTORIAVILLE', to: 'QUEBEC', cost: 12 },
+    { from: 'VICTORIAVILLE', to: 'ST_GEORGES', cost: 10 },
+    { from: 'ST_GEORGES', to: 'MONTMAGNY', cost: 12 },
+    { from: 'ST_GEORGES', to: 'QUEBEC', cost: 12 },
+    { from: 'QUEBEC', to: 'MONTMAGNY', cost: 5 },
+    { from: 'CHARLESBOURG', to: 'BEAUPORT', cost: 0 },
+    { from: 'BEAUPORT', to: 'QUEBEC', cost: 0 },
+    { from: 'QUEBEC', to: 'CHARLESBOURG', cost: 0 },
+    { from: 'CHARLESBOURG', to: 'ST_SIMEON', cost: 18 },
+    { from: 'CHARLESBOURG', to: 'JONQUIERE', cost: 21 },
+    { from: 'ST_SIMEON', to: 'JONQUIERE', cost: 16 },
+    { from: 'ST_SIMEON', to: 'BAIE_COMEAU', cost: 23 },
+    { from: 'JONQUIERE', to: 'ROBERVAL', cost: 10 },
+    { from: 'JONQUIERE', to: 'ALMA', cost: 4 },
+    { from: 'JONQUIERE', to: 'CHICOUTIMI', cost: 0 },
+    { from: 'CHICOUTIMI', to: 'ALMA', cost: 4 },
+    { from: 'CHICOUTIMI', to: 'BAIE_COMEAU', cost: 23 },
+    { from: 'BAIE_COMEAU', to: 'PORT_CARTIER', cost: 16 },
+    { from: 'PORT_CARTIER', to: 'SEPT_ILES', cost: 6 },
+    { from: 'MONTMAGNY', to: 'RIVIERE_DU_LOUP', cost: 16 },
+    { from: 'RIVIERE_DU_LOUP', to: 'RIMOUSKI', cost: 12 },
+    { from: 'RIMOUSKI', to: 'MATANE', cost: 11 },
+    { from: 'MATANE', to: 'STE_ANNE_DES_MONTS', cost: 10 },
+    { from: 'MATANE', to: 'POINTE_A_LA_CROIX', cost: 15 },
+    { from: 'STE_ANNE_DES_MONTS', to: 'POINTE_A_LA_CROIX', cost: 16 },
+    { from: 'STE_ANNE_DES_MONTS', to: 'GASPE', cost: 21 },
+    { from: 'POINTE_A_LA_CROIX', to: 'GASPE', cost: 25 },
+  ],
+};
+
+/**
+ * Baden-Württemberg Expansion Map Definition (5 Regions, 30 Regular + 5 Transregional Cities, Swapped Phase 1/2).
+ */
+export const BADEN_WUERTTEMBERG_MAP: PowerGridMapDefinition = {
+  id: 'BADEN_WUERTTEMBERG',
+  name: 'Baden-Württemberg',
+  regions: ['NORTH', 'WEST', 'EAST', 'SOUTH_WEST', 'SOUTH_EAST'],
+  regionAdjacency: {
+    NORTH: ['EAST', 'WEST'],
+    WEST: ['NORTH', 'EAST', 'SOUTH_WEST'],
+    EAST: ['NORTH', 'WEST', 'SOUTH_WEST', 'SOUTH_EAST'],
+    SOUTH_WEST: ['SOUTH_EAST', 'EAST', 'WEST'],
+    SOUTH_EAST: ['SOUTH_WEST', 'EAST'],
+  },
+  cities: [
+    // NORTH (6 regular + 1 Transregional: Ludwigshafen — Red)
+    {
+      id: 'LUDWIGSHAFEN',
+      name: 'Ludwigshafen',
+      regionId: 'NORTH',
+      isTransregional: true,
+    },
+    {
+      id: 'TAUBERBISCHOFSHEIM',
+      name: 'Tauberbischofsheim',
+      regionId: 'NORTH',
+    },
+    { id: 'SCHWABISCH_HALL', name: 'Schwäbisch Hall', regionId: 'NORTH' },
+    { id: 'HEILBRONN', name: 'Heilbronn', regionId: 'NORTH' },
+    { id: 'SINSHEIM', name: 'Sinsheim', regionId: 'NORTH' },
+    { id: 'HEIDELBERG', name: 'Heidelberg', regionId: 'NORTH' },
+    { id: 'MANNHEIM', name: 'Mannheim', regionId: 'NORTH' },
+    // WEST (6 regular + 1 Transregional: Strasbourg — Yellow)
+    {
+      id: 'STRASBOURG',
+      name: 'Strasbourg',
+      regionId: 'WEST',
+      isTransregional: true,
+    },
+    { id: 'KARLSRUHE', name: 'Karlsruhe', regionId: 'WEST' },
+    { id: 'PFORZHEIM', name: 'Pforzheim', regionId: 'WEST' },
+    { id: 'RASTATT', name: 'Rastatt', regionId: 'WEST' },
+    { id: 'BADEN_BADEN', name: 'Baden-Baden', regionId: 'WEST' },
+    { id: 'OFFENBURG', name: 'Offenburg', regionId: 'WEST' },
+    { id: 'LAHR', name: 'Lahr', regionId: 'WEST' },
+    // EAST (6 regular + 1 Transregional: Nürnberg — Blue)
+    {
+      id: 'NURNBERG',
+      name: 'Nürnberg',
+      regionId: 'EAST',
+      isTransregional: true,
+    },
+    { id: 'REUTLINGEN', name: 'Reutlingen', regionId: 'EAST' },
+    { id: 'STUTTGART', name: 'Stuttgart', regionId: 'EAST' },
+    { id: 'BOBLINGEN', name: 'Böblingen', regionId: 'EAST' },
+    { id: 'LUDWIGSBURG', name: 'Ludwigsburg', regionId: 'EAST' },
+    { id: 'GOPPINGEN', name: 'Göppingen', regionId: 'EAST' },
+    { id: 'ELLWANGEN', name: 'Ellwangen', regionId: 'EAST' },
+    // SOUTH_WEST (6 regular + 1 Transregional: Basel — Teal)
+    {
+      id: 'BASEL',
+      name: 'Basel',
+      regionId: 'SOUTH_WEST',
+      isTransregional: true,
+    },
+    { id: 'FREIBURG', name: 'Freiburg', regionId: 'SOUTH_WEST' },
+    { id: 'DONAUESCHINGEN', name: 'Donaueschingen', regionId: 'SOUTH_WEST' },
+    { id: 'TUTTLINGEN', name: 'Tuttlingen', regionId: 'SOUTH_WEST' },
+    { id: 'SINGEN', name: 'Singen', regionId: 'SOUTH_WEST' },
+    {
+      id: 'WALDSHUT_TIENGEN',
+      name: 'Waldshut-Tiengen',
+      regionId: 'SOUTH_WEST',
+    },
+    { id: 'LORRACH', name: 'Lörrach', regionId: 'SOUTH_WEST' },
+    // SOUTH_EAST (6 regular + 1 Transregional: Augsburg — Purple)
+    {
+      id: 'AUGSBURG',
+      name: 'Augsburg',
+      regionId: 'SOUTH_EAST',
+      isTransregional: true,
+    },
+    { id: 'ULM', name: 'Ulm', regionId: 'SOUTH_EAST' },
+    { id: 'BIBERACH', name: 'Biberach', regionId: 'SOUTH_EAST' },
+    { id: 'SIGMARINGEN', name: 'Sigmaringen', regionId: 'SOUTH_EAST' },
+    { id: 'RAVENSBURG', name: 'Ravensburg', regionId: 'SOUTH_EAST' },
+    { id: 'FRIEDRICHSHAFEN', name: 'Friedrichshafen', regionId: 'SOUTH_EAST' },
+    { id: 'KONSTANZ', name: 'Konstanz', regionId: 'SOUTH_EAST' },
+  ],
+  connections: [
+    { from: 'LUDWIGSHAFEN', to: 'MANNHEIM', cost: 0 },
+    { from: 'MANNHEIM', to: 'KARLSRUHE', cost: 10 },
+    { from: 'MANNHEIM', to: 'HEIDELBERG', cost: 4 },
+    { from: 'HEIDELBERG', to: 'SINSHEIM', cost: 5 },
+    { from: 'HEIDELBERG', to: 'KARLSRUHE', cost: 9 },
+    { from: 'SINSHEIM', to: 'KARLSRUHE', cost: 9 },
+    { from: 'SINSHEIM', to: 'PFORZHEIM', cost: 10 },
+    { from: 'SINSHEIM', to: 'LUDWIGSBURG', cost: 10 },
+    { from: 'SINSHEIM', to: 'HEILBRONN', cost: 6 },
+    { from: 'SINSHEIM', to: 'TAUBERBISCHOFSHEIM', cost: 15 },
+    { from: 'TAUBERBISCHOFSHEIM', to: 'HEILBRONN', cost: 13 },
+    { from: 'TAUBERBISCHOFSHEIM', to: 'SCHWABISCH_HALL', cost: 13 },
+    { from: 'SCHWABISCH_HALL', to: 'HEILBRONN', cost: 9 },
+    { from: 'SCHWABISCH_HALL', to: 'ELLWANGEN', cost: 8 },
+    { from: 'SCHWABISCH_HALL', to: 'GOPPINGEN', cost: 11 },
+    { from: 'SCHWABISCH_HALL', to: 'LUDWIGSBURG', cost: 10 },
+    { from: 'HEILBRONN', to: 'LUDWIGSBURG', cost: 5 },
+    { from: 'KARLSRUHE', to: 'RASTATT', cost: 4 },
+    { from: 'KARLSRUHE', to: 'PFORZHEIM', cost: 6 },
+    { from: 'RASTATT', to: 'BADEN_BADEN', cost: 2 },
+    { from: 'PFORZHEIM', to: 'LUDWIGSBURG', cost: 8 },
+    { from: 'PFORZHEIM', to: 'STUTTGART', cost: 8 },
+    { from: 'PFORZHEIM', to: 'BOBLINGEN', cost: 7 },
+    { from: 'PFORZHEIM', to: 'BADEN_BADEN', cost: 9 },
+    { from: 'BADEN_BADEN', to: 'BOBLINGEN', cost: 15 },
+    { from: 'BADEN_BADEN', to: 'REUTLINGEN', cost: 22 },
+    { from: 'BADEN_BADEN', to: 'OFFENBURG', cost: 8 },
+    { from: 'OFFENBURG', to: 'REUTLINGEN', cost: 30 },
+    { from: 'OFFENBURG', to: 'TUTTLINGEN', cost: 27 },
+    { from: 'OFFENBURG', to: 'LAHR', cost: 3 },
+    { from: 'OFFENBURG', to: 'STRASBOURG', cost: 5 },
+    { from: 'LAHR', to: 'FREIBURG', cost: 8 },
+    { from: 'LAHR', to: 'DONAUESCHINGEN', cost: 19 },
+    { from: 'ELLWANGEN', to: 'NURNBERG', cost: 18 },
+    { from: 'ELLWANGEN', to: 'ULM', cost: 19 },
+    { from: 'ELLWANGEN', to: 'GOPPINGEN', cost: 10 },
+    { from: 'GOPPINGEN', to: 'ULM', cost: 10 },
+    { from: 'GOPPINGEN', to: 'REUTLINGEN', cost: 10 },
+    { from: 'GOPPINGEN', to: 'STUTTGART', cost: 8 },
+    { from: 'GOPPINGEN', to: 'LUDWIGSBURG', cost: 9 },
+    { from: 'STUTTGART', to: 'LUDWIGSBURG', cost: 2 },
+    { from: 'STUTTGART', to: 'REUTLINGEN', cost: 9 },
+    { from: 'STUTTGART', to: 'BOBLINGEN', cost: 4 },
+    { from: 'REUTLINGEN', to: 'BOBLINGEN', cost: 8 },
+    { from: 'REUTLINGEN', to: 'TUTTLINGEN', cost: 17 },
+    { from: 'REUTLINGEN', to: 'SIGMARINGEN', cost: 11 },
+    { from: 'REUTLINGEN', to: 'ULM', cost: 16 },
+    { from: 'FREIBURG', to: 'DONAUESCHINGEN', cost: 13 },
+    { from: 'FREIBURG', to: 'WALDSHUT_TIENGEN', cost: 15 },
+    { from: 'FREIBURG', to: 'LORRACH', cost: 10 },
+    { from: 'LORRACH', to: 'BASEL', cost: 2 },
+    { from: 'LORRACH', to: 'WALDSHUT_TIENGEN', cost: 9 },
+    { from: 'WALDSHUT_TIENGEN', to: 'DONAUESCHINGEN', cost: 11 },
+    { from: 'DONAUESCHINGEN', to: 'SINGEN', cost: 7 },
+    { from: 'DONAUESCHINGEN', to: 'TUTTLINGEN', cost: 6 },
+    { from: 'TUTTLINGEN', to: 'SINGEN', cost: 7 },
+    { from: 'SINGEN', to: 'KONSTANZ', cost: 6 },
+    { from: 'TUTTLINGEN', to: 'KONSTANZ', cost: 11 },
+    { from: 'TUTTLINGEN', to: 'SIGMARINGEN', cost: 7 },
+    { from: 'ULM', to: 'AUGSBURG', cost: 16 },
+    { from: 'ULM', to: 'BIBERACH', cost: 8 },
+    { from: 'ULM', to: 'SIGMARINGEN', cost: 14 },
+    { from: 'SIGMARINGEN', to: 'BIBERACH', cost: 11 },
+    { from: 'SIGMARINGEN', to: 'RAVENSBURG', cost: 10 },
+    { from: 'SIGMARINGEN', to: 'FRIEDRICHSHAFEN', cost: 11 },
+    { from: 'SIGMARINGEN', to: 'KONSTANZ', cost: 14 },
+    { from: 'KONSTANZ', to: 'FRIEDRICHSHAFEN', cost: 9 },
+    { from: 'FRIEDRICHSHAFEN', to: 'RAVENSBURG', cost: 3 },
+    { from: 'RAVENSBURG', to: 'BIBERACH', cost: 9 },
+  ],
+};
+
+export const POWER_GRID_MAPS: Readonly<
+  Record<PowerGridMapId, PowerGridMapDefinition>
+> = {
   USA: USA_MAP,
   GERMANY: GERMANY_MAP,
+  QUEBEC: QUEBEC_MAP,
+  BADEN_WUERTTEMBERG: BADEN_WUERTTEMBERG_MAP,
 };
 

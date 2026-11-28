@@ -7,12 +7,12 @@ import {
   CITY_SLOT_COSTS,
   FuelBurnAllocation,
   getBureaucracyPayout,
+  getEffectivePlayerCountConfig,
   getMaxCitySlotsForStep,
   getNextUnitCost,
   getPlantRemainingCapacity,
   getTotalStoredOnPlant,
   OwnedPowerPlant,
-  PLAYER_COUNT_CONFIGS,
   POWER_GRID_MAPS,
   POWER_GRID_VISUAL_LAYOUTS,
   PowerGridAction,
@@ -140,8 +140,10 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
     [state.activeRegions]
   );
 
-  const cfg =
-    PLAYER_COUNT_CONFIGS[state.turnOrder.length] ?? PLAYER_COUNT_CONFIGS[4]!;
+  const cfg = getEffectivePlayerCountConfig(
+    state.turnOrder.length,
+    state.mapId
+  );
 
   const allPlayersById = useMemo(() => {
     const map: Record<string, SanitizedPowerGridPlayerState> = {
@@ -782,9 +784,11 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                 return (
                   <>
                     <div className="font-black text-amber-300">
-                      📍 {cDef.name}{' '}
+                      {cDef.isTransregional ? '🌐 ' : '📍 '}
+                      {cDef.name}{' '}
                       <span className="text-[10px] text-slate-400 font-normal">
-                        ({cDef.regionId.replace(/_/g, ' ')})
+                        ({cDef.regionId.replace(/_/g, ' ')}
+                        {cDef.isTransregional ? ' • Transregional' : ''})
                       </span>
                     </div>
                     {occ.owners.includes(selfPlayer.id) ? (
@@ -798,6 +802,10 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                           ${info.totalCost}
                         </strong>{' '}
                         (${info.slotCost} house slot + ${info.pipeCost} pipe)
+                      </div>
+                    ) : cDef.isTransregional && state.step === 'STEP_1' ? (
+                      <div className="text-cyan-300">
+                        🔒 Transregional — Opens in Step 2 ($15 slot)
                       </div>
                     ) : (
                       <div className="text-rose-300">
@@ -931,6 +939,36 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
               })}
             </g>
 
+            {/* 1B. METROPOLITAN MULTI-DISTRICT CLUSTERS (e.g. Greater Montréal & Québec City) */}
+            {visualLayout.districtClusters && (
+              <g pointerEvents="none">
+                {visualLayout.districtClusters.map((dc) => (
+                  <g key={dc.label}>
+                    <ellipse
+                      cx={dc.x}
+                      cy={dc.y}
+                      rx={dc.rx}
+                      ry={dc.ry}
+                      fill="rgba(56, 189, 248, 0.06)"
+                      stroke="#38bdf8"
+                      strokeWidth={1.6}
+                      strokeDasharray="6 4"
+                    />
+                    <text
+                      x={dc.x}
+                      y={dc.y - dc.ry - 4}
+                      textAnchor="middle"
+                      fill="#7dd3fc"
+                      fontSize={8.5}
+                      fontWeight={900}
+                    >
+                      🏙️ {dc.label.toUpperCase()} MULTI-DISTRICT
+                    </text>
+                  </g>
+                ))}
+              </g>
+            )}
+
             {/* 2. TRANSMISSION PIPES & COST BADGES */}
             <g>
               {mapDef.connections.map((edge, idx) => {
@@ -1061,27 +1099,40 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                   >
                     {/* Outer City Box */}
                     <rect
-                      x={-37}
+                      x={-39}
                       y={-19}
-                      width={74}
+                      width={78}
                       height={38}
                       rx={6}
-                      fill={isActiveCity ? '#0f172a' : '#1e293b'}
+                      fill={
+                        !isActiveCity
+                          ? '#1e293b'
+                          : cityDef.isTransregional
+                            ? '#082f49'
+                            : '#0f172a'
+                      }
                       stroke={
                         isPendingConfirm
                           ? '#fde047'
                           : isHovered && canClickToBuild
                             ? '#34d399'
                             : isActiveCity
-                              ? (rVis?.borderHex ?? '#94a3b8')
+                              ? cityDef.isTransregional
+                                ? '#38bdf8'
+                                : (rVis?.borderHex ?? '#94a3b8')
                               : '#475569'
+                      }
+                      strokeDasharray={
+                        cityDef.isTransregional && !isPendingConfirm
+                          ? '4 2'
+                          : undefined
                       }
                       strokeWidth={
                         isPendingConfirm
                           ? 3
                           : isHovered && canClickToBuild
                             ? 2.4
-                            : 1.5
+                            : 1.6
                       }
                     />
 
@@ -1090,26 +1141,54 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                       x={0}
                       y={-7}
                       textAnchor="middle"
-                      fill={isActiveCity ? '#f8fafc' : '#94a3b8'}
-                      fontSize={8.2}
+                      fill={
+                        !isActiveCity
+                          ? '#94a3b8'
+                          : cityDef.isTransregional
+                            ? '#bae6fd'
+                            : '#f8fafc'
+                      }
+                      fontSize={7.8}
                       fontWeight={900}
                     >
-                      {cityDef.name}
+                      {cityDef.isTransregional
+                        ? `🌐${cityDef.name}`
+                        : cityDef.name}
                     </text>
 
-                    {/* 3 Classic House Slots: 10 | 15 | 20 */}
+                    {/* 3 Classic House Slots: 10 | 15 | 20 (Transregional: — | 15 | 20) */}
                     {CITY_SLOT_COSTS.map((slotPrice, slotIdx) => {
                       const slotX = -32 + slotIdx * 22;
-                      const ownerId = occ?.owners[slotIdx];
+                      const isTrans = Boolean(cityDef.isTransregional);
+                      const isPermanentlySealed = isTrans && slotIdx === 0;
+
+                      const ownerId = isTrans
+                        ? slotIdx === 0
+                          ? undefined
+                          : occ?.owners[slotIdx - 1]
+                        : occ?.owners[slotIdx];
+
                       const ownerPlayer = ownerId
                         ? allPlayersById[ownerId]
                         : undefined;
                       const ownerCol = ownerPlayer
                         ? getPlayerColorStyle(ownerPlayer.color)
                         : null;
-                      const isUnlockedByStep = slotIdx < maxSlotsOpenForStep;
+
+                      const isUnlockedByStep = isTrans
+                        ? (slotIdx === 1 &&
+                            (state.step === 'STEP_2' ||
+                              state.step === 'STEP_3')) ||
+                          (slotIdx === 2 && state.step === 'STEP_3')
+                        : slotIdx < maxSlotsOpenForStep;
+
+                      const expectedSlotIdxForNextBuild = isTrans
+                        ? nextOpenSlotIndex + 1
+                        : nextOpenSlotIndex;
+
                       const isFlashingTargetSlot =
-                        isPendingConfirm && slotIdx === nextOpenSlotIndex;
+                        isPendingConfirm &&
+                        slotIdx === expectedSlotIdxForNextBuild;
 
                       return (
                         <g
@@ -1132,9 +1211,11 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                                 ? '#fde047'
                                 : ownerCol
                                   ? ownerCol.fill
-                                  : isUnlockedByStep && isActiveCity
-                                    ? '#1e293b'
-                                    : '#090d16'
+                                  : isPermanentlySealed
+                                    ? '#020617'
+                                    : isUnlockedByStep && isActiveCity
+                                      ? '#1e293b'
+                                      : '#090d16'
                             }
                             stroke={
                               isFlashingTargetSlot
@@ -1161,15 +1242,17 @@ export const PowerGridBoard: React.FC<PowerGridBoardProps> = ({
                               fill={
                                 isFlashingTargetSlot
                                   ? '#0f172a'
-                                  : isUnlockedByStep && isActiveCity
-                                    ? '#e2e8f0'
-                                    : '#475569'
+                                  : isPermanentlySealed
+                                    ? '#334155'
+                                    : isUnlockedByStep && isActiveCity
+                                      ? '#e2e8f0'
+                                      : '#475569'
                               }
                               fontSize={8.2}
                               fontFamily="monospace"
                               fontWeight={800}
                             >
-                              {slotPrice}
+                              {isPermanentlySealed ? '—' : slotPrice}
                             </text>
                           )}
                         </g>

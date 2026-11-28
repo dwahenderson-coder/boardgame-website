@@ -6,8 +6,31 @@ import {
 import {
   CityOccupancyState,
   PowerGridMapDefinition,
+  PowerGridMapId,
   PowerGridStep,
 } from './types.js';
+
+export const POWER_GRID_MAP_EXPANSION_IDS = [
+  'germany_map',
+  'quebec_map',
+  'baden_wuerttemberg_map',
+] as const;
+
+export function resolvePowerGridMapIdFromExpansions(
+  selectedExpansions?: readonly string[]
+): PowerGridMapId {
+  if (!selectedExpansions) return 'USA';
+  if (selectedExpansions.includes('baden_wuerttemberg_map')) {
+    return 'BADEN_WUERTTEMBERG';
+  }
+  if (selectedExpansions.includes('quebec_map')) {
+    return 'QUEBEC';
+  }
+  if (selectedExpansions.includes('germany_map')) {
+    return 'GERMANY';
+  }
+  return 'USA';
+}
 
 /**
  * Verifies that the selected active regions form a single connected component.
@@ -43,7 +66,7 @@ export function areRegionsContiguous(
 }
 
 export function getDefaultActiveRegions(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   playerCount: number
 ): readonly string[] {
   const map = POWER_GRID_MAPS[mapId];
@@ -52,7 +75,7 @@ export function getDefaultActiveRegions(
 }
 
 export function extractManualRegionsFromExpansions(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   selectedExpansions?: readonly string[]
 ): readonly string[] {
   if (!selectedExpansions || selectedExpansions.length === 0) {
@@ -66,7 +89,7 @@ export function extractManualRegionsFromExpansions(
 }
 
 export function resolvePowerGridRegionsFromExpansions(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   playerCount: number,
   selectedExpansions?: readonly string[],
   explicitRegions?: readonly string[]
@@ -121,7 +144,7 @@ export function selectActiveRegions(
  * Creates the initial `cityBoard` map containing only cities within the active regions.
  */
 export function createInitialCityBoard(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   activeRegions: readonly string[]
 ): Record<string, CityOccupancyState> {
   const map = POWER_GRID_MAPS[mapId];
@@ -165,7 +188,8 @@ export function getMaxCitySlotsForStep(step: PowerGridStep): number {
 export function getCitySlotFee(
   city: CityOccupancyState,
   step: PowerGridStep,
-  playerId: string
+  playerId: string,
+  isTransregional = false
 ): {
   readonly allowed: boolean;
   readonly slotCost: number;
@@ -179,8 +203,33 @@ export function getCitySlotFee(
     };
   }
 
-  const maxSlots = getMaxCitySlotsForStep(step);
   const occupiedCount = city.owners.length;
+
+  if (isTransregional) {
+    if (step === 'STEP_1') {
+      return {
+        allowed: false,
+        slotCost: 0,
+        reason: `Transregional city ${city.cityId} does not open until Step 2.`,
+      };
+    }
+    const maxTransregionalSlots = step === 'STEP_2' ? 1 : 2;
+    if (occupiedCount >= maxTransregionalSlots) {
+      return {
+        allowed: false,
+        slotCost: 0,
+        reason: `Transregional city ${city.cityId} has no open slots in ${step} (${occupiedCount}/${maxTransregionalSlots} occupied).`,
+      };
+    }
+    // Starts at $15 (index 1) in Step 2, then $20 (index 2) in Step 3
+    const slotCost = CITY_SLOT_COSTS[occupiedCount + 1]!;
+    return {
+      allowed: true,
+      slotCost,
+    };
+  }
+
+  const maxSlots = getMaxCitySlotsForStep(step);
   if (occupiedCount >= maxSlots) {
     return {
       allowed: false,
@@ -206,7 +255,7 @@ export function getCitySlotFee(
  * - Returns `null` if no path exists.
  */
 export function calculateShortestPipeCost(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   cityBoard: Readonly<Record<string, CityOccupancyState>>,
   ownedCities: readonly string[],
   targetCityId: string
@@ -311,7 +360,7 @@ export function calculateShortestPipeCost(
  * for `playerId` to connect `targetCityId`.
  */
 export function calculateCityBuildCost(
-  mapId: 'USA' | 'GERMANY',
+  mapId: PowerGridMapId,
   cityBoard: Readonly<Record<string, CityOccupancyState>>,
   step: PowerGridStep,
   playerId: string,
@@ -337,7 +386,15 @@ export function calculateCityBuildCost(
     };
   }
 
-  const slotCheck = getCitySlotFee(city, step, playerId);
+  const cityDef = POWER_GRID_MAPS[mapId].cities.find(
+    (c) => c.id === targetCityId
+  );
+  const slotCheck = getCitySlotFee(
+    city,
+    step,
+    playerId,
+    Boolean(cityDef?.isTransregional)
+  );
   if (!slotCheck.allowed) {
     return {
       valid: false,

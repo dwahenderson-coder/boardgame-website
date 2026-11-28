@@ -87,6 +87,7 @@ import {
   initPowerGridGame,
   PowerGridAction,
   PowerGridGameState,
+  resolvePowerGridMapIdFromExpansions,
   resolvePowerGridRegionsFromExpansions,
   SanitizedPowerGridState,
   validatePowerGridAction,
@@ -358,10 +359,9 @@ export const GameRegistry: Readonly<
       seed: number,
       options?: GameSetupOptions
     ) => {
-      const mapId: 'USA' | 'GERMANY' =
-        options?.selectedExpansions?.includes('germany_map')
-          ? 'GERMANY'
-          : 'USA';
+      const mapId = resolvePowerGridMapIdFromExpansions(
+        options?.selectedExpansions
+      );
       const mapRegionKeys = resolvePowerGridRegionsFromExpansions(
         mapId,
         playerIds.length,

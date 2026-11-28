@@ -7,6 +7,7 @@ import {
   createEmptyResourceStorage,
   determineTurnOrder,
   getBureaucracyPayout,
+  getEffectivePlayerCountConfig,
   getNextUnitCost,
   getPlayerPerspective,
   initGame,
@@ -14,6 +15,8 @@ import {
   POWER_GRID_VISUAL_LAYOUTS,
   PowerGridGameState,
   PowerGridPhase,
+  replenishResourceMarket,
+  resolvePowerGridMapIdFromExpansions,
   resolvePowerGridRegionsFromExpansions,
   STANDARD_POWER_PLANTS,
   STEP_3_CARD,
@@ -774,6 +777,304 @@ describe('Power Grid Core Engine (Headless State Machine, Market & Graph)', () =
       expect(regState.players['p1']!.color).toBe('purple');
       expect(regState.players['p2']!.color).toBe('green');
       expect(regState.players['p3']!.color).toBe('yellow');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. Québec & Baden-Württemberg Expansion Maps & Variant Rules
+  // ---------------------------------------------------------------------------
+  describe('7. Québec & Baden-Württemberg Expansion Maps & Variant Rules', () => {
+    it('validates map geometry, symmetric region adjacency, and pipe connections for QUEBEC and BADEN_WUERTTEMBERG', () => {
+      const expectedStats = {
+        QUEBEC: { cities: 42, regions: 6, connections: 65 },
+        BADEN_WUERTTEMBERG: { cities: 35, regions: 5, connections: 69 },
+      } as const;
+
+      for (const mapId of ['QUEBEC', 'BADEN_WUERTTEMBERG'] as const) {
+        const mapDef = POWER_GRID_MAPS[mapId];
+        const layout = POWER_GRID_VISUAL_LAYOUTS[mapId];
+        expect(mapDef.cities).toHaveLength(expectedStats[mapId].cities);
+        expect(mapDef.regions).toHaveLength(expectedStats[mapId].regions);
+        expect(mapDef.connections).toHaveLength(
+          expectedStats[mapId].connections
+        );
+
+        const cityIds = new Set(mapDef.cities.map((c) => c.id));
+        expect(cityIds.size).toBe(expectedStats[mapId].cities);
+
+        // Every region has polygon visual layout and symmetric adjacency
+        for (const rid of mapDef.regions) {
+          expect(layout.regions[rid]).toBeDefined();
+          expect(layout.regions[rid]!.polygonPath.length).toBeGreaterThan(10);
+          for (const adj of mapDef.regionAdjacency[rid] ?? []) {
+            expect(mapDef.regionAdjacency[adj]).toContain(rid);
+          }
+        }
+
+        // Every city has visual coordinates
+        for (const city of mapDef.cities) {
+          const coord = layout.cities[city.id];
+          expect(coord).toBeDefined();
+          expect(coord!.x).toBeGreaterThan(0);
+          expect(coord!.y).toBeGreaterThan(0);
+        }
+
+        // Every pipe connection references valid distinct cities
+        for (const conn of mapDef.connections) {
+          expect(cityIds.has(conn.from)).toBe(true);
+          expect(cityIds.has(conn.to)).toBe(true);
+          expect(conn.from).not.toBe(conn.to);
+          expect(conn.cost).toBeGreaterThanOrEqual(0);
+        }
+      }
+
+      // Verify expansion ID resolution
+      expect(resolvePowerGridMapIdFromExpansions(['quebec_map'])).toBe(
+        'QUEBEC'
+      );
+      expect(
+        resolvePowerGridMapIdFromExpansions(['baden_wuerttemberg_map'])
+      ).toBe('BADEN_WUERTTEMBERG');
+    });
+
+    it('enforces Québec setup (#13, #18, #22 on top of draw deck), Hydro Ecological market protection, and Québec restock rates', () => {
+      let state = initGame(['p1', 'p2', 'p3', 'p4'], 2026, {
+        mapId: 'QUEBEC',
+      });
+
+      // 1. Setup stacks Ecological plants #13, #18, #22 on top of the draw pile in exact order
+      expect(state.drawDeck.slice(0, 3).map((c) => c.id)).toEqual([13, 18, 22]);
+
+      // 2. Multi-district 0-cost connections exist (Montréal & Québec City)
+      const montrealCheck = calculateCityBuildCost(
+        'QUEBEC',
+        state.cityBoard,
+        'STEP_1',
+        'p1',
+        ['LAVAL'],
+        'LONGUEUIL'
+      );
+      if (state.cityBoard['LAVAL'] && state.cityBoard['LONGUEUIL']) {
+        expect(montrealCheck.valid).toBe(true);
+        expect(montrealCheck.pipeCost).toBe(0);
+        expect(montrealCheck.slotCost).toBe(10);
+      }
+
+      // 3. Hydro / Ecological Market Rule in Phase 5 Bureaucracy:
+      // Highest plant in Future Market (#37 Ecological) stays in market;
+      // highest non-ecological plant in Future Market (#34 Uranium) cycles under drawDeck!
+      state = {
+        ...state,
+        step: 'STEP_2',
+        phase: PowerGridPhase.PHASE_5_BUREAUCRACY,
+        turnOrder: ['p1', 'p2', 'p3', 'p4'],
+        playerOrder: ['p1', 'p2', 'p3', 'p4'],
+        activePlayerIndex: 0,
+        actualMarket: [
+          getPlantById(14),
+          getPlantById(15),
+          getPlantById(16),
+          getPlantById(18), // Ecological
+        ],
+        futureMarket: [
+          getPlantById(20),
+          getPlantById(22), // Ecological
+          getPlantById(34), // Highest NON-ecological plant in Future Market
+          getPlantById(37), // Highest plant overall, Ecological -> protected!
+        ],
+        drawDeck: [getPlantById(25), STEP_3_CARD],
+      };
+
+      for (const pid of ['p1', 'p2', 'p3', 'p4']) {
+        state = applyAction(state, pid, {
+          type: 'PG_POWER_CITIES',
+          allocations: [],
+        });
+      }
+
+      // #37 stayed in the market, #34 was cycled under drawDeck, and #25 was drawn!
+      const allMarketIds = [
+        ...state.actualMarket.map((c) => c.id),
+        ...state.futureMarket.map((c) => c.id),
+      ];
+      expect(allMarketIds).toContain(37);
+      expect(allMarketIds).toContain(25);
+      expect(allMarketIds).not.toContain(34);
+      expect(state.drawDeck[state.drawDeck.length - 1]!.id).toBe(34);
+
+      // 4. Québec custom resource replenishment (4P STEP_2 adds 4 Coal, 4 Oil, 3 Garbage, 2 Uranium)
+      const restocked = replenishResourceMarket(
+        {
+          inventory: { COAL: 0, OIL: 0, GARBAGE: 0, URANIUM: 0 },
+          totalSupplyPool: { COAL: 24, OIL: 24, GARBAGE: 24, URANIUM: 12 },
+        },
+        4,
+        'STEP_2',
+        'QUEBEC'
+      );
+      expect(restocked.inventory).toEqual({
+        COAL: 4,
+        OIL: 4,
+        GARBAGE: 3,
+        URANIUM: 2,
+      });
+    });
+
+    it('enforces Baden-Württemberg Transregional cities, Step 2 thresholds (9/6/5), 2-plant Market Stagnation, and Swapped Phase 1 & Phase 2', () => {
+      // 1. Step 2 city thresholds: 9 (2P), 6 (3–5P), 5 (6P)
+      expect(
+        getEffectivePlayerCountConfig(2, 'BADEN_WUERTTEMBERG')
+          .step2TriggerCities
+      ).toBe(9);
+      expect(
+        getEffectivePlayerCountConfig(3, 'BADEN_WUERTTEMBERG')
+          .step2TriggerCities
+      ).toBe(6);
+      expect(
+        getEffectivePlayerCountConfig(5, 'BADEN_WUERTTEMBERG')
+          .step2TriggerCities
+      ).toBe(6);
+      expect(
+        getEffectivePlayerCountConfig(6, 'BADEN_WUERTTEMBERG')
+          .step2TriggerCities
+      ).toBe(5);
+
+      let state = initGame(['p1', 'p2', 'p3'], 3030, {
+        mapId: 'BADEN_WUERTTEMBERG',
+        mapRegionKeys: ['NORTH', 'WEST', 'EAST'],
+      });
+
+      // Active regions include NORTH -> Transregional city LUDWIGSHAFEN is on the active cityBoard
+      expect(state.cityBoard['LUDWIGSHAFEN']).toBeDefined();
+      expect(state.cityBoard['BASEL']).toBeUndefined(); // SOUTH_WEST is inactive
+
+      // 2. Transregional Cities: closed in STEP_1, open at $15 in STEP_2, open $15 & $20 in STEP_3
+      const step1Trans = calculateCityBuildCost(
+        'BADEN_WUERTTEMBERG',
+        state.cityBoard,
+        'STEP_1',
+        'p1',
+        ['MANNHEIM'],
+        'LUDWIGSHAFEN'
+      );
+      expect(step1Trans.valid).toBe(false);
+
+      const step2Trans = calculateCityBuildCost(
+        'BADEN_WUERTTEMBERG',
+        state.cityBoard,
+        'STEP_2',
+        'p1',
+        ['MANNHEIM'],
+        'LUDWIGSHAFEN'
+      );
+      expect(step2Trans.valid).toBe(true);
+      expect(step2Trans.slotCost).toBe(15);
+      expect(step2Trans.pipeCost).toBe(0);
+      expect(step2Trans.totalCost).toBe(15);
+
+      // Once 1 player builds in LUDWIGSHAFEN during STEP_2, 2nd slot ($20) stays closed until STEP_3
+      const boardWithOneOccupant = {
+        ...state.cityBoard,
+        LUDWIGSHAFEN: {
+          ...state.cityBoard['LUDWIGSHAFEN']!,
+          owners: ['p1'],
+        },
+      };
+      expect(
+        calculateCityBuildCost(
+          'BADEN_WUERTTEMBERG',
+          boardWithOneOccupant,
+          'STEP_2',
+          'p2',
+          ['MANNHEIM'],
+          'LUDWIGSHAFEN'
+        ).valid
+      ).toBe(false);
+
+      const step3TransSecondSlot = calculateCityBuildCost(
+        'BADEN_WUERTTEMBERG',
+        boardWithOneOccupant,
+        'STEP_3',
+        'p2',
+        ['MANNHEIM'],
+        'LUDWIGSHAFEN'
+      );
+      expect(step3TransSecondSlot.valid).toBe(true);
+      expect(step3TransSecondSlot.slotCost).toBe(20);
+
+      // 3. Market Stagnation removes 2 lowest plants + Swapped Phase 1 & Phase 2 recomputes turnOrder after Phase 2!
+      state = {
+        ...state,
+        roundNumber: 2,
+        firstRoundOrderRecomputed: true,
+        turnOrder: ['p1', 'p2', 'p3'],
+        playerOrder: ['p1', 'p2', 'p3'],
+        drawDeck: [getPlantById(14), getPlantById(15), ...state.drawDeck],
+        players: {
+          ...state.players,
+          // Give p3 the most cities so turn order will flip to ['p3', 'p2', 'p1'] AFTER Phase 2!
+          p1: {
+            ...state.players['p1']!,
+            cities: ['MANNHEIM'],
+            powerPlants: [
+              {
+                card: getPlantById(3),
+                storedResources: createEmptyResourceStorage(),
+              },
+            ],
+          },
+          p2: {
+            ...state.players['p2']!,
+            cities: ['KARLSRUHE', 'RASTATT'],
+            powerPlants: [
+              {
+                card: getPlantById(4),
+                storedResources: createEmptyResourceStorage(),
+              },
+            ],
+          },
+          p3: {
+            ...state.players['p3']!,
+            cities: ['STUTTGART', 'LUDWIGSBURG', 'BOBLINGEN'],
+            powerPlants: [
+              {
+                card: getPlantById(5),
+                storedResources: createEmptyResourceStorage(),
+              },
+            ],
+          },
+        },
+      };
+
+      // All 3 players pass Phase 2 Auction in Round 2
+      state = applyAction(state, 'p1', { type: 'PG_PASS_AUCTION_PHASE' });
+      state = applyAction(state, 'p2', { type: 'PG_PASS_AUCTION_PHASE' });
+      state = applyAction(state, 'p3', { type: 'PG_PASS_AUCTION_PHASE' });
+
+      // Both #03 AND #04 (2 lowest plants) were discarded; #14 and #15 drawn -> Actual Market is [5, 6, 7, 8]!
+      expect(state.actualMarket.map((c) => c.id)).toEqual([5, 6, 7, 8]);
+      // And Swapped Phase 1 ran immediately after Phase 2: turnOrder is now ['p3', 'p2', 'p1']!
+      expect(state.turnOrder).toEqual(['p3', 'p2', 'p1']);
+      expect(state.phase).toBe(PowerGridPhase.PHASE_3_BUY_RESOURCES);
+
+      // Verify end of Phase 5 does NOT prematurely recompute turnOrder before next round's Phase 2 Auction
+      let phase5State: PowerGridGameState = {
+        ...state,
+        phase: PowerGridPhase.PHASE_5_BUREAUCRACY,
+        turnOrder: ['p1', 'p2', 'p3'], // Suppose p1 was 1st entering Bureaucracy even though p3 now has more cities
+        playerOrder: ['p1', 'p2', 'p3'],
+        activePlayerIndex: 0,
+        drawDeck: [getPlantById(20), STEP_3_CARD],
+      };
+      for (const pid of ['p1', 'p2', 'p3']) {
+        phase5State = applyAction(phase5State, pid, {
+          type: 'PG_POWER_CITIES',
+          allocations: [],
+        });
+      }
+      expect(phase5State.roundNumber).toBe(3);
+      expect(phase5State.phase).toBe(PowerGridPhase.PHASE_2_AUCTION_POWER_PLANTS);
+      expect(phase5State.turnOrder).toEqual(['p1', 'p2', 'p3']);
     });
   });
 });

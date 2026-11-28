@@ -11,7 +11,9 @@ import {
   extractManualRegionsFromExpansions,
   getDefaultActiveRegions,
   PLAYER_COUNT_CONFIGS as PG_PLAYER_COUNT_CONFIGS,
+  POWER_GRID_MAP_EXPANSION_IDS,
   POWER_GRID_MAPS,
+  resolvePowerGridMapIdFromExpansions,
 } from '../games/power-grid/index.js';
 import { GameId, GameRegistry } from '../games/registry.js';
 import {
@@ -369,8 +371,9 @@ io.on('connection', (socket) => {
 
     // Power Grid virtual region selection tokens ('region:RESET' | 'region:<ID>')
     if (activeGameId === 'power_grid' && expansionId.startsWith('region:')) {
-      const currentMapId: 'USA' | 'GERMANY' =
-        ctx.room.selectedExpansions.includes('germany_map') ? 'GERMANY' : 'USA';
+      const currentMapId = resolvePowerGridMapIdFromExpansions(
+        ctx.room.selectedExpansions
+      );
       const mapDef = POWER_GRID_MAPS[currentMapId];
       const connectedCount = Math.max(
         2,
@@ -457,7 +460,17 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (activeGameId === 'power_grid' && expansionId === 'germany_map') {
+    if (
+      activeGameId === 'power_grid' &&
+      (POWER_GRID_MAP_EXPANSION_IDS as readonly string[]).includes(expansionId)
+    ) {
+      if (!isCurrentlyEnabled) {
+        nextExpansions = nextExpansions.filter(
+          (id) =>
+            id === expansionId ||
+            !(POWER_GRID_MAP_EXPANSION_IDS as readonly string[]).includes(id)
+        );
+      }
       nextExpansions = nextExpansions.filter((id) => !id.startsWith('region:'));
     }
 
@@ -670,10 +683,9 @@ io.on('connection', (socket) => {
         gameId === 'power_grid' &&
         ctx.room.selectedExpansions.some((id) => id.startsWith('region:'))
       ) {
-        const pgMapId: 'USA' | 'GERMANY' =
-          ctx.room.selectedExpansions.includes('germany_map')
-            ? 'GERMANY'
-            : 'USA';
+        const pgMapId = resolvePowerGridMapIdFromExpansions(
+          ctx.room.selectedExpansions
+        );
         const pgMap = POWER_GRID_MAPS[pgMapId];
         const reqCount =
           PG_PLAYER_COUNT_CONFIGS[currentCount]?.activeRegionsCount ?? 4;
